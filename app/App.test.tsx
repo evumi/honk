@@ -296,3 +296,13 @@ test("scrolling up in a chat shows a button back to the newest message", async (
   await app.press("id:jump-latest");
   await app.waitUntil(() => app.count("id:jump-latest") === 0);
 });
+
+test("pulling the chat list refreshes and the spinner stops", async () => {
+  const app = await open("./App.tsx", { locale: "zh-Hans-CN", host: host() });
+  await app.waitFor("id:chat-aZ3kQ9xT");
+  const before = app.host.calls().filter((c) => c.name === "honk.refresh").length;
+  await app.drag("id:chat-aZ3kQ9xT", { y: 200 });
+  await app.waitUntil(() => app.host.calls().filter((c) => c.name === "honk.refresh").length > before);
+  await app.waitUntil(() => app.host.calls().filter((c) => c.name === "honk.chats").length > 1);
+});
+

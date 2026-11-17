@@ -88,12 +88,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationC
         defer { completionHandler() }
         guard let info = PushInfo(userInfo: response.notification.request.content.userInfo) else { return }
         Task { @MainActor in
-            // A message with a url opens it; otherwise its chat.
-            if let m = try? HonkService.shared.store.message(id: info.messageID), !m.url.isEmpty,
-               let url = URL(string: m.url) {
-                await UIApplication.shared.open(url)
-                return
-            }
+            // A tap opens the chat; the message's url is one tap away in there.
             // A notification from before the bot got its short id names the old one.
             let botID = HonkService.shared.store.currentBotID(info.botID)
             if let open = self.openChat {
