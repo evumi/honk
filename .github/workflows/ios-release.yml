@@ -25,7 +25,6 @@ concurrency:
 
 env:
   ASC_BYPASS_KEYCHAIN: "1"
-  ASC_NO_UPDATE: "1"
   ASC_TELEMETRY_DISABLED: "1"
   ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
   ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
@@ -64,9 +63,6 @@ jobs:
       - name: Install tools
         run: brew install xcodegen longbridge/tap/nsh
 
-      - name: Check App Store Connect access
-        run: asc auth status --validate
-
       - name: Version and build number
         id: version
         env:
@@ -79,6 +75,8 @@ jobs:
           else
             version="$(sed -n 's/^MARKETING_VERSION *= *//p' ios/Config/Base.xcconfig)"
           fi
+          # The first call to App Store Connect: it also checks the API key (asc
+          # auth status only looks at stored credentials, not the ASC_* variables).
           build="$(asc builds next-build-number --app "$ASC_APP_ID" --version "$version" --platform IOS --initial-build-number 1 --output json | jq -r '.nextBuildNumber')"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "build=$build" >> "$GITHUB_OUTPUT"
