@@ -1,4 +1,5 @@
-// The contract with the native host (ios/App/NshBridge.swift; Android later).
+// The contract with the native hosts (ios/App/NshBridge.swift and
+// android/app/src/main/kotlin/dev/evumi/honk/NshBridge.kt).
 // Every call goes through `call`, which uses the demo backend when no host
 // embeds the app (`nsh run` on a desktop), so the UI can be tried alone.
 import { host } from "nsh";

@@ -28,7 +28,8 @@ Honk 是一个以 bot 为渠道的推送通知服务：每个 bot 是一个独�
 | `ios/HonkKit/` | App 和 NSE 共用的 Swift 包：网关客户端、Keychain、本地 SQLite、同步、通讯通知 | 已实现，有测试（macOS 上 `swift test`） |
 | `ios/App/`、`ios/NotificationService/` | iOS 宿主和 Notification Service Extension；XcodeGen 生成工程 | 已实现，**尚未在 Xcode 中编译验证** |
 | `app/` | nsh App（TSX）：会话列表、消息流、卡片渲染、创建和设置 bot | 已实现，有 `nsh test` 测试 |
-| `android/` | Kotlin 宿主和 FirebaseMessagingService | 未开始 |
+| `android/core/` | 纯 Kotlin/JVM 模块，对应 HonkKit：网关客户端、本地 SQLite、同步、设备注册 | 已实现，有测试（只需 JDK：`./gradlew :core:test`） |
+| `android/app/` | Android 宿主：嵌入 nsh App、FirebaseMessagingService、通知、EncryptedSharedPreferences | 已实现，**尚未用 Android SDK 编译验证**（Kotlin 代码已对 API 34 的 android-all 和真实 AAR 做过类型检查） |
 
 ## 3. 消息流
 
@@ -89,7 +90,9 @@ bot token 形如 `<bot id>:<32 位随机串>`；token 和 device secret 都只�
 - **模拟器身份**：push token 以 `simulator-` 开头的设备照常注册和排队，但不发推送（见第 5 节「模拟器开发」）。
 - **清理**：每小时删除过期和 ack 超过 1 天的消息。
 
-## 5. iOS（ios/）
+## 5. 原生宿主
+
+### iOS（ios/）
 
 工程由 XcodeGen 从 `project.yml` 生成，有两个 target：
 
@@ -98,7 +101,7 @@ bot token 形如 `<bot id>:<32 位随机串>`；token 和 device secret 都只�
 
 两者都依赖本地 Swift 包 `HonkKit`。
 
-### HonkKit
+#### HonkKit
 
 | 文件 | 作用 |
 | --- | --- |
@@ -109,7 +112,7 @@ bot token 形如 `<bot id>:<32 位随机串>`；token 和 device secret 都只�
 | `Avatar.swift` | 头像格式 `preset:<icon>:<#rrggbb>` 或 https URL；图片缓存到 App Group |
 | `CommunicationNotification.swift` | iOS 15 通讯通知：`INSendMessageIntent` + bot 头像 |
 
-### NSE 流程
+#### NSE 流程
 
 1. 从 `userInfo` 读 `msg_id`、`bot_id`
 2. 读 Keychain 凭据，调 `GET /v1/messages/:id`
@@ -120,7 +123,7 @@ bot token 形如 `<bot id>:<32 位随机串>`；token 和 device secret 都只�
 
 任何一步失败，都照常显示推送自带的横幅。
 
-### App
+#### App
 
 - `AppDelegate`：申请通知权限，注册推送；收到静默推送就拉取并应用修改或删除；正在看的会话来消息时不弹横幅；点击通知时，有 `url` 就打开，否则进入对应会话。
 - `HonkService`：注册或更新 push token（网关返回 401 时自动重新注册）、刷新 bot 列表、同步、角标、切换网关。
@@ -129,20 +132,65 @@ bot token 形如 `<bot id>:<32 位随机串>`；token 和 device secret 都只�
 - `RootViewController`：全屏 `NshAppView`。加载 `nsh/bundle.nshc`，按 `capabilities.json` 授权；设置了环境变量 `NSH_DEV_URL` 时改连 `nsh dev` 做热更新。
 - `NshBridge`：nsh App 调用的 `honk.*` 宿主函数，见第 6 节。
 
-### 模拟器开发
+#### 模拟器开发
 
 - **架构**：nsh 的 xcframework 只有 arm64 模拟器切片，所以模拟器构建只支持 Apple 芯片的 Mac。`Base.xcconfig` 对模拟器排除了 x86_64，`generic/platform=iOS Simulator` 也能构建。
 - **构建入口**：`make sim` 构建，`make run-sim` 构建、启动模拟器、安装并打开；`SIM="iPhone 17 Pro"` 指定机型。没在 `Local.xcconfig` 配团队时用 ad hoc 签名，entitlements 照常嵌入。
 - **模拟器身份（只在 Debug + 模拟器下生效）**：拿不到 APNs token（未签名构建、APNs 报错，或 8 秒没回应）时，用固定的 `simulator-<uuid>` 身份注册。网关不给这类 token 发推送，App 在前台时每 10 秒同步一次，所以可以连真实网关完成注册、建 bot、发消息、同步。Release 构建和真机不会走这条路径。
 - **Keychain 回退**：未签名或 ad hoc 构建没有共享 Keychain 组的权限，凭据会退回存到 App 自己的 Keychain。这种情况下 NSE 读不到凭据，横幅只显示推送自带的文字。
 
-### 配置
+#### 配置
 
 - `Config/Base.xcconfig`：bundle ID、App Group、Keychain 组、网关地址
 - `Config/Local.xcconfig`（不入库）：自己的 `DEVELOPMENT_TEAM` 和网关地址
 - Capabilities：Push Notifications、App Groups、Keychain Sharing、Communication Notifications、Time Sensitive Notifications。
   - 这些权限写在 `project.yml` 的 `entitlements.properties` 里，由 XcodeGen 生成。只写 `path` 时 XcodeGen 会把文件清成空 dict。
   - `make project` 之后会跑 `scripts/check-entitlements.sh`，缺任何一项都会失败。
+
+### Android（android/）
+
+Gradle 工程，minSdk 26，compileSdk / targetSdk 35。只支持有 GMS 的设备：推送全部是 FCM data message，不接国内厂商通道。两个模块：
+
+- `:core`：纯 Kotlin/JVM，没有 Android 依赖，单元测试在 JVM 上跑（SQLite 用 sqlite-jdbc）
+- `:app`：Android 宿主，依赖 `:core`
+
+#### core（对应 HonkKit）
+
+| 文件 | 作用 |
+| --- | --- |
+| `ApiClient.kt` | `/v1` 接口客户端，HttpURLConnection + kotlinx.serialization；阻塞调用，在 IO 线程用。传输层是 `Transport` 接口，测试里换成假网关 |
+| `Credentials.kt` | `CredentialStore`、`BotTokenStore` 接口；`DeviceRegistrar` 注册设备或更新 push token，网关返回 401 时清掉凭据重新注册 |
+| `Gateway.kt` | 网关地址规范化（规则同 `HonkConfig.normalizeGateway`）；`check()` 请求 `/v1/info` 确认是 Honk 网关；`describe()` 把错误转成中文说明 |
+| `LocalStore.kt` | 表结构和 `apply()` 语义与 `LocalStore.swift` 一致：collapse 替换、edit / delete 先按 `target_id`（同一个 bot）再按 collapse id 找原消息、重复调用安全、返回要撤掉的通知。SQL 通过 `Sql` 接口执行，App 里是 `AndroidSql`，测试里是 JDBC |
+| `Sync.kt` | `SyncEngine`：分页 `/v1/sync`，逐条 `apply`，先存 cursor 再 ack |
+| `Models.kt`、`Avatar.kt` | 数据模型；FCM data 字段解析（`PushInfo`）；头像字符串解析 |
+
+#### app
+
+- `HonkService`：进程内单例，持有凭据、本地库、通知；注册、刷新（拉 bot 列表 + 同步）、处理推送、切换网关。
+  - 注册状态和 iOS 一样有四种（等待推送 token、注册中、已注册、失败），`honk.status` 返回；`pushMode` 固定是 `apns`（FCM 是真实推送通道，没有模拟器模式）。重试：先用 `/v1/bots` 检查已有设备（401 就清掉凭据），再用上次的 FCM token 注册，都没有就重新向 Firebase 要 token（最多等 20 秒）。
+  - 切换网关：先 `Gateway.check`，地址存进 SharedPreferences（恢复默认时删掉），然后清空本机的 bot、消息、各 bot 的 token、通知和 bot 的 channel，用当前 FCM token 在新网关上重新注册。
+  - 数据库在 `noBackupFilesDir/honk.sqlite`。Android 没有单独的扩展进程，FCM Service 和界面在同一个进程里共用一个 `LocalStore`。
+- `SecureStores.kt`：设备凭据和各 bot token 存 EncryptedSharedPreferences（密钥在 Android Keystore），`allowBackup=false`。
+- `HonkMessagingService`（`FirebaseMessagingService`）：
+  - `onNewToken`：注册或更新 token；App 每次启动也会取一次当前 token 走同样的流程（token 没变就不发请求）。刷新时网关返回 401，同样清掉凭据重新注册。
+  - `onMessageReceived`：按 `gateway/internal/push/fcm.go` 的字段解析。`message`：拉 `GET /v1/messages/:id`、写库、显示通知；拉取失败就用推送里自带的标题正文显示。`edit` / `delete`：拉取后应用到本地库，按 tag 撤掉过时的通知；拉不到就整体同步。
+  - `onDeletedMessages`：FCM 丢了积压的消息，整体同步。
+- `Notifier`：
+  - 每个 bot 一个 NotificationChannel（`bot-<id>`，放在 “Bots” 分组里），用户可以在系统设置里分别调整；删除 bot 时删掉对应的 channel。
+  - MessagingStyle，发送者是代表 bot 的 `Person`，头像是 bot 头像（https 头像下载并缓存，5 秒超时、最大 2MB；预设头像画成色块加 bot 名称首字）。每个 bot 推一个长期会话快捷方式，Android 11+ 会把它显示在“对话”区。
+  - 通知 tag：有 collapse id 时是 `c<bot>:<collapse id>`，同 id 的新消息原地替换旧通知；否则是 `m<msg_id>`。tag 存在本地库的 `notif_id` 里，删除、替换、标记已读时据此撤掉通知。
+  - `level=passive` 或 bot 静音时不响铃、不弹横幅（`setSilent`）。正在看的会话来消息时不发通知，直接标为已读。
+- `MainActivity`：全屏 `NshView`，按 `assets/nsh/capabilities.json` 授权后 `loadAssetBundle("nsh")`；debug 构建可以用 intent extra `nshDevUrl` 连 `nsh dev` 热更新。Android 13+ 首次启动申请 `POST_NOTIFICATIONS`，被拒后在设置页里引导去系统设置。点击通知：消息有 `url` 就打开，否则发 `honk.open` 进入会话。
+- `NshBridge`：`honk.*` 宿主函数和事件，行为对照 iOS 的 `NshBridge.swift`，见第 6 节。处理函数在 UI 线程被调用，实际工作放到 IO 线程，再通过 `NshHostReply` 回复。
+
+#### 配置
+
+- `android/app/google-services.json`（不入库）：Firebase 项目配置。没有它也能编译运行，只是拿不到 FCM token。
+- 网关地址：`-Phonk.gatewayUrl=…`、环境变量 `HONK_GATEWAY_URL` 或 `android/local.properties` 里的 `honk.gatewayUrl`，写进 `BuildConfig.GATEWAY_URL`；默认 `http://10.0.2.2:8080/`（模拟器访问开发机）。debug 构建允许明文 http；release 只在构建时的网关地址是 http 时允许，所以 https 的 release 构建里不能切到 http 网关（检查网关时会报连不上）。
+- 版本：环境变量 `HONK_VERSION_NAME` / `HONK_VERSION_CODE`，默认 `0.1.0` / `1`。
+- release 签名：环境变量 `HONK_KEYSTORE_FILE`（keystore 绝对路径）、`HONK_KEYSTORE_PASSWORD`、`HONK_KEY_ALIAS`、`HONK_KEY_PASSWORD`；没设时用 debug 签名，本地也能 `./gradlew :app:assembleRelease`。产物在 `android/app/build/outputs/apk/release/`。
+- nsh：`scripts/fetch-nsh-android.sh` 下载 v0.5.1 的 `nsh-embed-android.zip` 并校验 sha256，`nsh.aar`（release）和 `nsh-dev.aar`（debug）放到 `android/app/libs/`（不入库）。构建前自动运行 `scripts/build-nsh-bundle.sh`，`app/dist/nsh` 打进 `assets/nsh`。
 
 ## 6. nsh App（app/）与宿主协议
 
@@ -156,7 +204,7 @@ App 用 TSX 写，跑在 QuickJS 上。页面：
 
 没有宿主时（例如在桌面上 `nsh run`）自动使用 `src/demo.ts` 的内存数据，方便单独调界面。
 
-宿主协议定义在 `app/src/host.ts` 和 `ios/App/NshBridge.swift`，两边要同步修改。
+宿主协议定义在 `app/src/host.ts`、`ios/App/NshBridge.swift` 和 `android/app/src/main/kotlin/dev/evumi/honk/NshBridge.kt`，三处要同步修改。
 
 | 调用 | 参数 | 返回 |
 | --- | --- | --- |
@@ -171,7 +219,7 @@ App 用 TSX 写，跑在 QuickJS 上。页面：
 | `honk.bot.setMuted` / `honk.bot.setPinned` | `{botId, muted / pinned}` | |
 | `honk.message.delete` | `{messageId}` | 只删本机 |
 | `honk.chat.clear` | `{botId}` | 只删本机 |
-| `honk.notifications.open` | | 打开系统设置 |
+| `honk.notifications.open` | | 打开系统的通知设置 |
 | `honk.register.retry` | | 重试注册，返回新的 status |
 | `honk.gateway.get` | | `{url, defaultURL, custom}` |
 | `honk.gateway.test` | `{url}` | `{ok, url?, version?, error?}` |
@@ -207,7 +255,7 @@ App 用 TSX 写，跑在 QuickJS 上。页面：
 | `level=active` | `interruption-level: active` | priority HIGH |
 | `level=timeSensitive` | `interruption-level: time-sensitive` | priority HIGH |
 | `group` | `thread-id: b<bot>:<group>` | data 里的 `group` |
-| `id` | `apns-collapse-id: b<bot>:<id>`（超过 64 字节时取哈希） | `collapse_key` |
+| `id` | `apns-collapse-id: b<bot>:<id>`（超过 64 字节时取哈希） | `collapse_key`；data 里的 `id`，App 用它做通知 tag |
 | edit / delete | `content-available: 1` 后台推送 | priority NORMAL 的 data message |
 
 ## 8. 本地开发
@@ -217,6 +265,8 @@ cd gateway && make test && make run      # 网关，:8080
 cd ios && make test                      # HonkKit 测试（只有 Command Line Tools 也能跑）
 cd app && nsh test && nsh run App.tsx    # nsh App 测试；在桌面上用演示数据运行
 cd ios && make setup                     # 下载 nsh 框架并生成 Xcode 工程（需要 XcodeGen）
+cd android && ./gradlew :core:test       # Android 核心逻辑测试（只需 JDK 17）
+cd android && make setup && ./gradlew assembleDebug   # 下载 nsh AAR 并编译 App（需要 Android SDK）
 ```
 
 真机联调需要：
@@ -227,7 +277,8 @@ cd ios && make setup                     # 下载 nsh 框架并生成 Xcode 工�
 ## 9. 待办与风险
 
 - [ ] 真机跑通 APNs、NSE 和通讯通知头像（模拟器已能连真实网关完成注册、建 bot、发送和同步）
-- [ ] Android 宿主：FirebaseMessagingService、每个 bot 一个 NotificationChannel、MessagingStyle 头像
+- [ ] 用 Android SDK 编译 `android/app`（`./gradlew test assembleDebug`），在有 GMS 的设备或模拟器上跑通 FCM、通知和 nsh 界面
+- [ ] Android 预设头像现在画的是 bot 名称首字，和 App 内的图标不一致；可以给 Android 加一套对应的矢量图标
 - [ ] 卡片 v2：JS、`TelegramWidget` 兼容接口、按钮回调（需要 bot webhook）
 - [ ] 推送内容端到端加密（参考 Bark 的 ciphertext），消息在网关上只存密文
 - **nsh 还是 0.5.x**：推送和扩展全部用原生写，nsh 只负责 App 内界面，把升级的影响面控制在 UI 层。
