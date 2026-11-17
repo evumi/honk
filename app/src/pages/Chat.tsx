@@ -107,6 +107,7 @@ export function ChatPage(props: { botId: string }) {
 
         <TopBar
           p={p()}
+          tint={p().chatWall}
           title={chat()?.bot.name ?? ""}
           subtitle={chat()?.muted ? tr("机器人 · 已静音") : tr("机器人")}
           onBack={() => nav.pop()}
@@ -117,7 +118,7 @@ export function ChatPage(props: { botId: string }) {
           }
         />
 
-        <EdgeBlur edge="bottom" height={safeArea().bottom + 76} />
+        <EdgeBlur edge="bottom" height={safeArea().bottom + 80} tint={p().chatWall} />
         {/* Back to the newest message, with how many arrived while scrolled up. */}
         <If when={away() || fresh() > 0}>
           <View

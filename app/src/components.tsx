@@ -66,21 +66,51 @@ export function glass(p: Palette) {
   };
 }
 
+/** Progressive blur: each layer blurs more and covers a band nearer the edge. */
+const BLUR_STEPS = [0.5, 1, 2, 4, 8, 16];
+
 /**
- * A blur along the top or bottom edge that fades out towards the middle, so
- * what scrolls under the floating controls softens instead of clashing.
+ * A progressive blur along the top or bottom edge, as iOS draws under its
+ * bars: stacked layers, each blurring more and masked to a band nearer the
+ * edge, so the blur grows smoothly instead of a blurred copy fading in over a
+ * sharp one. `tint` (the page's background) washes in lightly towards the
+ * edge so the floating controls stay readable over busy content.
  */
-export function EdgeBlur(props: { edge: "top" | "bottom"; height: number }) {
+export function EdgeBlur(props: { edge: "top" | "bottom"; height: number; tint?: string }) {
+  // Gradients run from the inner side (0%) to the edge (100%).
+  const dir = props.edge === "top" ? "to top" : "to bottom";
+  const n = BLUR_STEPS.length;
+  const band = (i: number) => {
+    const at = (k: number) => `${Math.max(0, Math.min(100, (k * 100) / (n + 1))).toFixed(1)}%`;
+    return `linear-gradient(${dir}, transparent ${at(i)}, #000 ${at(i + 1)}, #000 ${at(i + 2)}, transparent ${at(i + 3)})`;
+  };
   return (
     <View
       style={{
         position: "absolute", left: 0, right: 0, height: props.height, pointerEvents: "none",
         ...(props.edge === "top" ? { top: 0 } : { bottom: 0 }),
-        // Light enough that what scrolls under stays faintly readable.
-        backdropFilter: "blur(3px)",
-        maskImage: `linear-gradient(to ${props.edge === "top" ? "bottom" : "top"}, #000 35%, transparent)`,
       }}
-    />
+    >
+      {BLUR_STEPS.map((r, i) => (
+        <View
+          style={{
+            position: "absolute", left: 0, right: 0, top: 0, bottom: 0,
+            backdropFilter: `blur(${r}px)`,
+            // The last layer runs all the way to the edge.
+            maskImage: i === n - 1 ? `linear-gradient(${dir}, transparent ${((i * 100) / (n + 1)).toFixed(1)}%, #000 ${(((i + 1) * 100) / (n + 1)).toFixed(1)}%)` : band(i),
+          }}
+        />
+      ))}
+      <If when={props.tint}>
+        <View
+          style={{
+            position: "absolute", left: 0, right: 0, top: 0, bottom: 0,
+            backgroundImage: `linear-gradient(${dir}, transparent, ${props.tint})`,
+            opacity: 0.55,
+          }}
+        />
+      </If>
+    </View>
   );
 }
 
@@ -92,11 +122,13 @@ export function EdgeBlur(props: { edge: "top" | "bottom"; height: number }) {
 export interface BarAction { label: string; onPress: () => void; testID?: string }
 
 export function TopBar(props: {
+  /** The page's background, washed in lightly behind the bar. */
+  tint?: string;
   p: Palette; title?: string; subtitle?: string; onBack?: () => void; right?: JSX.Element; action?: BarAction; testID?: string;
 }) {
   return (
     <View style={{ position: "absolute", left: 0, right: 0, top: 0, height: safeArea().top + BAR_H + 26, pointerEvents: "box-none" }}>
-      <EdgeBlur edge="top" height={safeArea().top + BAR_H + 26} />
+      <EdgeBlur edge="top" height={safeArea().top + BAR_H + 30} tint={props.tint} />
       <View
         testID={props.testID}
         style={{ position: "absolute", left: 12, right: 12, top: safeArea().top + 2, flexDirection: "row", alignItems: "center", gap: 10 }}
@@ -305,7 +337,7 @@ export function FormBody(props: {
         </View>
       </If>
       <If when={bar()}>
-        <TopBar p={props.p} title={props.title} onBack={props.onBack} action={props.action} />
+        <TopBar p={props.p} tint={props.p.groupedBg} title={props.title} onBack={props.onBack} action={props.action} />
       </If>
     </View>
   );
