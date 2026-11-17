@@ -1,5 +1,5 @@
 import type { JSX } from "nsh";
-import { Canvas, List, Path2D, safeArea, signal, Text, View } from "nsh";
+import { Canvas, createAnimatedValue, effect, List, Path2D, safeArea, signal, Text, View } from "nsh";
 import { AlertDialog, Input, NavPage } from "nsh/base";
 import { Avatar, Badge, EdgeBlur, Glyph, glass, Row, Section, UI_ICONS } from "../components";
 import { listTime } from "../format";
@@ -174,10 +174,32 @@ function Empty(props: { p: Palette }) {
   );
 }
 
+/** The row swiped open to show its delete button (one at a time). */
+const swipedRow = signal<number | null>(null);
+/** How far a row slides to show its delete button, in points. */
+const ACTION_W = 88;
+
 function ChatRow(props: { chat: Chat; p: Palette; editing: boolean }) {
   const c = () => props.chat;
   const dissolving = signal(false);
   const dust = createDissolve();
+  // Swipe left to reveal Delete: the drag drives `drag` natively; the row only
+  // moves left, and settles open or shut when the finger lifts.
+  const drag = createAnimatedValue(0);
+  const shift = drag.interpolate({ inputRange: [-ACTION_W * 3, 0, 1], outputRange: [-ACTION_W * 3, 0, 0], extrapolate: "clamp" });
+  const open = signal(false);
+  const settle = (to: boolean) => {
+    open.set(to);
+    if (to) swipedRow.set(c().bot.id);
+    else if (swipedRow() === c().bot.id) swipedRow.set(null);
+    void drag.spring(to ? -ACTION_W : 0, { damping: 22, stiffness: 260 });
+  };
+  effect(() => {
+    if (open() && swipedRow() !== c().bot.id) settle(false);
+  });
+  effect(() => {
+    if (props.editing && open()) settle(false);
+  });
   const preview = () => {
     const m = c().last;
     if (!m) return tr("还没有消息");
@@ -205,7 +227,10 @@ function ChatRow(props: { chat: Chat; p: Palette; editing: boolean }) {
       description: tr("token 立即失效，网关队列里未拉取的消息一并删除。"),
       actions: [{ id: "cancel", label: tr("取消"), role: "cancel" }, { id: "delete", label: tr("删除"), role: "destructive" }],
     });
-    if (action !== "delete") return;
+    if (action !== "delete") {
+      settle(false);
+      return;
+    }
     dissolving.set(true);
     try {
       // Dust first, then the request: deleting tells the host, which reloads the
@@ -217,17 +242,35 @@ function ChatRow(props: { chat: Chat; p: Palette; editing: boolean }) {
     } finally {
       dissolving.set(false);
       dust.reset();
+      open.set(false);
+      void drag.timing(0, { duration: 0 });
     }
   };
   return (
     <Dissolve active={dissolving()} progress={dust.progress}>
+    <View style={{ height: 80, backgroundColor: props.p.destructive }}>
+    {/* The delete button under the row, shown as the row slides left. */}
+    <View
+      testID={`swipe-delete-${c().bot.id}`}
+      role="button"
+      accessibilityLabel={tr("删除")}
+      onPress={() => void remove()}
+      activeStyle={{ opacity: 0.7 }}
+      style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: ACTION_W, alignItems: "center", justifyContent: "center", gap: 4 }}
+    >
+      <Icon path={UI_ICONS.trash} color="#ffffff" size={22} width={2} />
+      <Text style={{ fontSize: 13, fontWeight: "600", color: "#ffffff" }}>{tr("删除")}</Text>
+    </View>
     <View
       testID={`chat-${c().bot.id}`}
       role="button"
-      onPress={() => (props.editing ? void actions() : nav.push({ name: "chat", botId: c().bot.id }))}
+      pan={props.editing ? undefined : { x: drag }}
+      panActivation={{ activeOffsetX: 12, failOffsetY: 10 }}
+      onPanEnd={(e) => settle(!e.cancelled && ((e.value?.x ?? e.translation.x) < -ACTION_W / 2 || e.velocity.x < -600))}
+      onPress={() => (open() ? settle(false) : props.editing ? void actions() : nav.push({ name: "chat", botId: c().bot.id }))}
       onLongPress={() => void actions()}
       activeStyle={{ backgroundColor: props.p.pill }}
-      style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingLeft: 16, height: 80 }}
+      style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingLeft: 16, height: 80, backgroundColor: props.p.bg, translate: [shift, 0] }}
     >
       <Avatar avatar={c().bot.avatar} size={56} />
       <View
@@ -265,6 +308,7 @@ function ChatRow(props: { chat: Chat; p: Palette; editing: boolean }) {
           </If>
         </View>
       </View>
+    </View>
     </View>
     </Dissolve>
   );
