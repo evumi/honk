@@ -266,8 +266,11 @@ func TestAppAuthAndOwnership(t *testing.T) {
 	if !store.ValidBotID(id) || !strings.HasPrefix(tokenA, id+":") {
 		t.Errorf("bot id %q, token %q: want a short id that prefixes the token", id, tokenA)
 	}
-	if r := e.do("GET", "/v1/bots/1", a, nil); r.ErrorCode != 404 {
-		t.Errorf("integer bot id: %d", r.ErrorCode)
+	if r := e.do("GET", "/v1/bots/1", a, nil); r.ErrorCode != 410 || !strings.Contains(r.Description, "update the Honk app") {
+		t.Errorf("integer bot id from an old app: %d %q", r.ErrorCode, r.Description)
+	}
+	if r := e.do("GET", "/v1/bots/nope", a, nil); r.ErrorCode != 404 {
+		t.Errorf("malformed bot id: %d", r.ErrorCode)
 	}
 	sent := must[store.Message](t, e.do("POST", "/bot"+tokenA+"/sendMessage", "", map[string]string{"body": "x"}))
 	if sent.BotID != id || e.pusher.last(t).BotID != id {
@@ -317,7 +320,7 @@ func TestGoneTokenStopsPushes(t *testing.T) {
 func TestInfo(t *testing.T) {
 	e := setup(t)
 	info := must[map[string]any](t, e.do("GET", "/v1/info", "", nil))
-	if info["name"] != "honk" || info["api"] != float64(1) {
+	if info["name"] != "honk" || info["api"] != float64(APIVersion) {
 		t.Errorf("info = %v", info)
 	}
 }

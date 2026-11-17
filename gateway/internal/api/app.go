@@ -124,9 +124,17 @@ func (s *Server) deleteDevice(w http.ResponseWriter, r *http.Request) {
 
 // ---- bots ----
 
-func botID(r *http.Request) (string, error) {
+// errOldClient answers an app build from before short bot ids, which asks
+// for /v1/bots/<integer>: it gets a reason it can show instead of a bare 404.
+var errOldClient = apiError{http.StatusGone, "Gone: bot ids are short strings now; update the Honk app"}
+
+func (s *Server) botID(r *http.Request) (string, error) {
 	id := chi.URLParam(r, "id")
 	if !store.ValidBotID(id) {
+		if _, err := strconv.ParseInt(id, 10, 64); err == nil {
+			s.log.Warn("integer bot id from an old app build", "path", r.URL.Path, "user_agent", r.UserAgent())
+			return "", errOldClient
+		}
 		return "", errNotFound
 	}
 	return id, nil
@@ -191,7 +199,7 @@ func (s *Server) createBot(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getBot(w http.ResponseWriter, r *http.Request) {
-	id, err := botID(r)
+	id, err := s.botID(r)
 	if err == nil {
 		var b store.Bot
 		if b, err = s.store.GetBot(r.Context(), device(r).ID, id); err == nil {
@@ -203,7 +211,7 @@ func (s *Server) getBot(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) updateBot(w http.ResponseWriter, r *http.Request) {
-	id, err := botID(r)
+	id, err := s.botID(r)
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -230,7 +238,7 @@ func (s *Server) updateBot(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) deleteBot(w http.ResponseWriter, r *http.Request) {
-	id, err := botID(r)
+	id, err := s.botID(r)
 	if err == nil {
 		if err = s.store.DeleteBot(r.Context(), device(r).ID, id); err == nil {
 			s.forgetBot(id)
@@ -242,7 +250,7 @@ func (s *Server) deleteBot(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) resetBotToken(w http.ResponseWriter, r *http.Request) {
-	id, err := botID(r)
+	id, err := s.botID(r)
 	if err == nil {
 		var token string
 		if token, err = s.store.ResetBotToken(r.Context(), device(r).ID, id); err == nil {

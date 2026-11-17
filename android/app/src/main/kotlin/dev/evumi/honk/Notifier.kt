@@ -95,6 +95,30 @@ class Notifier(private val context: Context) {
         )
     }
 
+    /**
+     * A bot known by a legacy integer id got its short id: create `bot-<new>`
+     * with the settings the user gave `bot-<old>` (importance, sound,
+     * vibration, lights, lock screen, badge), then delete the old channel.
+     */
+    fun moveChannel(old: String, new: String) {
+        val from = manager.getNotificationChannel(channelId(old)) ?: return
+        if (manager.getNotificationChannel(channelId(new)) == null) {
+            ensureGroup()
+            val ch = NotificationChannel(channelId(new), from.name, from.importance)
+            ch.group = GROUP
+            ch.description = from.description
+            ch.setSound(from.sound, from.audioAttributes)
+            ch.enableVibration(from.shouldVibrate())
+            ch.vibrationPattern = from.vibrationPattern
+            ch.enableLights(from.shouldShowLights())
+            ch.lightColor = from.lightColor
+            ch.lockscreenVisibility = from.lockscreenVisibility
+            ch.setShowBadge(from.canShowBadge())
+            manager.createNotificationChannel(ch)
+        }
+        deleteChannel(old)
+    }
+
     fun deleteChannel(botId: String) {
         manager.deleteNotificationChannel(channelId(botId))
         ShortcutManagerCompat.removeLongLivedShortcuts(context, listOf(channelId(botId)))

@@ -103,11 +103,15 @@ class LocalStore(private val sql: Sql) {
 
     // bots
 
-    /** Replaces the stored bots with the gateway's list, keeping local flags and dropping messages of bots that are gone. */
-    fun replaceBots(bots: List<Bot>) = locked {
+    /**
+     * Replaces the stored bots with the gateway's list, keeping local flags and dropping messages of bots that are gone.
+     * [keeping] names stored bots to leave alone although the list lacks them: legacy-id bots whose rename failed for
+     * now (see [LegacyBotIds]).
+     */
+    fun replaceBots(bots: List<Bot>, keeping: Set<String> = emptySet()) = locked {
         transaction {
             bots.forEach(::upsert)
-            val ids = bots.map { it.id }
+            val ids = bots.map { it.id } + keeping.sorted()
             val marks = ids.joinToString(",") { "?" }
             val keep = if (ids.isEmpty()) "" else " WHERE id NOT IN ($marks)"
             val keepMsg = if (ids.isEmpty()) "" else " WHERE bot_id NOT IN ($marks)"
@@ -118,20 +122,38 @@ class LocalStore(private val sql: Sql) {
 
     /**
      * Moves a bot's local data (flags, messages) from [old] to [new]: the
-     * gateway gave a bot known by a legacy integer id its short id. Returns
-     * the renamed messages' notification tags, which name the old id.
+     * gateway gave a bot known by a legacy integer id its short id. Delivered
+     * notifications keep their tags (still in `notif_id`), so they can be
+     * removed as before. Records old → new for [currentBotId]. Returns whether
+     * it renamed. Same as LocalStore.swift.
      */
-    fun renameBot(old: String, new: String): List<String> = locked {
+    fun renameBot(old: String, new: String): Boolean = locked {
         transaction {
             if (old == new || scalar("SELECT COUNT(*) FROM bots WHERE id = ?", listOf(old)) != 1L ||
                 scalar("SELECT COUNT(*) FROM bots WHERE id = ?", listOf(new)) != 0L
-            ) return@transaction emptyList()
-            val tags = sql.query("SELECT notif_id FROM messages WHERE bot_id = ? AND notif_id IS NOT NULL", listOf(old)) {
-                it.text(0)
-            }.filterNotNull()
+            ) return@transaction false
             sql.run("UPDATE bots SET id = ? WHERE id = ?", listOf(new, old))
             sql.run("UPDATE messages SET bot_id = ? WHERE bot_id = ?", listOf(new, old))
-            tags
+            sql.run(
+                "INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                listOf("renamed-bot:$old", new),
+            )
+            true
+        }
+    }
+
+    /** The id a bot has now: [id], or the short id a legacy id was renamed to (an old notification or shortcut names it). */
+    fun currentBotId(id: String): String {
+        if (!BotIds.isLegacy(id)) return id
+        return locked {
+            sql.query("SELECT value FROM meta WHERE key = ?", listOf("renamed-bot:$id")) { it.text(0) }.firstOrNull()
+        } ?: id
+    }
+
+    /** The stored bots, oldest first. */
+    fun bots(): List<Bot> = locked {
+        sql.query("SELECT id, name, avatar, default_level, created_at, updated_at FROM bots ORDER BY created_at, id") {
+            Bot(it.text(0).orEmpty(), it.text(1).orEmpty(), it.text(2).orEmpty(), it.text(3) ?: "active", it.long(4), it.long(5))
         }
     }
 

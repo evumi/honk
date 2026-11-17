@@ -92,7 +92,14 @@ enum Keychain {
 
 /// Keeps each bot's token in the keychain. The gateway shows a token only when
 /// it is created or reset, so the app keeps it to show and copy later.
-public struct BotTokenStore: Sendable {
+/// Where bot tokens are kept: the keychain in the app, memory in tests.
+public protocol BotTokenStoring: Sendable {
+    func token(botID: String) -> String?
+    func save(_ token: String, botID: String)
+    func remove(botID: String)
+}
+
+public struct BotTokenStore: BotTokenStoring, Sendable {
     let service: String
     let accessGroup: String?
 

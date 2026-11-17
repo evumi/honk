@@ -1,6 +1,7 @@
 package dev.evumi.honk.core
 
 import kotlinx.serialization.KSerializer
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.descriptors.PrimitiveKind
@@ -8,6 +9,7 @@ import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
 import kotlinx.serialization.encoding.Decoder
 import kotlinx.serialization.encoding.Encoder
 import kotlinx.serialization.json.JsonDecoder
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 
 /** Bot ids: short random strings (`aZ3kQ9xT`). Gateways before v2 sent integers. */
@@ -21,7 +23,13 @@ object BotIdSerializer : KSerializer<String> {
     override val descriptor = PrimitiveSerialDescriptor("BotId", PrimitiveKind.STRING)
     override fun serialize(encoder: Encoder, value: String) = encoder.encodeString(value)
     override fun deserialize(decoder: Decoder): String =
-        if (decoder is JsonDecoder) (decoder.decodeJsonElement() as JsonPrimitive).content else decoder.decodeString()
+        if (decoder is JsonDecoder) {
+            val e = decoder.decodeJsonElement()
+            if (e !is JsonPrimitive || e is JsonNull) throw SerializationException("bot id must be a string or a number")
+            e.content
+        } else {
+            decoder.decodeString()
+        }
 }
 
 /** A notification channel. */

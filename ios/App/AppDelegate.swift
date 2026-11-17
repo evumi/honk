@@ -94,10 +94,12 @@ final class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationC
                 await UIApplication.shared.open(url)
                 return
             }
+            // A notification from before the bot got its short id names the old one.
+            let botID = HonkService.shared.store.currentBotID(info.botID)
             if let open = self.openChat {
-                open(info.botID)
+                open(botID)
             } else {
-                self.pendingOpen = info.botID
+                self.pendingOpen = botID
             }
         }
     }

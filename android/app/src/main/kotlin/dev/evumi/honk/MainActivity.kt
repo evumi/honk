@@ -90,11 +90,15 @@ class MainActivity : ComponentActivity() {
     /** A tapped notification: a message with a url opens it; otherwise its chat. */
     private fun handleOpen(intent: Intent?) {
         if (intent?.action != ACTION_OPEN) return
-        val botId = intent.getStringExtra(EXTRA_BOT_ID).orEmpty()
+        // Notifications and shortcuts from before short ids carry the bot id as a Long.
+        val extra = intent.getStringExtra(EXTRA_BOT_ID)
+            ?: intent.getLongExtra(EXTRA_BOT_ID, 0).takeIf { it > 0 }?.toString()
+            ?: ""
         val messageId = intent.getLongExtra(EXTRA_MESSAGE_ID, 0)
         intent.action = null // not again after a configuration change
-        if (botId.isEmpty()) return
+        if (extra.isEmpty()) return
         lifecycleScope.launch(Dispatchers.IO) {
+            val botId = service.store.currentBotId(extra)
             val url = if (messageId > 0) service.store.message(messageId)?.url.orEmpty() else ""
             launch(Dispatchers.Main) {
                 if (url.startsWith("https://") || url.startsWith("http://")) {

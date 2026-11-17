@@ -28,28 +28,85 @@ class SyncEngine(private val api: ApiClient, private val store: LocalStore) {
 }
 
 /**
- * Bots stored under an integer id from before short ids would otherwise be
- * dropped, messages and all, once the gateway lists them by short id. Old
- * tokens keep working, so ask the gateway who each one is and move the local
- * data and the token over. A bot whose token is not stored is lost. Returns
- * the notification tags of the renamed messages (they name the old id).
+ * Moves bots stored under an integer id (from before short ids) to the short
+ * id the gateway now lists them by, so their messages, flags and token are not
+ * dropped. The same rules as ios/HonkKit's `LegacyBotIDs`:
+ *
+ * 1. With a stored token, ask `getMe` (old tokens keep working) which bot it is.
+ * 2. Otherwise, or when the gateway says the token is gone (401/404), match on
+ *    `created_at` + name when exactly one listed bot, not yet stored, has both.
+ * 3. A bot whose `getMe` failed for another reason (offline, timeout, 5xx) and
+ *    that did not match stays pending: keep it (`replaceBots(keeping =)`) and
+ *    try again next time.
+ *
+ * Delivered notifications are left alone on both platforms; their stored tags
+ * still remove them.
  */
 object LegacyBotIds {
-    fun rename(store: LocalStore, tokens: BotTokenStore, api: ApiClient, known: Set<String>): List<String> {
-        val tags = mutableListOf<String>()
-        for (old in store.botIds()) {
-            if (!BotIds.isLegacy(old) || old in known) continue
-            val token = tokens.token(old) ?: continue
-            val bot = try {
-                api.getMe(token)
-            } catch (e: java.io.IOException) {
+    data class Rename(val old: String, val new: String)
+    data class Outcome(val renamed: List<Rename> = emptyList(), val pending: Set<String> = emptySet())
+
+    fun rename(store: LocalStore, tokens: BotTokenStore, serverBots: List<Bot>, getMe: (String) -> Bot): Outcome {
+        val local = store.bots()
+        val known = serverBots.map { it.id }.toSet()
+        val legacy = local.filter { BotIds.isLegacy(it.id) && it.id !in known }
+        if (legacy.isEmpty()) return Outcome()
+        val stored = local.map { it.id }.toSet()
+        val claimed = mutableSetOf<String>()
+        val renamed = mutableListOf<Rename>()
+        val pending = mutableSetOf<String>()
+
+        for (bot in legacy) {
+            var newId: String? = null
+            var transient = false
+            val token = tokens.token(bot.id)
+            if (token != null) {
+                try {
+                    getMe(token).id.takeIf { it in known }?.let { newId = it }
+                } catch (e: ApiException.Gateway) {
+                    // 401/404: the token no longer names a bot. Anything else may pass.
+                    if (e.code != 401 && e.code != 404) transient = true
+                } catch (e: Exception) {
+                    transient = true
+                }
+            }
+            if (newId == null) {
+                val twins = legacy.count { it.createdAt == bot.createdAt && it.name == bot.name }
+                val matches = serverBots.filter {
+                    it.id !in stored && it.id !in claimed && it.createdAt == bot.createdAt && it.name == bot.name
+                }
+                if (twins == 1 && matches.size == 1) newId = matches[0].id
+            }
+            val id = newId
+            if (id == null || id in claimed || !store.renameBot(bot.id, id)) {
+                if (transient) pending += bot.id
                 continue
             }
-            if (bot.id !in known) continue
-            tags += store.renameBot(old, bot.id)
-            tokens.save(bot.id, token)
-            tokens.remove(old)
+            claimed += id
+            if (token != null) {
+                tokens.save(id, token)
+                tokens.remove(bot.id)
+            }
+            renamed += Rename(bot.id, id)
         }
-        return tags
+        return Outcome(renamed, pending)
+    }
+
+    /** Whether any stored bot still has a legacy id. */
+    fun hasLegacy(store: LocalStore): Boolean = store.botIds().any(BotIds::isLegacy)
+
+    /**
+     * For a push naming [botId]: when that bot is not stored but legacy ones
+     * are, fetch the bot list and rename first, so the push finds its bot
+     * (name, avatar, mute). Returns what it renamed; nothing on any failure.
+     */
+    fun renameBeforePush(botId: String, store: LocalStore, tokens: BotTokenStore, api: ApiClient): Outcome {
+        if (store.bot(botId) != null || !hasLegacy(store)) return Outcome()
+        val bots = try {
+            api.listBots()
+        } catch (e: Exception) {
+            return Outcome()
+        }
+        return rename(store, tokens, bots) { api.getMe(it) }
     }
 }
