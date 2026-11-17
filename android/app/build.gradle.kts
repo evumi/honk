@@ -12,14 +12,23 @@ if (hasFirebase) {
     apply(plugin = libs.plugins.google.services.get().pluginId)
 }
 
-// The gateway URL: -Phonk.gatewayUrl=… or honk.gatewayUrl in android/local.properties.
-// The default reaches a gateway on the development machine from the emulator.
 val localProps = Properties().apply {
     rootProject.file("local.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) }
 }
+fun env(name: String): String? = System.getenv(name)?.takeIf { it.isNotBlank() }
+
+// The gateway URL: -Phonk.gatewayUrl=…, HONK_GATEWAY_URL, or honk.gatewayUrl in
+// android/local.properties. The default reaches a gateway on the development
+// machine from the emulator.
 val gatewayUrl = (findProperty("honk.gatewayUrl") as String?)
+    ?: env("HONK_GATEWAY_URL")
     ?: localProps.getProperty("honk.gatewayUrl")
     ?: "http://10.0.2.2:8080/"
+
+// Release signing from HONK_KEYSTORE_FILE (absolute path), HONK_KEYSTORE_PASSWORD,
+// HONK_KEY_ALIAS and HONK_KEY_PASSWORD; without them a release build is signed
+// with the debug key, so assembleRelease also works locally.
+val releaseKeystore = env("HONK_KEYSTORE_FILE")?.let(::file)
 
 android {
     namespace = "dev.evumi.honk"
@@ -29,10 +38,22 @@ android {
         applicationId = "dev.evumi.honk"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        // CI sets HONK_VERSION_CODE / HONK_VERSION_NAME.
+        versionCode = env("HONK_VERSION_CODE")?.toInt() ?: 1
+        versionName = env("HONK_VERSION_NAME") ?: "0.1.0"
         buildConfigField("String", "GATEWAY_URL", "\"$gatewayUrl\"")
         buildConfigField("boolean", "HAS_FIREBASE", hasFirebase.toString())
+    }
+
+    signingConfigs {
+        if (releaseKeystore != null) {
+            create("release") {
+                storeFile = releaseKeystore
+                storePassword = env("HONK_KEYSTORE_PASSWORD")
+                keyAlias = env("HONK_KEY_ALIAS")
+                keyPassword = env("HONK_KEY_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
@@ -43,7 +64,9 @@ android {
         release {
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            manifestPlaceholders["cleartext"] = "false"
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
+            // Plain http only when the gateway URL is http (a local test build).
+            manifestPlaceholders["cleartext"] = gatewayUrl.startsWith("http://").toString()
         }
     }
 
