@@ -6,6 +6,7 @@ import { listTime } from "../format";
 import { api, type Chat } from "../host";
 import { chats, loadStatus, nav, reload, status } from "../store";
 import { palette, type Palette } from "../theme";
+import { lang, tr } from "../i18n";
 
 type Tab = "chats" | "settings";
 
@@ -86,7 +87,7 @@ function ChatsTab(props: { p: Palette }) {
   return (
     <View style={{ flex: 1 }}>
       <Header
-        title="通知"
+        title={tr("通知")}
         p={p()}
         left={
           <If when={chats().length > 0}>
@@ -98,7 +99,7 @@ function ChatsTab(props: { p: Palette }) {
               style={{ height: 44, paddingLeft: 18, paddingRight: 18, borderRadius: 22, backgroundColor: p().pill, justifyContent: "center" }}
             >
               <Text style={{ fontSize: 17, color: editing() ? p().accent : p().text, fontWeight: editing() ? "600" : "400" }}>
-                {editing() ? "完成" : "编辑"}
+                {editing() ? tr("完成") : tr("编辑")}
               </Text>
             </View>
           </If>
@@ -107,7 +108,7 @@ function ChatsTab(props: { p: Palette }) {
           <View
             testID="new-bot"
             role="button"
-            accessibilityLabel="新建 Bot"
+            accessibilityLabel={tr("新建 Bot")}
             onPress={() => nav.push({ name: "newBot" })}
             activeStyle={{ opacity: 0.7 }}
             style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: p().accent, alignItems: "center", justifyContent: "center" }}
@@ -124,7 +125,7 @@ function ChatsTab(props: { p: Palette }) {
               testID="search"
               value={query()}
               onChange={({ value }) => query.set(value)}
-              placeholder="搜索"
+              placeholder={tr("搜索")}
               returnKeyType="search"
               style={{ flex: 1, fontSize: 16, color: p().text }}
             />
@@ -140,7 +141,7 @@ function ChatsTab(props: { p: Palette }) {
         onRefresh={() => void api.refresh().then(reload)}
         empty={
           <If when={query().trim()} else={<Empty p={p()} />}>
-            <Text style={{ textAlign: "center", paddingTop: 60, fontSize: 15, color: p().hint }}>没有匹配的会话</Text>
+            <Text style={{ textAlign: "center", paddingTop: 60, fontSize: 15, color: p().hint }}>{tr("没有匹配的会话")}</Text>
           </If>
         }
       >
@@ -154,9 +155,9 @@ function Empty(props: { p: Palette }) {
   return (
     <View style={{ alignItems: "center", paddingTop: 96, paddingLeft: 40, paddingRight: 40 }}>
       <Glyph icon="bell" color={props.p.accent} size={72} />
-      <Text style={{ marginTop: 20, fontSize: 20, fontWeight: "600", color: props.p.text }}>还没有 Bot</Text>
+      <Text style={{ marginTop: 20, fontSize: 20, fontWeight: "600", color: props.p.text }}>{tr("还没有 Bot")}</Text>
       <Text style={{ marginTop: 8, fontSize: 15, lineHeight: 21, color: props.p.hint, textAlign: "center" }}>
-        每个 Bot 是一个独立的通知渠道。创建后用它的 token 调用发送接口，通知就会出现在这里。
+        {tr("每个 Bot 是一个独立的通知渠道。创建后用它的 token 调用发送接口，通知就会出现在这里。")}
       </Text>
       <View
         testID="create-first-bot"
@@ -165,7 +166,7 @@ function Empty(props: { p: Palette }) {
         activeStyle={{ opacity: 0.85 }}
         style={{ marginTop: 24, height: 50, paddingLeft: 28, paddingRight: 28, borderRadius: 25, backgroundColor: props.p.accent, justifyContent: "center" }}
       >
-        <Text style={{ color: "#ffffff", fontSize: 17, fontWeight: "600" }}>创建第一个 Bot</Text>
+        <Text style={{ color: "#ffffff", fontSize: 17, fontWeight: "600" }}>{tr("创建第一个 Bot")}</Text>
       </View>
     </View>
   );
@@ -175,18 +176,18 @@ function ChatRow(props: { chat: Chat; p: Palette; editing: boolean }) {
   const c = () => props.chat;
   const preview = () => {
     const m = c().last;
-    if (!m) return "还没有消息";
-    return m.title && m.body ? `${m.title}：${m.body}` : m.title || m.body;
+    if (!m) return tr("还没有消息");
+    return m.title && m.body ? `${m.title}${lang() === "zh" ? "：" : ": "}${m.body}` : m.title || m.body;
   };
   const actions = async () => {
     const { action } = await AlertDialog.show({
       title: c().bot.name,
       presentation: "actionSheet",
       actions: [
-        { id: "pin", label: c().pinned ? "取消置顶" : "置顶" },
-        { id: "mute", label: c().muted ? "取消静音" : "静音" },
-        { id: "read", label: "标为已读" },
-        { id: "cancel", label: "取消", role: "cancel" },
+        { id: "pin", label: c().pinned ? tr("取消置顶") : tr("置顶") },
+        { id: "mute", label: c().muted ? tr("取消静音") : tr("静音") },
+        { id: "read", label: tr("标为已读") },
+        { id: "cancel", label: tr("取消"), role: "cancel" },
       ],
     });
     if (action === "pin") await api.setPinned(c().bot.id, !c().pinned);
@@ -196,9 +197,9 @@ function ChatRow(props: { chat: Chat; p: Palette; editing: boolean }) {
   };
   const remove = async () => {
     const { action } = await AlertDialog.show({
-      title: `删除「${c().bot.name}」？`,
-      description: "token 立即失效，网关队列里未拉取的消息一并删除。",
-      actions: [{ id: "cancel", label: "取消", role: "cancel" }, { id: "delete", label: "删除", role: "destructive" }],
+      title: tr("删除「{name}」？", { name: c().bot.name }),
+      description: tr("token 立即失效，网关队列里未拉取的消息一并删除。"),
+      actions: [{ id: "cancel", label: tr("取消"), role: "cancel" }, { id: "delete", label: tr("删除"), role: "destructive" }],
     });
     if (action !== "delete") return;
     await api.deleteBot(c().bot.id);
@@ -231,7 +232,7 @@ function ChatRow(props: { chat: Chat; p: Palette; editing: boolean }) {
           <If
             when={props.editing}
             else={
-              <If when={c().unread > 0} else={<If when={c().pinned}><Text style={{ fontSize: 13, color: props.p.hint }}>置顶</Text></If>}>
+              <If when={c().unread > 0} else={<If when={c().pinned}><Text style={{ fontSize: 13, color: props.p.hint }}>{tr("置顶")}</Text></If>}>
                 <Badge count={c().unread} muted={c().muted} p={props.p} />
               </If>
             }
@@ -242,7 +243,7 @@ function ChatRow(props: { chat: Chat; p: Palette; editing: boolean }) {
               onPress={() => void remove()}
               style={{ height: 32, paddingLeft: 14, paddingRight: 14, borderRadius: 16, backgroundColor: props.p.destructive, justifyContent: "center" }}
             >
-              <Text style={{ fontSize: 14, fontWeight: "600", color: "#ffffff" }}>删除</Text>
+              <Text style={{ fontSize: 14, fontWeight: "600", color: "#ffffff" }}>{tr("删除")}</Text>
             </View>
           </If>
         </View>
@@ -257,15 +258,15 @@ function SettingsTab(props: { p: Palette }) {
   const retrying = signal(false);
   const permission = () => {
     const n = status()?.notifications;
-    return n === "authorized" ? "已开启" : n === "denied" ? "已关闭" : "未设置";
+    return n === "authorized" ? tr("已开启") : n === "denied" ? tr("已关闭") : tr("未设置");
   };
   const registration = () => {
     switch (status()?.registration) {
-      case "registered": return "已注册";
-      case "registering": return "注册中…";
-      case "waitingForPushToken": return "等待推送授权";
-      case "failed": return "注册失败";
-      default: return status()?.registered ? "已注册" : "未注册";
+      case "registered": return tr("已注册");
+      case "registering": return tr("注册中…");
+      case "waitingForPushToken": return tr("等待推送授权");
+      case "failed": return tr("注册失败");
+      default: return status()?.registered ? tr("已注册") : tr("未注册");
     }
   };
   const retry = async () => {
@@ -284,27 +285,27 @@ function SettingsTab(props: { p: Palette }) {
   };
   return (
     <View style={{ flex: 1, gap: 22 }}>
-      <Header title="设置" p={p()} />
+      <Header title={tr("设置")} p={p()} />
       <Section
-        title="推送"
+        title={tr("推送")}
         p={p()}
         footer={
           status()?.registration === "failed"
-            ? `注册失败：${status()?.registrationError ?? "未知错误"}。检查网关地址和网络后重试。`
+            ? tr("注册失败：{error}。检查网关地址和网络后重试。", { error: status()?.registrationError ?? tr("未知错误") })
             : status()?.pushMode === "simulator"
-              ? "模拟器调试：没有 APNs 推送，App 在前台时每 10 秒同步一次。"
-              : "通知被关闭时，消息仍会在打开 App 时同步过来。"
+              ? tr("模拟器调试：没有 APNs 推送，App 在前台时每 10 秒同步一次。")
+              : tr("通知被关闭时，消息仍会在打开 App 时同步过来。")
         }
       >
-        <Row p={p()} first label="系统通知" value={permission()} onPress={() => void api.openNotificationSettings()} />
-        <Row p={p()} label="设备注册" value={registration()} color={status()?.registration === "failed" ? p().destructive : undefined} testID="registration" />
+        <Row p={p()} first label={tr("系统通知")} value={permission()} onPress={() => void api.openNotificationSettings()} />
+        <Row p={p()} label={tr("设备注册")} value={registration()} color={status()?.registration === "failed" ? p().destructive : undefined} testID="registration" />
         <If when={status()?.registration !== "registered"}>
-          <Row p={p()} label={retrying() ? "正在重试…" : "重试注册"} color={p().accent} onPress={() => void retry()} testID="retry-registration" />
+          <Row p={p()} label={retrying() ? tr("正在重试…") : tr("重试注册")} color={p().accent} onPress={() => void retry()} testID="retry-registration" />
         </If>
       </Section>
-      <Section title="网关" p={p()}>
-        <Row p={p()} first label={host()} value="更改" onPress={() => nav.push({ name: "gateway" })} testID="gateway-row" />
-        <Row p={p()} label="立即同步" color={p().accent} onPress={() => void api.refresh().then(reload)} />
+      <Section title={tr("网关")} p={p()}>
+        <Row p={p()} first label={host()} value={tr("更改")} onPress={() => nav.push({ name: "gateway" })} testID="gateway-row" />
+        <Row p={p()} label={tr("立即同步")} color={p().accent} onPress={() => void api.refresh().then(reload)} />
       </Section>
     </View>
   );
@@ -330,11 +331,11 @@ function TabBar(props: { tab: Tab; onSelect: (t: Tab) => void; p: Palette }) {
             </View>
           </If>
         </View>
-        <Text style={{ fontSize: 11, fontWeight: "600", color: color("chats") }}>通知</Text>
+        <Text style={{ fontSize: 11, fontWeight: "600", color: color("chats") }}>{tr("通知")}</Text>
       </View>
       <View testID="tab-settings" role="tab" onPress={() => props.onSelect("settings")} style={{ flex: 1, alignItems: "center", justifyContent: "center", gap: 2 }}>
         <Icon path={GEAR} color={color("settings")} size={28} />
-        <Text style={{ fontSize: 11, fontWeight: "600", color: color("settings") }}>设置</Text>
+        <Text style={{ fontSize: 11, fontWeight: "600", color: color("settings") }}>{tr("设置")}</Text>
       </View>
     </View>
   );

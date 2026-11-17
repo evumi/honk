@@ -1,4 +1,10 @@
-const WEEKDAYS = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+import { lang, tr } from "./i18n";
+
+const WEEKDAYS = {
+  zh: ["周日", "周一", "周二", "周三", "周四", "周五", "周六"],
+  en: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
+};
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
@@ -8,7 +14,7 @@ export function listTime(ms: number, now = Date.now()): string {
   const today = new Date(now);
   today.setHours(0, 0, 0, 0);
   if (ms >= today.getTime()) return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  if (ms >= today.getTime() - 6 * 864e5) return WEEKDAYS[d.getDay()];
+  if (ms >= today.getTime() - 6 * 864e5) return WEEKDAYS[lang()][d.getDay()];
   return `${pad(d.getMonth() + 1)}/${pad(d.getDate())}`;
 }
 
@@ -22,9 +28,9 @@ export function dayLabel(ms: number, now = Date.now()): string {
   const d = new Date(ms);
   const today = new Date(now);
   today.setHours(0, 0, 0, 0);
-  if (ms >= today.getTime()) return "今天";
-  if (ms >= today.getTime() - 864e5) return "昨天";
-  return `${d.getMonth() + 1}月${d.getDate()}日`;
+  if (ms >= today.getTime()) return tr("今天");
+  if (ms >= today.getTime() - 864e5) return tr("昨天");
+  return lang() === "zh" ? `${d.getMonth() + 1}月${d.getDate()}日` : `${MONTHS[d.getMonth()]} ${d.getDate()}`;
 }
 
 export function sameDay(a: number, b: number): boolean {
@@ -47,11 +53,11 @@ export const LEVELS = [
 ] as const;
 
 export function levelLabel(l: string): string {
-  return LEVELS.find((x) => x.id === l)?.label ?? "普通";
+  return tr(LEVELS.find((x) => x.id === l)?.label ?? "普通");
 }
 
 /** The curl example for a bot. */
 export function curlExample(gateway: string, token: string): string {
   const base = gateway.endsWith("/") ? gateway : gateway + "/";
-  return `curl ${base}bot${token}/sendMessage \\\n  -d title="部署成功" \\\n  -d body="sub2api / sluice 已上线"`;
+  return `curl ${base}bot${token}/sendMessage \\\n  -d title="${tr("部署成功")}" \\\n  -d body="${tr("sub2api / sluice 已上线")}"`;
 }

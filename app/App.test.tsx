@@ -32,14 +32,14 @@ function host(overrides: Record<string, unknown> = {}) {
 }
 
 test("lists bots with their last message and unread count", async () => {
-  const app = await open("./App.tsx", { host: host() });
+  const app = await open("./App.tsx", { locale: "zh-Hans-CN",  host: host() });
   await app.waitFor("text:Berth 部署");
   expect(app.texts()).toContain("部署成功：sub2api / sluice 已上线。");
   expect(app.texts()).toContain("1");
 });
 
 test("opens a chat and renders the card with its data", async () => {
-  const app = await open("./App.tsx", { host: host() });
+  const app = await open("./App.tsx", { locale: "zh-Hans-CN",  host: host() });
   await app.press("id:chat-1");
   await app.waitFor("text:已上线");
   const texts = app.texts();
@@ -53,14 +53,14 @@ test("opens a chat and renders the card with its data", async () => {
 });
 
 test("a host event opens the chat", async () => {
-  const app = await open("./App.tsx", { host: host() });
+  const app = await open("./App.tsx", { locale: "zh-Hans-CN",  host: host() });
   await app.waitFor("text:Berth 部署");
   await app.host.send("honk.open", { botId: 1 });
   await app.waitFor("text:在 Berth 中查看");
 });
 
 test("creates a bot and shows its token", async () => {
-  const app = await open("./App.tsx", { host: host() });
+  const app = await open("./App.tsx", { locale: "zh-Hans-CN",  host: host() });
   await app.press("id:new-bot");
   await app.press("id:icon-ship");
   await app.press("id:color-#1c1c1e");
@@ -73,14 +73,14 @@ test("creates a bot and shows its token", async () => {
 });
 
 test("bot settings masks the stored token", async () => {
-  const app = await open("./App.tsx", { host: host() });
+  const app = await open("./App.tsx", { locale: "zh-Hans-CN",  host: host() });
   await app.press("id:chat-1");
   await app.press("id:open-settings");
   await app.waitFor("text:1:abcd••••••••nop");
 });
 
 test("search filters the chat list", async () => {
-  const app = await open("./App.tsx", { host: host() });
+  const app = await open("./App.tsx", { locale: "zh-Hans-CN",  host: host() });
   await app.waitFor("text:Berth 部署");
   await app.type("id:search", "告警");
   await app.waitFor("text:没有匹配的会话");
@@ -90,7 +90,7 @@ test("search filters the chat list", async () => {
 });
 
 test("edit mode deletes a bot after confirming", async () => {
-  const app = await open("./App.tsx", { host: host() });
+  const app = await open("./App.tsx", { locale: "zh-Hans-CN",  host: host() });
   await app.press("id:edit");
   app.onDialog(() => "删除");
   await app.press("id:delete-1");
@@ -99,7 +99,7 @@ test("edit mode deletes a bot after confirming", async () => {
 });
 
 test("the gateway page tests an address before switching", async () => {
-  const app = await open("./App.tsx", { host: host() });
+  const app = await open("./App.tsx", { locale: "zh-Hans-CN",  host: host() });
   await app.press("id:tab-settings");
   await app.press("id:gateway-row");
   await app.clear("id:gateway-url");
@@ -123,7 +123,7 @@ test("settings shows a failed registration and retries it", async () => {
   const status = () => registered
     ? { registered: true, registration: "registered", pushMode: "apns", gatewayURL: "https://gw.test/", notifications: "authorized" }
     : { registered: false, registration: "failed", registrationError: "连不上网关", pushMode: "apns", gatewayURL: "https://gw.test/", notifications: "authorized" };
-  const app = await open("./App.tsx", {
+  const app = await open("./App.tsx", { locale: "zh-Hans-CN", 
     host: host({
       "honk.status": () => status(),
       "honk.register.retry": () => {
@@ -137,4 +137,14 @@ test("settings shows a failed registration and retries it", async () => {
   expect(app.texts().some((t) => t.includes("连不上网关"))).toBe(true);
   await app.press("id:retry-registration");
   await app.waitFor("text:已注册");
+});
+
+test("an English locale gets the English UI", async () => {
+  const app = await open("./App.tsx", { locale: "en-US", host: host() });
+  await app.waitFor("text:Berth 部署");
+  expect(app.texts()).toContain("Notifications");
+  expect(app.texts()).toContain("Edit");
+  await app.press("id:tab-settings");
+  await app.waitFor("text:Registered");
+  expect(app.texts()).toContain("Sync now");
 });
