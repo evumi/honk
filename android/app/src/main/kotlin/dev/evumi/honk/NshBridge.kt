@@ -143,7 +143,7 @@ class NshBridge(
             val bytes = try {
                 Base64.getDecoder().decode(a.requireString("data"))
             } catch (e: IllegalArgumentException) {
-                throw LocalAvatars.SaveException("只支持 JPEG 和 PNG 图片")
+                throw LocalAvatars.SaveException(LocalAvatars.NOT_AN_IMAGE)
             }
             Notifier.localAvatars(activity).save(bytes)
         }

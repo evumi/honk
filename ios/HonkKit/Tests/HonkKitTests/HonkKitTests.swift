@@ -177,7 +177,7 @@ func tempStore() throws -> LocalStore {
         #expect(Avatar("preset:box:#1c1c1e") == .preset(icon: "box", color: "#1c1c1e"))
         #expect(Avatar("https://e.com/a.png") == .image(URL(string: "https://e.com/a.png")!))
         #expect(Avatar("http://e.com/a.png") == .default)
-        #expect(Avatar("preset:nope:#000000") == .default)
+        #expect(Avatar("preset:nope:#000000") == .preset(icon: "bell", color: "#000000"))
         #expect(Avatar("") == .default)
     }
 }
@@ -304,8 +304,9 @@ final class MockGateway: URLProtocol {
         #expect(Avatar("local:ab-12.jpg") == .local("ab-12.jpg"))
         #expect(Avatar("local:ab-12.jpg").stringValue == "local:ab-12.jpg")
         #expect(Avatar("local:../x.jpg") == .default)
-        #expect(Avatar("local:x.gif") == .default)
-        #expect(Avatar("preset:ship:#1c1c1e") == .default, "the ship is no longer offered")
+        #expect(Avatar("local:x.bmp") == .default)
+        #expect(Avatar("local:x.webp") == .local("x.webp"))
+        #expect(Avatar("preset:ship:#c2410c") == .preset(icon: "bell", color: "#c2410c"), "the ship is gone; its colour stays")
     }
 
     @Test func savesReadsAndPrunes() throws {
@@ -318,13 +319,17 @@ final class MockGateway: URLProtocol {
         #expect(avatars.data(for: "local:missing.png") == nil)
         let b = try avatars.save(Data([0xFF, 0xD8, 0xFF, 0xD9]))
         #expect(b.hasSuffix(".jpg"))
-        #expect(throws: LocalAvatars.SaveError.self) { try avatars.save(Data("GIF89a".utf8)) }
+        #expect(try avatars.save(Data("GIF89a\u{1}\u{0}".utf8)).hasSuffix(".gif"))
+        let webp = try avatars.save(Data("RIFF\u{0}\u{0}\u{0}\u{0}WEBPVP8 ".utf8))
+        #expect(webp.hasSuffix(".webp") && avatars.dataURL(for: webp)?.hasPrefix("data:image/webp;base64,") == true)
+        #expect(throws: LocalAvatars.SaveError.self) { try avatars.save(Data("BM\u{0}\u{0}".utf8)) }
         #expect(throws: LocalAvatars.SaveError.self) { try avatars.save(Data(count: LocalAvatars.maxBytes + 1)) }
         // Young files stay (a bot may be about to use them); old unused ones go.
         avatars.prune(keeping: [a])
         #expect(avatars.data(for: b) != nil)
         avatars.prune(keeping: [a], now: Date().addingTimeInterval(7200))
         #expect(avatars.data(for: b) == nil)
+        #expect(avatars.data(for: webp) == nil)
         #expect(avatars.data(for: a) != nil)
     }
 }

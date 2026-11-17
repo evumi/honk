@@ -24,7 +24,10 @@ class LocalAvatarsTest {
         assertNull(avatars.data("local:missing.png"))
         val b = avatars.save(byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte(), 0xD9.toByte()))
         assertTrue(b.endsWith(".jpg"))
-        assertThrows(LocalAvatars.SaveException::class.java) { avatars.save("GIF89a".toByteArray()) }
+        assertTrue(avatars.save("GIF89a\u0001\u0000".toByteArray()).endsWith(".gif"))
+        val webp = avatars.save("RIFF\u0000\u0000\u0000\u0000WEBPVP8 ".toByteArray())
+        assertTrue(webp.endsWith(".webp") && avatars.dataUrl(webp)!!.startsWith("data:image/webp;base64,"))
+        assertThrows(LocalAvatars.SaveException::class.java) { avatars.save("BM\u0000\u0000".toByteArray()) }
         assertThrows(LocalAvatars.SaveException::class.java) { avatars.save(ByteArray(LocalAvatars.MAX_BYTES + 1)) }
         // Young files stay (a bot may be about to use them); old unused ones go.
         avatars.prune(setOf(a))

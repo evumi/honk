@@ -228,14 +228,15 @@ class ModelTest {
 
     @Test fun avatar() {
         assertEquals(Avatar.Preset("box", "#1c1c1e"), Avatar.parse("preset:box:#1c1c1e"))
-        assertEquals("the ship is no longer offered", Avatar.DEFAULT, Avatar.parse("preset:ship:#1c1c1e"))
+        assertEquals("the ship is gone; its colour stays", Avatar.Preset("bell", "#c2410c"), Avatar.parse("preset:ship:#c2410c"))
+        assertEquals(Avatar.Local("x.webp"), Avatar.parse("local:x.webp"))
         assertEquals(Avatar.Local("ab-12.jpg"), Avatar.parse("local:ab-12.jpg"))
         assertEquals("local:ab-12.jpg", Avatar.parse("local:ab-12.jpg").stringValue)
         assertEquals(Avatar.DEFAULT, Avatar.parse("local:../x.jpg"))
-        assertEquals(Avatar.DEFAULT, Avatar.parse("local:x.gif"))
+        assertEquals(Avatar.DEFAULT, Avatar.parse("local:x.bmp"))
         assertEquals(Avatar.Image("https://e.com/a.png"), Avatar.parse("https://e.com/a.png"))
         assertEquals(Avatar.DEFAULT, Avatar.parse("http://e.com/a.png"))
-        assertEquals(Avatar.DEFAULT, Avatar.parse("preset:nope:#000000"))
+        assertEquals(Avatar.Preset("bell", "#000000"), Avatar.parse("preset:nope:#000000"))
         assertEquals(Avatar.DEFAULT, Avatar.parse(""))
         assertEquals(0xFF1C1C1E.toInt(), Avatar.parse("preset:box:#1c1c1e").argb)
     }

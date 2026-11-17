@@ -119,7 +119,8 @@ export async function demo<T>(name: string, args: unknown): Promise<T> {
         messages.forEach((m) => m.botId === a.botId && (m.read = true));
         return true;
       case "honk.avatar.save": {
-        const avatar = `local:demo${localAvatars.size + 1}.${a.type === "image/png" ? "png" : "jpg"}`;
+        const ext = ({ "image/png": "png", "image/webp": "webp", "image/gif": "gif" } as Record<string, string>)[a.type] ?? "jpg";
+        const avatar = `local:demo${localAvatars.size + 1}.${ext}`;
         localAvatars.set(avatar, `data:${a.type};base64,${a.data}`);
         return avatar;
       }

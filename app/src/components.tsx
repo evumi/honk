@@ -191,12 +191,16 @@ export interface ParsedAvatar {
   url: string;
 }
 
-/** Reads `preset:<icon>:<#rrggbb>`, an https URL or `local:<file>`; anything else (a removed icon too) is the default bell. */
+/**
+ * Reads `preset:<icon>:<#rrggbb>`, an https URL or `local:<file>`; anything
+ * else is the default bell. A preset whose icon the app no longer offers (the
+ * ship) keeps its colour with the bell.
+ */
 export function parseAvatar(s: string): ParsedAvatar {
   if (s.startsWith("https://")) return { kind: "image", icon: "bell", color: "#0a6ed1", url: s };
-  if (/^local:[A-Za-z0-9_-]+\.(jpg|png)$/.test(s)) return { kind: "local", icon: "bell", color: "#0a6ed1", url: "" };
+  if (/^local:[A-Za-z0-9_-]+\.(jpg|png|webp|gif)$/.test(s)) return { kind: "local", icon: "bell", color: "#0a6ed1", url: "" };
   const [kind, icon, color] = s.split(":");
-  if (kind === "preset" && ICONS[icon] && /^#[0-9a-fA-F]{6}$/.test(color ?? "")) return { kind: "preset", icon, color, url: "" };
+  if (kind === "preset" && /^#[0-9a-fA-F]{6}$/.test(color ?? "")) return { kind: "preset", icon: ICONS[icon] ? icon : "bell", color, url: "" };
   return { kind: "preset", icon: "bell", color: "#0a6ed1", url: "" };
 }
 
@@ -213,9 +217,11 @@ export function localImage(avatar: string): string | null {
   const v = localImages()[avatar];
   if (v === undefined && !loading.has(avatar)) {
     loading.add(avatar);
-    void api.avatarImage(avatar)
-      .catch(() => null)
-      .then((url) => localImages.update((m) => ({ ...m, [avatar]: url })));
+    api.avatarImage(avatar).then(
+      (url) => localImages.update((m) => ({ ...m, [avatar]: url })),
+      // Not answered (the host not ready yet): ask again on the next render.
+      () => loading.delete(avatar),
+    );
   }
   return v ?? null;
 }
@@ -226,13 +232,33 @@ export function rememberLocalImage(avatar: string, url: string) {
   localImages.update((m) => ({ ...m, [avatar]: url }));
 }
 
+/** Image sources that failed to load; their avatars fall back to the glyph. */
+const broken = signal<Record<string, true>>({});
+
+/** An avatar image that falls back to `fallback` when it cannot be shown. */
+export function AvatarImage(props: { src: string | null; size: number; fallback: JSX.Element; testID?: string }) {
+  const ok = () => props.src && !broken()[props.src];
+  return (
+    <If when={ok()} else={props.fallback}>
+      <Image
+        testID={props.testID}
+        src={props.src ?? ""}
+        onError={() => props.src && broken.update((m) => ({ ...m, [props.src!]: true }))}
+        style={{ width: props.size, height: props.size, borderRadius: props.size / 2 }}
+      />
+    </If>
+  );
+}
+
 export function Avatar(props: { avatar: string; size: number; iconScale?: number }) {
   const a = () => parseAvatar(props.avatar);
   const src = () => (a().kind === "local" ? localImage(props.avatar) : a().kind === "image" ? a().url : null);
   return (
-    <If when={src()} else={<Glyph icon={a().icon} color={a().color} size={props.size} hairline={palette().hairline} iconScale={props.iconScale} />}>
-      <Image src={src() ?? ""} style={{ width: props.size, height: props.size, borderRadius: props.size / 2 }} />
-    </If>
+    <AvatarImage
+      src={src()}
+      size={props.size}
+      fallback={<Glyph icon={a().icon} color={a().color} size={props.size} hairline={palette().hairline} iconScale={props.iconScale} />}
+    />
   );
 }
 

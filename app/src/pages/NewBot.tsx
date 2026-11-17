@@ -1,6 +1,6 @@
-import { Image, Picker, signal, Text, View } from "nsh";
+import { Picker, signal, Text, View } from "nsh";
 import { AlertDialog, Input, NavPage } from "nsh/base";
-import { COLORS, FormBody, Glyph, Icon, ICONS, localImage, parseAvatar, presetAvatar, rememberLocalImage } from "../components";
+import { AvatarImage, COLORS, FormBody, Glyph, Icon, ICONS, localImage, parseAvatar, presetAvatar, rememberLocalImage } from "../components";
 import { LEVELS } from "../format";
 import { api, type Level } from "../host";
 import { chatOf, nav, reload } from "../store";
@@ -8,8 +8,10 @@ import { palette, type Palette } from "../theme";
 import { tr } from "../i18n";
 
 const ICON_NAMES = Object.keys(ICONS);
-/** The largest picked image kept, after the picker scaled it to 512 px. */
-const MAX_IMAGE = 512 * 1024;
+/** The largest picked image kept (a 512 px PNG can be close to this); the hosts check it too. */
+const MAX_IMAGE = 1024 * 1024;
+/** The formats the hosts keep; anything else the picker gives is sent as JPEG and refused there. */
+const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
 
 /** A selection ring in the colour itself, unless that colour would vanish (black on a dark page). */
 function ring(c: string, p: Palette): string {
@@ -62,7 +64,7 @@ export function NewBot(props: { botId?: string }) {
     try {
       const [picked] = await Picker.pickImages({ maxDimension: 512, quality: 0.85 });
       if (!picked) return;
-      const type = picked.file.type === "image/png" ? "image/png" : "image/jpeg";
+      const type = IMAGE_TYPES.includes(picked.file.type) ? picked.file.type : "image/jpeg";
       const bytes = new Uint8Array(await picked.file.arrayBuffer());
       if (bytes.length > MAX_IMAGE) throw new Error(tr("图片太大，请换一张小一点的"));
       let bin = "";
@@ -72,7 +74,8 @@ export function NewBot(props: { botId?: string }) {
       rememberLocalImage(avatar, `data:${type};base64,${data}`);
       custom.set(avatar);
     } catch (e) {
-      await AlertDialog.show({ title: tr("无法使用这张图片"), description: String((e as Error)?.message ?? e), actions: [{ id: "ok", label: tr("好") }] });
+      // The hosts' messages are Chinese; tr() gives their English where the table has it.
+      await AlertDialog.show({ title: tr("无法使用这张图片"), description: tr(String((e as Error)?.message ?? e)), actions: [{ id: "ok", label: tr("好") }] });
     }
   };
 
@@ -99,9 +102,7 @@ export function NewBot(props: { botId?: string }) {
       >
         {/* What the bot will look like in the chat list. */}
         <View style={{ alignItems: "center", gap: 10, paddingTop: 20, paddingBottom: 8 }}>
-          <If when={customImage()} else={<Glyph icon={icon()} color={color()} size={88} hairline={p().hairline} />}>
-            <Image testID="custom-avatar" src={customImage() ?? ""} style={{ width: 88, height: 88, borderRadius: 44 }} />
-          </If>
+          <AvatarImage testID="custom-avatar" src={customImage()} size={88} fallback={<Glyph icon={icon()} color={color()} size={88} hairline={p().hairline} />} />
           <Text style={{ fontSize: 20, fontWeight: "600", color: name().trim() ? p().text : p().hint, numberOfLines: 1 }}>
             {name().trim() || tr("新 Bot")}
           </Text>
@@ -145,16 +146,15 @@ export function NewBot(props: { botId?: string }) {
                   borderWidth: 2, borderColor: custom() ? p().accent : "transparent",
                 }}
               >
-                <If
-                  when={customImage()}
-                  else={
+                <AvatarImage
+                  src={customImage()}
+                  size={42}
+                  fallback={
                     <View style={{ width: 42, height: 42, borderRadius: 21, backgroundColor: p().pill, alignItems: "center", justifyContent: "center" }}>
                       <Icon name="plus" color={p().hint} size={22} />
                     </View>
                   }
-                >
-                  <Image src={customImage() ?? ""} style={{ width: 42, height: 42, borderRadius: 21 }} />
-                </If>
+                />
               </View>
             </View>
           </View>

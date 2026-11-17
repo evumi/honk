@@ -13,14 +13,10 @@ import java.util.UUID
 class LocalAvatars(private val dir: File) {
     class SaveException(message: String) : IOException(message)
 
-    /** Keeps a JPEG or PNG and returns the avatar that names it, `local:<name>`. */
+    /** Keeps a JPEG, PNG, WebP or GIF and returns the avatar that names it, `local:<name>`. */
     fun save(data: ByteArray): String {
         if (data.size > MAX_BYTES) throw SaveException("图片太大，请换一张小一点的")
-        val ext = when {
-            data.startsWith(0xFF, 0xD8, 0xFF) -> "jpg"
-            data.startsWith(0x89, 0x50, 0x4E, 0x47) -> "png"
-            else -> throw SaveException("只支持 JPEG 和 PNG 图片")
-        }
+        val ext = format(data) ?: throw SaveException(NOT_AN_IMAGE)
         dir.mkdirs()
         val name = UUID.randomUUID().toString() + "." + ext
         val tmp = File(dir, "$name.tmp")
@@ -40,7 +36,7 @@ class LocalAvatars(private val dir: File) {
     /** The image as a `data:` URL, for the nsh app to show. */
     fun dataUrl(avatar: String): String? {
         val d = data(avatar) ?: return null
-        val type = if (avatar.endsWith(".png")) "image/png" else "image/jpeg"
+        val type = TYPES[avatar.substringAfterLast('.')] ?: "image/jpeg"
         return "data:$type;base64," + Base64.getEncoder().encodeToString(d)
     }
 
@@ -55,12 +51,27 @@ class LocalAvatars(private val dir: File) {
     }
 
     companion object {
-        /** The most a picked image may weigh (the app scales it to 512 px first). */
-        const val MAX_BYTES = 512 * 1024
+        /** The most a picked image may weigh (the app scales it to 512 px first; a PNG that size can still be close to 1 MB). */
+        const val MAX_BYTES = 1024 * 1024
+
+        const val NOT_AN_IMAGE = "只支持 JPEG、PNG、WebP 和 GIF 图片"
+
+        /** The formats kept, by file extension, with their media types. */
+        private val TYPES = mapOf("jpg" to "image/jpeg", "png" to "image/png", "webp" to "image/webp", "gif" to "image/gif")
+
+        /** The format of an image's bytes, by its signature, as a file extension. */
+        fun format(d: ByteArray): String? = when {
+            d.startsWith(0xFF, 0xD8, 0xFF) -> "jpg"
+            d.startsWith(0x89, 0x50, 0x4E, 0x47) -> "png"
+            d.startsWith(*"GIF8".map { it.code }.toIntArray()) -> "gif"
+            d.size >= 12 && d.startsWith(*"RIFF".map { it.code }.toIntArray()) &&
+                String(d.copyOfRange(8, 12), Charsets.US_ASCII) == "WEBP" -> "webp"
+            else -> null
+        }
 
         fun isValidName(name: String): Boolean {
             val parts = name.split(".")
-            return parts.size == 2 && (parts[1] == "jpg" || parts[1] == "png") && parts[0].isNotEmpty() &&
+            return parts.size == 2 && parts[1] in TYPES && parts[0].isNotEmpty() &&
                 parts[0].all { it in 'a'..'z' || it in 'A'..'Z' || it in '0'..'9' || it == '-' || it == '_' }
         }
 

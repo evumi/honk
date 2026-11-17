@@ -13,7 +13,7 @@ sealed class Avatar {
     data class Preset(val icon: String, val color: String) : Avatar()
     data class Image(val url: String) : Avatar()
 
-    /** A file in [LocalAvatars]: `<name>.jpg` or `<name>.png`. */
+    /** A file in [LocalAvatars]: `<name>.jpg`, `.png`, `.webp` or `.gif`. */
     data class Local(val name: String) : Avatar()
 
     val stringValue: String
@@ -41,8 +41,9 @@ sealed class Avatar {
             if (s.startsWith("https://") && s.length > "https://".length) return Image(s)
             if (s.startsWith("local:") && LocalAvatars.isValidName(s.removePrefix("local:"))) return Local(s.removePrefix("local:"))
             val parts = s.split(":")
-            if (parts.size == 3 && parts[0] == "preset" && parts[1] in ICONS && isHex(parts[2])) {
-                return Preset(parts[1], parts[2])
+            if (parts.size == 3 && parts[0] == "preset" && isHex(parts[2])) {
+                // An icon the app no longer offers (the ship) keeps its colour with the bell.
+                return Preset(if (parts[1] in ICONS) parts[1] else "bell", parts[2])
             }
             return DEFAULT
         }
