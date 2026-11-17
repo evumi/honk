@@ -74,6 +74,7 @@ bot token 形如 `<bot id>:<32 位随机串>`；token 和 device secret 都只�
 | `/bot<token>/editMessageData` | 发送方 | `message_id` 或 `id` + `data`，卡片原地更新，不弹通知 |
 | `/bot<token>/deleteMessage` | 发送方 | `message_id` 或 `id` |
 | `/bot<token>/getMe` | 发送方 | 测试 token |
+| `GET /v1/info` | App | `{name:"honk", version, api}`，切换网关前用来确认地址是 Honk 网关 |
 | `POST /v1/devices` | App | 注册，返回 `device_secret`（只返回这一次） |
 | `GET` / `PUT` / `DELETE /v1/devices/me` | App | 读取；更新 push token；删除设备及全部数据 |
 | `GET` / `POST /v1/bots`，`GET` / `PATCH` / `DELETE /v1/bots/:id`，`POST /v1/bots/:id/token` | App | bot 管理；token 只在创建和重置时返回 |
@@ -85,6 +86,7 @@ bot token 形如 `<bot id>:<32 位随机串>`；token 和 device secret 都只�
 - **卡片**（`internal/widget`）：原文 ≤ 32KB，zlib 9 压缩后 ≤ 4KB，`data` ≤ 1KB。按白名单清理：删掉脚本、`on*` 属性、表单控件、外部资源；链接只允许 `https://`、`#id`、`{{key}}`；CSS 里禁止 `@import`、`expression()`、非 data: 的 `url()` 和反斜杠转义。
 - **字段长度**：`title` ≤ 256 字，`body` ≤ 4096 字，`id` ≤ 128 字节，`icon` 必须是 https。
 - **限流**：每个 bot 每秒 5 条，突发 20 条（可配）。
+- **模拟器身份**：push token 以 `simulator-` 开头的设备照常注册和排队，但不发推送（见第 5 节「模拟器开发」）。
 - **清理**：每小时删除过期和 ack 超过 1 天的消息。
 
 ## 5. iOS（ios/）
@@ -121,15 +123,26 @@ bot token 形如 `<bot id>:<32 位随机串>`；token 和 device secret 都只�
 ### App
 
 - `AppDelegate`：申请通知权限，注册推送；收到静默推送就拉取并应用修改或删除；正在看的会话来消息时不弹横幅；点击通知时，有 `url` 就打开，否则进入对应会话。
-- `HonkService`：注册或更新 push token（网关返回 401 时自动重新注册）、刷新 bot 列表、同步、角标。
+- `HonkService`：注册或更新 push token（网关返回 401 时自动重新注册）、刷新 bot 列表、同步、角标、切换网关。
+  - 注册状态有四种：等待推送 token、注册中、已注册、失败（带原因）。设置页显示状态，失败时可以重试；重试会先检查已有设备，再用上次的 token 注册，都没有就重新向 APNs 要 token。
+  - 切换网关：先请求 `/v1/info` 确认是 Honk 网关，地址存进 App Group（NSE 也读这里），然后清空本机的 bot、消息、token，在新网关上重新注册。旧网关上的 bot 不受影响。
 - `RootViewController`：全屏 `NshAppView`。加载 `nsh/bundle.nshc`，按 `capabilities.json` 授权；设置了环境变量 `NSH_DEV_URL` 时改连 `nsh dev` 做热更新。
 - `NshBridge`：nsh App 调用的 `honk.*` 宿主函数，见第 6 节。
+
+### 模拟器开发
+
+- **架构**：nsh 的 xcframework 只有 arm64 模拟器切片，所以模拟器构建只支持 Apple 芯片的 Mac。`Base.xcconfig` 对模拟器排除了 x86_64，`generic/platform=iOS Simulator` 也能构建。
+- **构建入口**：`make sim` 构建，`make run-sim` 构建、启动模拟器、安装并打开；`SIM="iPhone 17 Pro"` 指定机型。没在 `Local.xcconfig` 配团队时用 ad hoc 签名，entitlements 照常嵌入。
+- **模拟器身份（只在 Debug + 模拟器下生效）**：拿不到 APNs token（未签名构建、APNs 报错，或 8 秒没回应）时，用固定的 `simulator-<uuid>` 身份注册。网关不给这类 token 发推送，App 在前台时每 10 秒同步一次，所以可以连真实网关完成注册、建 bot、发消息、同步。Release 构建和真机不会走这条路径。
+- **Keychain 回退**：未签名或 ad hoc 构建没有共享 Keychain 组的权限，凭据会退回存到 App 自己的 Keychain。这种情况下 NSE 读不到凭据，横幅只显示推送自带的文字。
 
 ### 配置
 
 - `Config/Base.xcconfig`：bundle ID、App Group、Keychain 组、网关地址
 - `Config/Local.xcconfig`（不入库）：自己的 `DEVELOPMENT_TEAM` 和网关地址
-- Capabilities：Push Notifications、App Groups、Keychain Sharing、Communication Notifications、Time Sensitive Notifications
+- Capabilities：Push Notifications、App Groups、Keychain Sharing、Communication Notifications、Time Sensitive Notifications。
+  - 这些权限写在 `project.yml` 的 `entitlements.properties` 里，由 XcodeGen 生成。只写 `path` 时 XcodeGen 会把文件清成空 dict。
+  - `make project` 之后会跑 `scripts/check-entitlements.sh`，缺任何一项都会失败。
 
 ## 6. nsh App（app/）与宿主协议
 
@@ -147,7 +160,7 @@ App 用 TSX 写，跑在 QuickJS 上。页面：
 
 | 调用 | 参数 | 返回 |
 | --- | --- | --- |
-| `honk.status` | | `{registered, gatewayURL, notifications}` |
+| `honk.status` | | `{registered, registration, registrationError?, pushMode, gatewayURL, notifications}` |
 | `honk.chats` | | `Chat[]`：`{bot, muted, pinned, unread, last}` |
 | `honk.messages` | `{botId, before?, limit?}` | `Message[]`，新的在前 |
 | `honk.markRead` / `honk.focus` | `{botId}` | |
@@ -159,6 +172,10 @@ App 用 TSX 写，跑在 QuickJS 上。页面：
 | `honk.message.delete` | `{messageId}` | 只删本机 |
 | `honk.chat.clear` | `{botId}` | 只删本机 |
 | `honk.notifications.open` | | 打开系统设置 |
+| `honk.register.retry` | | 重试注册，返回新的 status |
+| `honk.gateway.get` | | `{url, defaultURL, custom}` |
+| `honk.gateway.test` | `{url}` | `{ok, url?, version?, error?}` |
+| `honk.gateway.set` | `{url}`（`null` 表示恢复默认） | 切换网关，清空本机数据并重新注册 |
 
 宿主发给 App 的事件有两个：
 
@@ -209,7 +226,7 @@ cd ios && make setup                     # 下载 nsh 框架并生成 Xcode 工�
 
 ## 9. 待办与风险
 
-- [ ] 在装了 Xcode 的机器上编译 iOS 工程，修正类型错误，真机跑通 APNs
+- [ ] 真机跑通 APNs、NSE 和通讯通知头像（模拟器已能连真实网关完成注册、建 bot、发送和同步）
 - [ ] Android 宿主：FirebaseMessagingService、每个 bot 一个 NotificationChannel、MessagingStyle 头像
 - [ ] 卡片 v2：JS、`TelegramWidget` 兼容接口、按钮回调（需要 bot webhook）
 - [ ] 推送内容端到端加密（参考 Bark 的 ciphertext），消息在网关上只存密文

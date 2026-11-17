@@ -21,6 +21,8 @@ Monorepo. `gateway/` is the Go module `github.com/evumi/honk/gateway`; `app/` (n
 - `ios/HonkKit` is a Swift package shared by the app and the Notification Service Extension. `cd ios && make test` runs its swift-testing tests, also with only the Command Line Tools (the Makefile adds the Testing framework path). Tests use swift-testing, not XCTest, for that reason.
 - The Xcode project is generated: `cd ios && make setup` fetches the nsh frameworks (`scripts/fetch-nsh-ios.sh`, sha256-checked) and runs XcodeGen on `project.yml`. Neither `Honk.xcodeproj` nor `Frameworks/` is committed. Team and gateway go in `Config/Local.xcconfig` (ignored).
 - The app and the extension share the SQLite store (App Group) and credentials (keychain access group). `LocalStore.apply` must stay idempotent: the extension and a later sync both apply the same item.
+- Entitlements are generated from `entitlements.properties` in `project.yml`; never leave only a `path` (XcodeGen then writes an empty dict). `make project` runs `scripts/check-entitlements.sh`.
+- Simulator builds are arm64 only (nsh ships no x86_64 simulator slice): `make sim` / `make run-sim`. Debug simulator builds without an APNs token register as `simulator-<uuid>` and poll; the gateway skips pushes to such tokens.
 
 ## nsh app (app/)
 
