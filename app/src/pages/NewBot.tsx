@@ -5,6 +5,7 @@ import { LEVELS } from "../format";
 import { api, type Level } from "../host";
 import { nav, reload } from "../store";
 import { palette, type Palette } from "../theme";
+import { tr } from "../i18n";
 
 const ICON_NAMES = Object.keys(ICONS);
 
@@ -30,24 +31,24 @@ export function NewBot() {
       await reload();
       nav.replace({ name: "botCreated", botId: bot.id, token, botName: bot.name, avatar: bot.avatar });
     } catch (e) {
-      await AlertDialog.show({ title: "创建失败", description: String((e as Error)?.message ?? e), actions: [{ id: "ok", label: "好" }] });
+      await AlertDialog.show({ title: tr("创建失败"), description: String((e as Error)?.message ?? e), actions: [{ id: "ok", label: tr("好") }] });
     } finally {
       busy.set(false);
     }
   };
 
   return (
-    <NavPage title="新建 Bot" testID="new-bot-page">
+    <NavPage title={tr("新建 Bot")} testID="new-bot-page">
       <View style={{ flex: 1, backgroundColor: p().groupedBg }}>
         {/* What the bot will look like in the chat list. */}
         <View style={{ alignItems: "center", gap: 10, paddingTop: 20, paddingBottom: 8 }}>
           <Glyph icon={icon()} color={color()} size={88} hairline={p().hairline} />
           <Text style={{ fontSize: 20, fontWeight: "600", color: name().trim() ? p().text : p().hint, numberOfLines: 1 }}>
-            {name().trim() || "新 Bot"}
+            {name().trim() || tr("新 Bot")}
           </Text>
         </View>
 
-        <Caption p={p()} text="外观" />
+        <Caption p={p()} text={tr("外观")} />
         <View style={{ marginLeft: 16, marginRight: 16, borderRadius: 12, backgroundColor: p().card, paddingTop: 14, paddingBottom: 14 }}>
           <View style={{ flexDirection: "row", flexWrap: "wrap", rowGap: 12, paddingLeft: 8, paddingRight: 8 }}>
             <Each of={ICON_NAMES}>
@@ -95,22 +96,22 @@ export function NewBot() {
           </View>
         </View>
 
-        <Caption p={p()} text="名称" />
+        <Caption p={p()} text={tr("名称")} />
         <View style={{ marginLeft: 16, marginRight: 16, borderRadius: 12, backgroundColor: p().card, paddingLeft: 16, paddingRight: 16, height: 48, justifyContent: "center" }}>
           <Input
             testID="bot-name"
             value={name()}
             onChange={({ value }) => name.set(value)}
             onSubmit={() => void create()}
-            placeholder="例如：Berth 部署"
+            placeholder={tr("例如：Berth 部署")}
             maxLength={64}
             returnKeyType="done"
             style={{ fontSize: 17, color: p().text }}
           />
         </View>
-        <Footer p={p()} text="显示在会话列表和锁屏通知上。" />
+        <Footer p={p()} text={tr("显示在会话列表和锁屏通知上。")} />
 
-        <Caption p={p()} text="默认提醒级别" />
+        <Caption p={p()} text={tr("默认提醒级别")} />
         <View style={{ marginLeft: 16, marginRight: 16, padding: 2, borderRadius: 9, backgroundColor: p().segmentTrack, flexDirection: "row" }}>
           <Each of={LEVELS}>
             {(l) => (
@@ -124,12 +125,12 @@ export function NewBot() {
                   boxShadow: level() === l().id ? "0 1px 3px rgba(0,0,0,0.12)" : undefined,
                 }}
               >
-                <Text style={{ fontSize: 14, fontWeight: level() === l().id ? "600" : "500", color: p().text }}>{l().label}</Text>
+                <Text style={{ fontSize: 14, fontWeight: level() === l().id ? "600" : "500", color: p().text }}>{tr(l().label)}</Text>
               </View>
             )}
           </Each>
         </View>
-        <Footer p={p()} text="静默只进通知中心，不响铃不亮屏；时效性可以穿透专注模式。发送时用 level 参数可以单条覆盖。" />
+        <Footer p={p()} text={tr("静默只进通知中心，不响铃不亮屏；时效性可以穿透专注模式。发送时用 level 参数可以单条覆盖。")} />
 
         <View style={{ flex: 1 }} />
         <View style={{ paddingLeft: 16, paddingRight: 16, paddingBottom: safeArea().bottom + 16 }}>
@@ -143,7 +144,7 @@ export function NewBot() {
               backgroundColor: ready() ? p().accent : p().pill,
             }}
           >
-            <Text style={{ fontSize: 17, fontWeight: "600", color: ready() ? "#ffffff" : p().hint }}>{busy() ? "创建中…" : "创建 Bot"}</Text>
+            <Text style={{ fontSize: 17, fontWeight: "600", color: ready() ? "#ffffff" : p().hint }}>{busy() ? tr("创建中…") : tr("创建 Bot")}</Text>
           </View>
         </View>
       </View>

@@ -5,6 +5,7 @@ import { clock, dayLabel, sameDay } from "../format";
 import { api, type Message } from "../host";
 import { chatOf, nav, reload, version } from "../store";
 import { palette, type Palette } from "../theme";
+import { tr } from "../i18n";
 import { Widget } from "../widget/Widget";
 
 export function ChatPage(props: { botId: number }) {
@@ -57,7 +58,7 @@ export function ChatPage(props: { botId: number }) {
           contentStyle={{ paddingTop: safeArea().top + 60, paddingBottom: safeArea().bottom + 76, paddingLeft: 12, paddingRight: 12, gap: 10 } as never}
           empty={
             <View style={{ alignItems: "center", paddingTop: 200 }}>
-              <Text style={{ fontSize: 15, color: p().hint }}>还没有消息。用 token 发一条试试。</Text>
+              <Text style={{ fontSize: 15, color: p().hint }}>{tr("还没有消息。用 token 发一条试试。")}</Text>
             </View>
           }
         >
@@ -86,7 +87,7 @@ export function ChatPage(props: { botId: number }) {
             activeStyle={{ opacity: 0.7 }}
             style={{ flex: 1, height: 52, borderRadius: 26, backgroundColor: p().glass, alignItems: "center", justifyContent: "center" }}
           >
-            <Text style={{ fontSize: 16, color: p().text }}>{chat()?.muted ? "取消静音" : "静音通知"}</Text>
+            <Text style={{ fontSize: 16, color: p().text }}>{chat()?.muted ? tr("取消静音") : tr("静音通知")}</Text>
           </View>
           <View
             testID="open-settings"
@@ -95,7 +96,7 @@ export function ChatPage(props: { botId: number }) {
             activeStyle={{ opacity: 0.7 }}
             style={{ flex: 1, height: 52, borderRadius: 26, backgroundColor: p().glass, alignItems: "center", justifyContent: "center" }}
           >
-            <Text style={{ fontSize: 16, color: p().text }}>Token 与设置</Text>
+            <Text style={{ fontSize: 16, color: p().text }}>{tr("Token 与设置")}</Text>
           </View>
         </View>
       </View>
@@ -114,7 +115,7 @@ function TopBar(props: { botId: number; p: Palette }) {
     >
       <View
         role="button"
-        accessibilityLabel="返回"
+        accessibilityLabel={tr("返回")}
         onPress={() => nav.pop()}
         activeStyle={{ opacity: 0.7 }}
         style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: props.p.glass, alignItems: "center", justifyContent: "center" }}
@@ -123,11 +124,11 @@ function TopBar(props: { botId: number; p: Palette }) {
       </View>
       <View style={{ flex: 1, height: 44, borderRadius: 22, backgroundColor: props.p.glass, alignItems: "center", justifyContent: "center" }}>
         <Text style={{ fontSize: 16, fontWeight: "600", color: props.p.text, numberOfLines: 1 }}>{chat()?.bot.name ?? ""}</Text>
-        <Text style={{ fontSize: 12, color: props.p.hint }}>{chat()?.muted ? "机器人 · 已静音" : "机器人"}</Text>
+        <Text style={{ fontSize: 12, color: props.p.hint }}>{chat()?.muted ? tr("机器人 · 已静音") : tr("机器人")}</Text>
       </View>
       <View
         role="button"
-        accessibilityLabel="Bot 设置"
+        accessibilityLabel={tr("Bot 设置")}
         onPress={() => nav.push({ name: "botSettings", botId: props.botId })}
       >
         <Avatar avatar={chat()?.bot.avatar ?? ""} size={44} />
@@ -147,12 +148,12 @@ function DayChip(props: { ms: number }) {
 function Bubble(props: { message: Message; p: Palette }) {
   const m = () => props.message;
   const actions = async () => {
-    const list = [{ id: "copy", label: "复制正文" }];
-    if (m().copy) list.push({ id: "copyExtra", label: "复制内容" });
-    if (m().url) list.push({ id: "open", label: "打开链接" });
+    const list = [{ id: "copy", label: tr("复制正文") }];
+    if (m().copy) list.push({ id: "copyExtra", label: tr("复制内容") });
+    if (m().url) list.push({ id: "open", label: tr("打开链接") });
     const { action } = await AlertDialog.show({
       presentation: "actionSheet",
-      actions: [...list, { id: "delete", label: "删除", role: "destructive" as const }, { id: "cancel", label: "取消", role: "cancel" as const }],
+      actions: [...list, { id: "delete", label: tr("删除"), role: "destructive" as const }, { id: "cancel", label: tr("取消"), role: "cancel" as const }],
     });
     if (action === "copy") await Clipboard.writeText(m().body);
     if (action === "copyExtra") await Clipboard.writeText(m().copy);

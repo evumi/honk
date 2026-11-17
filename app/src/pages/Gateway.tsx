@@ -4,6 +4,7 @@ import { Row, Section } from "../components";
 import { api, type Gateway, type GatewayTest } from "../host";
 import { loadStatus, nav, reload } from "../store";
 import { palette } from "../theme";
+import { tr } from "../i18n";
 
 type Check = { state: "idle" } | { state: "checking" } | { state: "done"; result: GatewayTest };
 
@@ -35,9 +36,9 @@ export function GatewayPage() {
 
   const confirmSwitch = async (target: string) => {
     const { action } = await AlertDialog.show({
-      title: "切换网关？",
-      description: `改用 ${target}。这台设备会在新网关上重新注册，当前的 Bot 和消息会从这台设备上清除；它们在原网关上仍然保留。`,
-      actions: [{ id: "cancel", label: "取消", role: "cancel" }, { id: "ok", label: "切换", role: "destructive" }],
+      title: tr("切换网关？"),
+      description: tr("改用 {url}。这台设备会在新网关上重新注册，当前的 Bot 和消息会从这台设备上清除；它们在原网关上仍然保留。", { url: target }),
+      actions: [{ id: "cancel", label: tr("取消"), role: "cancel" }, { id: "ok", label: tr("切换"), role: "destructive" }],
     });
     return action === "ok";
   };
@@ -49,7 +50,7 @@ export function GatewayPage() {
       await Promise.all([reload(), loadStatus()]);
       nav.setRoutes([{ name: "home" }]);
     } catch (e) {
-      await AlertDialog.show({ title: "切换失败", description: String((e as Error)?.message ?? e), actions: [{ id: "ok", label: "好" }] });
+      await AlertDialog.show({ title: tr("切换失败"), description: String((e as Error)?.message ?? e), actions: [{ id: "ok", label: tr("好") }] });
     } finally {
       busy.set(false);
     }
@@ -72,19 +73,19 @@ export function GatewayPage() {
 
   const status = () => {
     const c = check();
-    if (c.state === "checking") return { text: "正在连接…", color: p().hint };
-    if (c.state === "done" && c.result.ok) return { text: `连接正常 · 网关版本 ${c.result.version || "未知"}`, color: p().good };
-    if (c.state === "done") return { text: c.result.error ?? "无法连接", color: p().destructive };
+    if (c.state === "checking") return { text: tr("正在连接…"), color: p().hint };
+    if (c.state === "done" && c.result.ok) return { text: tr("连接正常 · 网关版本 {version}", { version: c.result.version || tr("未知") }), color: p().good };
+    if (c.state === "done") return { text: c.result.error ?? tr("无法连接"), color: p().destructive };
     return null;
   };
 
   return (
-    <NavPage title="网关" testID="gateway-page">
+    <NavPage title={tr("网关")} testID="gateway-page">
       <View style={{ flex: 1, backgroundColor: p().groupedBg, gap: 22, paddingTop: 16 }}>
         <Section
-          title="网关地址"
+          title={tr("网关地址")}
           p={p()}
-          footer="自己部署了 Honk 网关时，填它的地址，例如 https://honk.example.com/。只填域名时默认使用 https。"
+          footer={tr("自己部署了 Honk 网关时，填它的地址，例如 https://honk.example.com/。只填域名时默认使用 https。")}
         >
           <View style={{ height: 48, paddingLeft: 16, paddingRight: 16, justifyContent: "center" }}>
             <Input
@@ -103,7 +104,7 @@ export function GatewayPage() {
               style={{ fontSize: 16, color: p().text }}
             />
           </View>
-          <Row p={p()} label="测试连接" color={p().accent} onPress={() => void test()} testID="test-gateway" />
+          <Row p={p()} label={tr("测试连接")} color={p().accent} onPress={() => void test()} testID="test-gateway" />
           <If when={status()}>
             {(s) => (
               <View style={{ minHeight: 44, paddingLeft: 16, paddingRight: 16, flexDirection: "row", alignItems: "center", gap: 8, borderTopWidth: 0.5, borderTopColor: p().separator }}>
@@ -114,10 +115,10 @@ export function GatewayPage() {
           </If>
         </Section>
 
-        <Section title="当前" p={p()} footer="切换后这台设备会在新网关上重新注册，本机的 Bot 和消息会被清除。">
-          <Row p={p()} first label={current()?.url ?? "…"} value={current()?.custom ? "自定义" : "默认"} />
+        <Section title={tr("当前")} p={p()} footer={tr("切换后这台设备会在新网关上重新注册，本机的 Bot 和消息会被清除。")}>
+          <Row p={p()} first label={current()?.url ?? "…"} value={current()?.custom ? tr("自定义") : tr("默认")} />
           <If when={current()?.custom}>
-            <Row p={p()} label="恢复默认网关" color={p().destructive} onPress={() => void restore()} testID="restore-gateway" />
+            <Row p={p()} label={tr("恢复默认网关")} color={p().destructive} onPress={() => void restore()} testID="restore-gateway" />
           </If>
         </Section>
 
@@ -134,7 +135,7 @@ export function GatewayPage() {
             }}
           >
             <Text style={{ fontSize: 17, fontWeight: "600", color: changed() && !busy() ? "#ffffff" : p().hint }}>
-              {busy() ? "切换中…" : "保存并切换"}
+              {busy() ? tr("切换中…") : tr("保存并切换")}
             </Text>
           </View>
         </View>

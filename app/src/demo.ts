@@ -1,21 +1,26 @@
 // An in-memory stand-in for the native host, used when the app runs without
 // one (`nsh run App.tsx` on a desktop). Same names and shapes as NshBridge.
 import type { Bot, Chat, Message } from "./host";
+import { lang } from "./i18n";
 
 const now = Date.now();
+// The demo speaks the app's language, so screenshots read naturally.
+const en = lang() === "en";
+const L = (zh: string, english: string) => (en ? english : zh);
+
 const card = `<div style="padding:4px 0">
 <span style="display:inline-flex;align-items:center;gap:8px;padding:4px 12px;border-radius:999px;border:1px solid var(--tg-theme-section-separator-color)"><span style="width:8px;height:8px;border-radius:4px;background:{{dot}}"></span><span>{{status}}</span></span>
 <h3 style="margin:12px 0 2px">{{service}}</h3>
-<p style="margin:0;color:var(--tg-theme-hint-color)">部署 · {{env}}</p>
+<p style="margin:0;color:var(--tg-theme-hint-color)">${L("部署", "Deploy")} · {{env}}</p>
 <hr>
-<p><span style="color:var(--tg-theme-hint-color)">部署 ID</span>  <code>{{deploy_id}}</code></p>
-<a href="{{url}}" style="display:block;padding:12px;border-radius:12px;background:var(--tg-theme-text-color);color:var(--tg-theme-bg-color);text-align:center">在 Berth 中查看</a>
+<p><span style="color:var(--tg-theme-hint-color)">${L("部署 ID", "Deploy ID")}</span>  <code>{{deploy_id}}</code></p>
+<a href="{{url}}" style="display:block;padding:12px;border-radius:12px;background:var(--tg-theme-text-color);color:var(--tg-theme-bg-color);text-align:center">${L("在 Berth 中查看", "View in Berth")}</a>
 </div>`;
 
 const bots: Bot[] = [
-  { id: 1, name: "Berth 部署", avatar: "preset:ship:#1c1c1e", defaultLevel: "active", createdAt: now - 864e5 * 5 },
-  { id: 2, name: "服务器告警", avatar: "preset:alert:#c2410c", defaultLevel: "timeSensitive", createdAt: now - 864e5 * 4 },
-  { id: 3, name: "CI 构建", avatar: "preset:check:#2f6f3e", defaultLevel: "active", createdAt: now - 864e5 * 3 },
+  { id: 1, name: L("Berth 部署", "Berth Deploys"), avatar: "preset:ship:#1c1c1e", defaultLevel: "active", createdAt: now - 864e5 * 5 },
+  { id: 2, name: L("服务器告警", "Server Alerts"), avatar: "preset:alert:#c2410c", defaultLevel: "timeSensitive", createdAt: now - 864e5 * 4 },
+  { id: 3, name: L("CI 构建", "CI Builds"), avatar: "preset:check:#2f6f3e", defaultLevel: "active", createdAt: now - 864e5 * 3 },
 ];
 
 let nextId = 100;
@@ -25,17 +30,17 @@ const msg = (botId: number, minutesAgo: number, m: Partial<Message>): Message =>
 });
 
 const messages: Message[] = [
-  msg(3, 60 * 30, { title: "main #482 通过", body: "3 分 12 秒 · 128 个测试全部通过", read: true }),
+  msg(3, 60 * 30, { title: L("main #482 通过", "main #482 passed"), body: L("3 分 12 秒 · 128 个测试全部通过", "3m 12s · all 128 tests passed"), read: true }),
   msg(1, 95, {
-    title: "部署失败", body: "fluxship / queue 未通过健康检查，已自动回滚。", html: card, read: true,
-    data: JSON.stringify({ status: "部署失败", dot: "#d9480f", service: "fluxship / queue", env: "production", deploy_id: "dep_r8kq2", url: "https://example.com" }),
+    title: L("部署失败", "Deploy failed"), body: L("fluxship / queue 未通过健康检查，已自动回滚。", "fluxship / queue failed its health check and was rolled back."), html: card, read: true,
+    data: JSON.stringify({ status: L("部署失败", "Failed"), dot: "#d9480f", service: "fluxship / queue", env: "production", deploy_id: "dep_r8kq2", url: "https://example.com" }),
   }),
-  msg(2, 75, { title: "hk-edge-02 CPU 92%", body: "持续 5 分钟超过阈值 85%，负载 7.8。" }),
+  msg(2, 75, { title: "hk-edge-02 CPU 92%", body: L("持续 5 分钟超过阈值 85%，负载 7.8。", "Above the 85% threshold for 5 minutes, load 7.8.") }),
   msg(1, 38, {
-    title: "部署成功", body: "部署成功：sub2api / sluice (production) 已上线。", html: card,
-    data: JSON.stringify({ status: "已上线", dot: "#1a9e6e", service: "sub2api / sluice", env: "production", deploy_id: "dep_w3tn2cnlrvwtspmjmpol", url: "https://example.com" }),
+    title: L("部署成功", "Deployed"), body: L("部署成功：sub2api / sluice (production) 已上线。", "sub2api / sluice is live in production."), html: card,
+    data: JSON.stringify({ status: L("已上线", "Live"), dot: "#1a9e6e", service: "sub2api / sluice", env: "production", deploy_id: "dep_w3tn2cnlrvwtspmjmpol", url: "https://example.com" }),
   }),
-  msg(1, 25, { title: "每日部署汇总", body: "今天共 6 次部署，5 次成功，1 次回滚。" }),
+  msg(1, 25, { title: L("每日部署汇总", "Daily deploy summary"), body: L("今天共 6 次部署，5 次成功，1 次回滚。", "6 deploys today: 5 succeeded, 1 rolled back.") }),
 ];
 const DEFAULT_GATEWAY = "https://honk.example.com/";
 let gateway = DEFAULT_GATEWAY;
@@ -81,8 +86,8 @@ export async function demo<T>(name: string, args: unknown): Promise<T> {
         return { url: gateway, defaultURL: DEFAULT_GATEWAY, custom: gateway !== DEFAULT_GATEWAY };
       case "honk.gateway.test": {
         const url = normalize(String(a.url ?? ""));
-        if (!url) return { ok: false, error: "地址无效：需要 http:// 或 https:// 开头的网址" };
-        if (url.includes("bad")) return { ok: false, error: "无法连接到这个地址" };
+        if (!url) return { ok: false, error: L("地址无效：需要 http:// 或 https:// 开头的网址", "Not a valid address: it needs http:// or https://") };
+        if (url.includes("bad")) return { ok: false, error: L("无法连接到这个地址", "Can't reach this address") };
         return { ok: true, url, version: "0.1.0" };
       }
       case "honk.gateway.set": {

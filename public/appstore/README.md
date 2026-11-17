@@ -1,20 +1,24 @@
-# App Store 宣传图
+# App Store images
 
-`iphone-6.9/` 是 6.9 英寸 iPhone 的截图，尺寸 1320×2868，App Store Connect 用这一组即可，其他 iPhone 尺寸由 Apple 自动缩放。
+Six 6.9" iPhone screenshots (1320×2868) per language; App Store Connect scales them for the other iPhone sizes.
 
-| 文件 | 标题 |
-| --- | --- |
-| `01-channels.png` | 每个服务，一个频道 |
-| `02-cards.png` | 通知不止一行字 |
-| `03-lockscreen.png` | 锁屏上就认得出是谁 |
-| `04-curl.png` | 一行 curl 就能推送 |
-| `05-dark.png` | 深夜值班也看得清 |
+| File | English | 中文 |
+| --- | --- | --- |
+| `01-channels.png` | Every service gets its own channel. | 每个服务，一个频道 |
+| `02-cards.png` | Notifications that say more than one line. | 通知，不止一行字 |
+| `03-lockscreen.png` | Know who’s honking at a glance. | 锁屏上，一眼认出是谁 |
+| `04-curl.png` | Push from any script with one curl. | 一行 curl，随处推送 |
+| `05-dark.png` | Built for the night shift. | 深夜值班，也看得清 |
+| `06-self-hosted.png` | Your gateway. Your data. | 网关和数据，都在你手里 |
 
-界面变了以后重新生成（需要 macOS 和 nsh CLI）：
+`en/` goes to the English (U.S.) localization, `zh-Hans/` to Simplified Chinese.
+
+Regenerate after UI or copy changes (macOS with the nsh CLI):
 
 ```bash
-scripts/brand/capture-screens.sh build/screens   # 用演示数据截 App 界面（440×956）
-swift scripts/brand/render.swift build/screens   # 合成宣传图，同时更新 logo 和 App 图标
+scripts/brand/capture-screens.sh build/screens-en en-US
+scripts/brand/capture-screens.sh build/screens-zh zh-Hans-CN
+swift scripts/brand/render.swift build/screens-en build/screens-zh
 ```
 
-标题和副标题写在 `scripts/brand/render.swift` 的 `slides` 里。锁屏那张是直接画的，不是截图。
+The copy is in `shots` in `scripts/brand/render.swift`. The lock screen is drawn, not captured.
