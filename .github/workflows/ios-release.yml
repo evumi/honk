@@ -1,0 +1,158 @@
+# Archives the iOS app, signs it for the App Store and uploads it to TestFlight
+# with the App Store Connect CLI (asc, github.com/rorkai/App-Store-Connect-CLI).
+# Runs on a tag v1.2.3 (version 1.2.3) or by hand. The build number is the next
+# free one for the version in App Store Connect. Secrets and variables: docs/DEPLOY.zh-CN.md.
+name: iOS release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Marketing version (default: MARKETING_VERSION in ios/Config/Base.xcconfig)"
+        required: false
+      testflight_group:
+        description: "TestFlight group to distribute to (default: the TESTFLIGHT_GROUP variable; empty uploads only)"
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-release
+  cancel-in-progress: false
+
+env:
+  ASC_BYPASS_KEYCHAIN: "1"
+  ASC_NO_UPDATE: "1"
+  ASC_TELEMETRY_DISABLED: "1"
+  ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+  ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+  ASC_PRIVATE_KEY_B64: ${{ secrets.ASC_PRIVATE_KEY_B64 }}
+  ASC_APP_ID: ${{ secrets.ASC_APP_ID }}
+  BUNDLE_ID: ${{ vars.IOS_BUNDLE_ID || 'dev.evumi.honk' }}
+
+jobs:
+  testflight:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: rudrankriyam/setup-asc@v1
+
+      - name: Install tools
+        run: brew install xcodegen longbridge/tap/nsh
+
+      - name: Check App Store Connect access
+        run: asc auth status --validate
+
+      - name: Version and build number
+        id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            version="${GITHUB_REF#refs/tags/v}"
+          elif [ -n "$INPUT_VERSION" ]; then
+            version="$INPUT_VERSION"
+          else
+            version="$(sed -n 's/^MARKETING_VERSION *= *//p' ios/Config/Base.xcconfig)"
+          fi
+          build="$(asc builds next-build-number --app "$ASC_APP_ID" --version "$version" --platform IOS --initial-build-number 1 --output json | jq -r '.nextBuildNumber')"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "build=$build" >> "$GITHUB_OUTPUT"
+          echo "Honk $version ($build)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Configure the project
+        env:
+          TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
+          GATEWAY_URL: ${{ vars.HONK_GATEWAY_URL }}
+          APP_GROUP: ${{ vars.IOS_APP_GROUP || 'group.dev.evumi.honk' }}
+          KEYCHAIN_GROUP: ${{ vars.IOS_KEYCHAIN_GROUP || 'dev.evumi.honk.shared' }}
+        run: |
+          if [ -z "$GATEWAY_URL" ]; then echo "::error::Set the HONK_GATEWAY_URL repository variable"; exit 1; fi
+          # xcconfig reads // as a comment: write https:/$()/host.
+          url="${GATEWAY_URL/:\/\//:/\$()/}"
+          cat > ios/Config/Local.xcconfig <<EOF
+          DEVELOPMENT_TEAM = $TEAM_ID
+          HONK_BUNDLE_ID = $BUNDLE_ID
+          HONK_APP_GROUP = $APP_GROUP
+          HONK_KEYCHAIN_GROUP = $KEYCHAIN_GROUP
+          HONK_GATEWAY_URL = $url
+          MARKETING_VERSION = ${{ steps.version.outputs.version }}
+          CURRENT_PROJECT_VERSION = ${{ steps.version.outputs.build }}
+          EOF
+          scripts/fetch-nsh-ios.sh
+          make -C ios project
+
+      - name: Install the signing identity and profiles
+        env:
+          P12_B64: ${{ secrets.IOS_DIST_P12_B64 }}
+          P12_PASSWORD: ${{ secrets.IOS_DIST_P12_PASSWORD }}
+        run: |
+          set -euo pipefail
+          s="$RUNNER_TEMP/signing"
+          mkdir -p "$s" .asc/signing
+          echo "$P12_B64" | base64 --decode > "$s/dist.p12"
+          printf '%s' "$P12_PASSWORD" > "$s/p12-password"
+          openssl rand -hex 24 > "$s/keychain-password"
+          chmod 600 "$s"/*
+          asc signing keychain install --identity "$s/dist.p12" --identity-password-file "$s/p12-password" \
+            --keychain "$s/honk.keychain-db" --keychain-password-file "$s/keychain-password" \
+            --add-to-search-list --confirm --output json
+          profiles=()
+          for bundle in "$BUNDLE_ID" "$BUNDLE_ID.NotificationService"; do
+            asc signing fetch --bundle-id "$bundle" --profile-type IOS_APP_STORE --create-missing \
+              --output ".asc/signing/$bundle" --format json > ".asc/signing/$bundle.json"
+            profile="$(jq -r '.profileFile' ".asc/signing/$bundle.json")"
+            asc profiles local install --path "$profile" --output json
+            profiles+=(--profile "$profile")
+          done
+          asc xcode signing plan --project ios/Honk.xcodeproj "${profiles[@]}" --configuration Release \
+            --export-options-out .asc/artifacts/ExportOptions.plist --output json > .asc/signing/plan-result.json
+          if [ "$(jq -r '.ready' .asc/signing/plan-result.json)" != "true" ]; then
+            cat .asc/signing/plan-result.json
+            echo "::error::A target has no matching App Store profile"
+            exit 1
+          fi
+          asc xcode signing apply --plan .asc/xcode/signing/plan.json --confirm --output json
+
+      - name: Archive
+        run: |
+          asc xcode archive --project ios/Honk.xcodeproj --scheme Honk --configuration Release \
+            --archive-path .asc/artifacts/Honk.xcarchive --destination generic/platform=iOS --clean --overwrite \
+            --xcodebuild-flag=MARKETING_VERSION=${{ steps.version.outputs.version }} \
+            --xcodebuild-flag=CURRENT_PROJECT_VERSION=${{ steps.version.outputs.build }} \
+            --output json
+
+      - name: Export the IPA
+        run: |
+          asc xcode export --archive-path .asc/artifacts/Honk.xcarchive \
+            --export-options .asc/artifacts/ExportOptions.plist \
+            --ipa-path .asc/artifacts/Honk.ipa --overwrite --timeout 10m --output json
+
+      - name: Upload to TestFlight
+        env:
+          GROUP: ${{ inputs.testflight_group || vars.TESTFLIGHT_GROUP }}
+        run: |
+          if [ -n "$GROUP" ]; then
+            asc publish testflight --app "$ASC_APP_ID" --ipa .asc/artifacts/Honk.ipa --group "$GROUP" --wait --poll-interval 15s --output json
+          else
+            asc publish testflight --app "$ASC_APP_ID" --ipa .asc/artifacts/Honk.ipa --upload-only --output json
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Honk-${{ steps.version.outputs.version }}-${{ steps.version.outputs.build }}.ipa
+          path: .asc/artifacts/Honk.ipa
+          retention-days: 14
+
+      - name: Remove the signing keychain
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/signing/honk.keychain-db" ]; then
+            asc signing keychain delete --keychain "$RUNNER_TEMP/signing/honk.keychain-db" --confirm || true
+          fi
+          rm -rf "$RUNNER_TEMP/signing"

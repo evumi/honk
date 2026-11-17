@@ -1,0 +1,25 @@
+# Run the gateway from the published image. Put the push credentials in
+# ./secrets (not committed) and the settings in .env:
+#   secrets/apns.p8   the APNs auth key (.p8)
+#   secrets/fcm.json  the Firebase service account JSON
+# Serve it behind a reverse proxy with HTTPS (see docs/DEPLOY.zh-CN.md).
+services:
+  honk:
+    image: ghcr.io/evumi/honk-gateway:${HONK_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - honk-data:/data
+      - ./secrets:/secrets:ro
+    environment:
+      HONK_APNS_KEY_FILE: /secrets/apns.p8
+      HONK_APNS_KEY_ID: ${HONK_APNS_KEY_ID:?set HONK_APNS_KEY_ID}
+      HONK_APNS_TEAM_ID: ${HONK_APNS_TEAM_ID:?set HONK_APNS_TEAM_ID}
+      HONK_APNS_TOPIC: ${HONK_APNS_TOPIC:-dev.evumi.honk}
+      HONK_APNS_SANDBOX: ${HONK_APNS_SANDBOX:-false}
+      HONK_FCM_CREDENTIALS_FILE: /secrets/fcm.json
+      HONK_MESSAGE_TTL: ${HONK_MESSAGE_TTL:-168h}
+
+volumes:
+  honk-data:
