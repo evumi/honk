@@ -190,6 +190,7 @@ Gradle 工程，minSdk 26，compileSdk / targetSdk 35。只支持有 GMS 的设�
 - 网关地址：`-Phonk.gatewayUrl=…`、环境变量 `HONK_GATEWAY_URL` 或 `android/local.properties` 里的 `honk.gatewayUrl`，写进 `BuildConfig.GATEWAY_URL`；默认 `http://10.0.2.2:8080/`（模拟器访问开发机）。debug 构建允许明文 http；release 只在构建时的网关地址是 http 时允许，所以 https 的 release 构建里不能切到 http 网关（检查网关时会报连不上）。
 - 版本：环境变量 `HONK_VERSION_NAME` / `HONK_VERSION_CODE`，默认 `0.1.0` / `1`。
 - release 签名：环境变量 `HONK_KEYSTORE_FILE`（keystore 绝对路径）、`HONK_KEYSTORE_PASSWORD`、`HONK_KEY_ALIAS`、`HONK_KEY_PASSWORD`；没设时用 debug 签名，本地也能 `./gradlew :app:assembleRelease`。产物在 `android/app/build/outputs/apk/release/`。
+- 图标：自适应图标 `mipmap-anydpi-v26/ic_launcher`（另有 `ic_launcher_round`），背景色 `#1c1c1e`，前景和 Android 13 主题图标用的 monochrome 层都是按 `brand/honk-icon.svg` 写的 vector drawable，100 单位网格对应 66 dp 安全区，渲染结果和 `brand/android/ic_launcher_foreground.png` 逐像素一致。角标外圈是透明缺口，不是背景色描边，所以 monochrome 层也能显示。minSdk 是 26，所有设备都用自适应图标，所以没有旧版 mipmap PNG。状态栏小图标 `ic_notification` 用同一个字形。
 - nsh：`scripts/fetch-nsh-android.sh` 下载 v0.5.1 的 `nsh-embed-android.zip` 并校验 sha256，`nsh.aar`（release）和 `nsh-dev.aar`（debug）放到 `android/app/libs/`（不入库）。构建前自动运行 `scripts/build-nsh-bundle.sh`，`app/dist/nsh` 打进 `assets/nsh`。
 
 ## 6. nsh App（app/）与宿主协议

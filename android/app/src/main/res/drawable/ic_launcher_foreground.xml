@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Honk mark (brand/honk-icon.svg, 100-unit grid) on the adaptive icon's 108 dp canvas:
+     the grid is 66 dp (the safe zone), centred; it renders pixel for pixel as brand/android/ic_launcher_foreground.png. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:scaleX="0.66"
+        android:scaleY="0.66"
+        android:translateX="21"
+        android:translateY="21">
+        <!-- The H, with a 2-unit gap around the badge (the clip is the canvas minus a radius-13 circle, wound the other way). -->
+        <group>
+            <clip-path android:pathData="M0,0 L100,0 L100,100 L0,100 Z M87,27 A13,13 0 1,0 61,27 A13,13 0 1,0 87,27 Z" />
+            <path
+                android:fillColor="#FFFFFFFF"
+                android:pathData="M33,27 A6,6 0 0,1 39,33 V69 A6,6 0 0,1 33,75 A6,6 0 0,1 27,69 V33 A6,6 0 0,1 33,27 Z M63,27 A6,6 0 0,1 69,33 V69 A6,6 0 0,1 63,75 A6,6 0 0,1 57,69 V33 A6,6 0 0,1 63,27 Z M32.5,45 H63.5 A5.5,5.5 0 0,1 63.5,56 H32.5 A5.5,5.5 0 0,1 32.5,45 Z" />
+        </group>
+        <path
+            android:fillColor="#FFFF5A36"
+            android:pathData="M85,27 A11,11 0 1,1 63,27 A11,11 0 1,1 85,27 Z" />
+    </group>
+</vector>
