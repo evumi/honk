@@ -166,11 +166,14 @@ function Bubble(props: { message: Message; p: Palette }) {
     if (action === "delete") {
       // Turn to dust first, then delete; the row is recycled afterwards, so reset it.
       dissolving.set(true);
-      await dust.play();
-      await api.deleteMessage(m().id);
-      await reload();
-      dissolving.set(false);
-      await dust.progress.timing(0, { duration: 0 });
+      try {
+        // The request runs while the dust plays; a failure brings the row back.
+        await Promise.all([dust.play(), api.deleteMessage(m().id)]);
+        await reload();
+      } finally {
+        dissolving.set(false);
+        dust.reset();
+      }
     }
   };
   return (

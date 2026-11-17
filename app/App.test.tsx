@@ -93,6 +93,16 @@ test("a message turns to dust before it is deleted", async () => {
   expect(app.host.calls().find((c) => c.name === "honk.message.delete")?.data).toEqual({ messageId: 7 });
 });
 
+test("a message whose delete fails comes back", async () => {
+  const app = await open("./App.tsx", { locale: "zh-Hans-CN", host: host({ "honk.message.delete": () => { throw new Error("offline"); } }) });
+  await app.press("id:chat-1");
+  app.onDialog(() => "删除");
+  await app.longPress("id:message-7");
+  await app.waitUntil(() => app.host.calls().some((c) => c.name === "honk.message.delete"));
+  await app.wait(1200);
+  expect(app.count("id:message-7")).toBe(1);
+});
+
 test("search filters the chat list", async () => {
   const app = await open("./App.tsx", { locale: "zh-Hans-CN",  host: host() });
   await app.waitFor("text:Berth 部署");

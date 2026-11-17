@@ -206,11 +206,14 @@ function ChatRow(props: { chat: Chat; p: Palette; editing: boolean }) {
     });
     if (action !== "delete") return;
     dissolving.set(true);
-    await dust.play();
-    await api.deleteBot(c().bot.id);
-    await reload();
-    dissolving.set(false);
-    await dust.progress.timing(0, { duration: 0 });
+    try {
+      // The request runs while the dust plays; a failure brings the row back.
+      await Promise.all([dust.play(), api.deleteBot(c().bot.id)]);
+      await reload();
+    } finally {
+      dissolving.set(false);
+      dust.reset();
+    }
   };
   return (
     <Dissolve active={dissolving()} progress={dust.progress}>
