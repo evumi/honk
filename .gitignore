@@ -1,0 +1,8 @@
+gateway/bin/
+gateway/data/
+*.db
+*.db-wal
+*.db-shm
+*.p8
+*service-account*.json
+.DS_Store
