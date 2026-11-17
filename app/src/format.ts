@@ -59,5 +59,5 @@ export function levelLabel(l: string): string {
 /** The curl example for a bot. */
 export function curlExample(gateway: string, token: string): string {
   const base = gateway.endsWith("/") ? gateway : gateway + "/";
-  return `curl ${base}bot${token}/sendMessage \\\n  -d title="${tr("部署成功")}" \\\n  -d body="${tr("sub2api / sluice 已上线")}"`;
+  return `curl ${base}bot${token}/sendMessage \\\n  -d title="${tr("部署成功")}" \\\n  -d body="${tr("evumi / sluice 已上线")}"`;
 }

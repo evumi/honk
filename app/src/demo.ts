@@ -38,8 +38,8 @@ const messages: Message[] = [
   }),
   msg(2, 75, { title: "hk-edge-02 CPU 92%", body: L("持续 5 分钟超过阈值 85%，负载 7.8。", "Above the 85% threshold for 5 minutes, load 7.8.") }),
   msg(1, 38, {
-    title: L("部署成功", "Deployed"), body: L("部署成功：sub2api / sluice (production) 已上线。", "sub2api / sluice is live in production."), html: card,
-    data: JSON.stringify({ status: L("已上线", "Live"), dot: "#1a9e6e", service: "sub2api / sluice", env: "production", deploy_id: "dep_w3tn2cnlrvwtspmjmpol", url: "https://example.com" }),
+    title: L("部署成功", "Deployed"), body: L("部署成功：evumi / sluice (production) 已上线。", "evumi / sluice is live in production."), html: card,
+    data: JSON.stringify({ status: L("已上线", "Live"), dot: "#1a9e6e", service: "evumi / sluice", env: "production", deploy_id: "dep_w3tn2cnlrvwtspmjmpol", url: "https://example.com" }),
   }),
   msg(1, 25, { title: L("每日部署汇总", "Daily deploy summary"), body: L("今天共 6 次部署，5 次成功，1 次回滚。", "6 deploys today: 5 succeeded, 1 rolled back.") }),
 ];
