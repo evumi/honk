@@ -27,6 +27,7 @@ import androidx.core.content.pm.ShortcutManagerCompat
 import androidx.core.graphics.drawable.IconCompat
 import dev.evumi.honk.core.Avatar
 import dev.evumi.honk.core.Bot
+import dev.evumi.honk.core.LocalAvatars
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
@@ -185,13 +186,16 @@ class Notifier(private val context: Context) {
 
     /**
      * The avatar as a bitmap: an https image (cached, 5 s timeout, 2 MB at
-     * most), else the preset's colour with the bot name's first letter. The
+     * most) or a picked image kept on the phone, else the preset's colour with the bot name's first letter. The
      * preset icon itself is drawn by the nsh app; the notification uses the
      * letter so the app ships no icon set of its own.
      */
     fun avatarBitmap(avatar: Avatar, name: String, size: Int = 192): Bitmap? {
         if (avatar is Avatar.Image) {
             image(avatar.url)?.let { return circle(it, size) }
+        }
+        if (avatar is Avatar.Local) {
+            localAvatars(context).file(avatar.stringValue)?.let { BitmapFactory.decodeFile(it.path) }?.let { return circle(it, size) }
         }
         val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)
@@ -246,6 +250,9 @@ class Notifier(private val context: Context) {
         const val CHANNEL_PREFIX = "bot-"
         const val NOTIFICATION_ID = 1
         private const val MAX_IMAGE = 2 shl 20
+
+        /** Where picked avatar images are kept (not backed up, like the database). */
+        fun localAvatars(context: Context) = LocalAvatars(File(context.noBackupFilesDir, "avatars"))
 
         fun channelId(botId: String) = "$CHANNEL_PREFIX$botId"
 

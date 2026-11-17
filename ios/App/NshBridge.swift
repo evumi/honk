@@ -9,7 +9,7 @@ import UIKit
 /// Calls: honk.status, honk.chats, honk.messages, honk.markRead, honk.focus,
 /// honk.refresh, honk.bot.create, honk.bot.update, honk.bot.token,
 /// honk.bot.resetToken, honk.bot.delete, honk.bot.setMuted, honk.bot.setPinned,
-/// honk.message.delete, honk.chat.clear, honk.notifications.open,
+/// honk.message.delete, honk.chat.clear, honk.notifications.open, honk.avatar.save, honk.avatar.image,
 /// honk.gateway.get, honk.gateway.test, honk.gateway.set, honk.register.retry.
 /// Events: honk.changed (the store changed), honk.open { botId } (open a chat).
 @MainActor
@@ -122,6 +122,19 @@ final class NshBridge {
             try service.store.setPinned(botID: try a.require("botId"), a.bool("pinned") ?? false)
             service.changed()
             return true
+        }
+
+        // MARK: avatars (kept on this phone only)
+
+        handle("honk.avatar.save") { [service] args in
+            let base64: String = try Args(args).require("data")
+            guard let data = Data(base64Encoded: base64) else { throw LocalAvatars.SaveError.notAnImage }
+            return try LocalAvatars(appGroup: service.config.appGroup).save(data)
+        }
+        handle("honk.avatar.image") { [service] args in
+            let avatar: String = try Args(args).require("avatar")
+            if let url = LocalAvatars(appGroup: service.config.appGroup).dataURL(for: avatar) { return url }
+            return NSNull()
         }
 
         // MARK: messages

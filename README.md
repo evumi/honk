@@ -70,7 +70,7 @@ Everything except device registration needs `Authorization: Bearer <device_secre
 | --- | --- |
 | `POST /v1/devices` | `{"platform":"ios"\|"android","push_token":"…"}` → `device`, `device_secret` |
 | `GET` / `PUT` / `DELETE /v1/devices/me` | read; update the push token; delete with all bots and messages |
-| `GET` / `POST /v1/bots` | list; create with `{"name","avatar","default_level"}` → `bot`, `token` |
+| `GET` / `POST /v1/bots` | list; create with `{"name","avatar","default_level"}` → `bot`, `token`. `avatar` is `preset:<icon>:<#rrggbb>`, an https URL, or `local:<file>` for an image the user picked in the app, which stays on the phone (the gateway stores only the name) |
 | `GET` / `PATCH` / `DELETE /v1/bots/:id` | read, change, delete a bot (`:id` is the short bot id) |
 | `POST /v1/bots/:id/token` | reset the token; the old one stops working |
 | `GET /v1/messages/:id` | one queued item: `message`, `edit` or `delete` |

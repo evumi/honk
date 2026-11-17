@@ -113,7 +113,7 @@ bot token 形如 `<bot id>:<32 位随机串>`；token 和 device secret 都只�
 | `Credentials.swift` | 设备凭据和各 bot token 存 Keychain，用共享 access group，`AfterFirstUnlock`，NSE 在锁屏时也能读 |
 | `LocalStore.swift` | App Group 里的 SQLite，WAL + busy timeout，App 和 NSE 两个进程共用。`apply()` 处理 message / edit / delete，重复调用安全，返回需要撤掉的系统通知 id。bot id 是 TEXT；v2 迁移把 v1 的整数 bot id 转成文本，`renameBot` 再把它们换成短 id |
 | `Honk.swift` | `HonkConfig`（从 Info.plist 读网关地址、App Group、Keychain 组）；`ChangeSignal`（Darwin 通知，NSE 写库后通知 App 刷新）；`SyncEngine`（分页拉取、应用、ack） |
-| `Avatar.swift` | 头像格式 `preset:<icon>:<#rrggbb>` 或 https URL；图片缓存到 App Group |
+| `Avatar.swift` | 头像格式 `preset:<icon>:<#rrggbb>`、https URL 或 `local:<文件名>`；https 图片缓存到 App Group。`LocalAvatars`：用户从相册选的头像只存在本机 App Group 的 `Library/Avatars`（NSE 也能读），网关的 `avatar` 字段只存 `local:<文件名>` 这个字符串；只收 JPEG / PNG / WebP / GIF（按文件头判断），≤ 1MB；刷新时删掉没有 bot 在用、且超过 1 小时的文件。预设图标里已去掉船，旧的 `preset:ship:<颜色>` 显示为同色的铃铛 |
 | `CommunicationNotification.swift` | iOS 15 通讯通知：`INSendMessageIntent` + bot 头像 |
 
 #### NSE 流程
@@ -122,7 +122,7 @@ bot token 形如 `<bot id>:<32 位随机串>`；token 和 device secret 都只�
 2. 读 Keychain 凭据，调 `GET /v1/messages/:id`
 3. `LocalStore.apply(..., notificationID: request.identifier)` 记下这条消息对应哪个系统通知，之后删除或被替换时用来撤回
 4. 设置角标（本地未读数，静音的 bot 不算）；静音的 bot 改成 passive、无声
-5. 渲染头像（预设图标用 SF Symbol 画在色块上；https 头像先下载，5 秒超时），转成通讯通知
+5. 渲染头像（预设图标用 SF Symbol 画在色块上；https 头像先下载，5 秒超时；`local:` 头像读本机文件），转成通讯通知
 6. `ChangeSignal.post()` 通知 App
 
 任何一步失败，都照常显示推送自带的横幅。
@@ -182,7 +182,7 @@ Gradle 工程，minSdk 26，compileSdk / targetSdk 35。只支持有 GMS 的设�
   - `onDeletedMessages`：FCM 丢了积压的消息，整体同步。
 - `Notifier`：
   - 每个 bot 一个 NotificationChannel（`bot-<id>`，放在 “Bots” 分组里），用户可以在系统设置里分别调整；删除 bot 时删掉对应的 channel。
-  - MessagingStyle，发送者是代表 bot 的 `Person`，头像是 bot 头像（https 头像下载并缓存，5 秒超时、最大 2MB；预设头像画成色块加 bot 名称首字）。每个 bot 推一个长期会话快捷方式，Android 11+ 会把它显示在“对话”区。
+  - MessagingStyle，发送者是代表 bot 的 `Person`，头像是 bot 头像（https 头像下载并缓存，5 秒超时、最大 2MB；`local:` 头像读 `noBackupFilesDir/avatars` 里的文件，规则同 iOS，见 `core/LocalAvatars.kt`；预设头像画成色块加 bot 名称首字）。每个 bot 推一个长期会话快捷方式，Android 11+ 会把它显示在“对话”区。
   - 通知 tag：有 collapse id 时是 `c<bot>:<collapse id>`，同 id 的新消息原地替换旧通知；否则是 `m<msg_id>`。tag 存在本地库的 `notif_id` 里，删除、替换、标记已读时据此撤掉通知。
   - `level=passive` 或 bot 静音时不响铃、不弹横幅（`setSilent`）。正在看的会话来消息时不发通知，直接标为已读。
 - `MainActivity`：全屏 `NshView`，按 `assets/nsh/capabilities.json` 授权后 `loadAssetBundle("nsh")`；debug 构建可以用 intent extra `nshDevUrl` 连 `nsh dev` 热更新。Android 13+ 首次启动申请 `POST_NOTIFICATIONS`，被拒后在设置页里引导去系统设置。点击通知：消息有 `url` 就打开，否则发 `honk.open` 进入会话。
@@ -230,6 +230,10 @@ App 用 TSX 写，跑在 QuickJS 上。页面：
 | `honk.gateway.get` | | `{url, defaultURL, custom}` |
 | `honk.gateway.test` | `{url}` | `{ok, url?, version?, error?}` |
 | `honk.gateway.set` | `{url}`（`null` 表示恢复默认） | 切换网关，清空本机数据并重新注册 |
+| `honk.avatar.save` | `{data, type}`（base64 的 JPEG / PNG / WebP / GIF） | 存到本机，返回头像字符串 `local:<文件名>` |
+| `honk.avatar.image` | `{avatar}` | `local:` 头像的 `data:` URL；文件不在本机时是 `null` |
+
+新建 / 编辑 Bot 的图标列表最后是一个“+”：用 nsh 的 `Picker.pickImages`（`picker` 权限，缩到 512px）选一张图，经 `honk.avatar.save` 存在本机，头像字符串作为 `avatar` 发给网关。图片本身不上传，所以换手机、重装或切换网关后会变回默认头像。nsh 端用 `data:` URL 显示本机头像，加载失败时退回预设图标。
 
 宿主发给 App 的事件有两个：
 

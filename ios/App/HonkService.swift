@@ -262,6 +262,7 @@ final class HonkService {
             try store.replaceBots(bots)
             let out = try await SyncEngine(api: api, store: store).run()
             removeNotifications(out.staleNotificationIDs)
+            LocalAvatars(appGroup: config.appGroup).prune(keeping: Set(bots.map(\.avatar)))
         } catch {
             NSLog("honk: refresh failed: \(error)")
         }

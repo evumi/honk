@@ -11,7 +11,12 @@ import UserNotifications
 /// `IntentsSupported`.
 public enum CommunicationNotification {
     public static func render(_ avatar: Avatar, imageData: Data?, size: CGFloat = 120) -> Data? {
-        if case .image = avatar, let imageData, UIImage(data: imageData) != nil { return imageData }
+        switch avatar {
+        case .image, .local:
+            if let imageData, UIImage(data: imageData) != nil { return imageData }
+        case .preset:
+            break
+        }
         let (icon, color): (String, String)
         if case let .preset(i, c) = avatar { (icon, color) = (i, c) } else { (icon, color) = ("bell", "#0a6ed1") }
         let renderer = UIGraphicsImageRenderer(size: CGSize(width: size, height: size))

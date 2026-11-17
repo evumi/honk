@@ -1,6 +1,6 @@
-import { signal, Text, View } from "nsh";
+import { Picker, signal, Text, View } from "nsh";
 import { AlertDialog, Input, NavPage } from "nsh/base";
-import { COLORS, FormBody, Glyph, ICONS, parseAvatar, presetAvatar } from "../components";
+import { AvatarImage, COLORS, FormBody, Glyph, Icon, ICONS, localImage, parseAvatar, presetAvatar, rememberLocalImage } from "../components";
 import { LEVELS } from "../format";
 import { api, type Level } from "../host";
 import { chatOf, nav, reload } from "../store";
@@ -8,6 +8,10 @@ import { palette, type Palette } from "../theme";
 import { tr } from "../i18n";
 
 const ICON_NAMES = Object.keys(ICONS);
+/** The largest picked image kept (a 512 px PNG can be close to this); the hosts check it too. */
+const MAX_IMAGE = 1024 * 1024;
+/** The formats the hosts keep; anything else the picker gives is sent as JPEG and refused there. */
+const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
 
 /** A selection ring in the colour itself, unless that colour would vanish (black on a dark page). */
 function ring(c: string, p: Palette): string {
@@ -22,6 +26,13 @@ export function NewBot(props: { botId?: string }) {
   const name = signal(editing?.name ?? "");
   const icon = signal(look?.kind === "preset" ? look.icon : "bell");
   const color = signal(look?.kind === "preset" ? look.color : COLORS[0]);
+  /** A picked image (`local:<file>`), which wins over the icon and colour until one of them is chosen. */
+  const custom = signal(look?.kind === "local" ? editing!.avatar : "");
+  const customImage = () => (custom() ? localImage(custom()) : null);
+  const choose = (set: () => void) => {
+    custom.set("");
+    set();
+  };
   const level = signal<Level>(editing?.defaultLevel ?? "active");
   const busy = signal(false);
   const ready = () => name().trim() !== "" && !busy();
@@ -31,20 +42,40 @@ export function NewBot(props: { botId?: string }) {
     busy.set(true);
     try {
       if (editing) {
-        // An uploaded image avatar stays unless a preset was picked.
-        const avatar = look?.kind === "image" && icon() === "bell" && color() === COLORS[0] ? editing.avatar : presetAvatar(icon(), color());
+        // An https image avatar stays unless a preset was picked.
+        const avatar = custom() || (look?.kind === "image" && icon() === "bell" && color() === COLORS[0] ? editing.avatar : presetAvatar(icon(), color()));
         await api.updateBot(editing.id, { name: name().trim(), avatar, defaultLevel: level() });
         await reload();
         nav.pop();
         return;
       }
-      const { bot, token } = await api.createBot(name().trim(), presetAvatar(icon(), color()), level());
+      const { bot, token } = await api.createBot(name().trim(), custom() || presetAvatar(icon(), color()), level());
       await reload();
       nav.replace({ name: "botCreated", botId: bot.id, token, botName: bot.name, avatar: bot.avatar });
     } catch (e) {
       await AlertDialog.show({ title: editing ? tr("保存失败") : tr("创建失败"), description: String((e as Error)?.message ?? e), actions: [{ id: "ok", label: tr("好") }] });
     } finally {
       busy.set(false);
+    }
+  };
+
+  /** The system photo picker; the image, scaled down, is kept on this phone as the avatar. */
+  const pickImage = async () => {
+    try {
+      const [picked] = await Picker.pickImages({ maxDimension: 512, quality: 0.85 });
+      if (!picked) return;
+      const type = IMAGE_TYPES.includes(picked.file.type) ? picked.file.type : "image/jpeg";
+      const bytes = new Uint8Array(await picked.file.arrayBuffer());
+      if (bytes.length > MAX_IMAGE) throw new Error(tr("图片太大，请换一张小一点的"));
+      let bin = "";
+      for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+      const data = btoa(bin);
+      const avatar = await api.saveAvatar(data, type);
+      rememberLocalImage(avatar, `data:${type};base64,${data}`);
+      custom.set(avatar);
+    } catch (e) {
+      // The hosts' messages are Chinese; tr() gives their English where the table has it.
+      await AlertDialog.show({ title: tr("无法使用这张图片"), description: tr(String((e as Error)?.message ?? e)), actions: [{ id: "ok", label: tr("好") }] });
     }
   };
 
@@ -71,7 +102,7 @@ export function NewBot(props: { botId?: string }) {
       >
         {/* What the bot will look like in the chat list. */}
         <View style={{ alignItems: "center", gap: 10, paddingTop: 20, paddingBottom: 8 }}>
-          <Glyph icon={icon()} color={color()} size={88} hairline={p().hairline} />
+          <AvatarImage testID="custom-avatar" src={customImage()} size={88} fallback={<Glyph icon={icon()} color={color()} size={88} hairline={p().hairline} />} />
           <Text style={{ fontSize: 20, fontWeight: "600", color: name().trim() ? p().text : p().hint, numberOfLines: 1 }}>
             {name().trim() || tr("新 Bot")}
           </Text>
@@ -87,14 +118,14 @@ export function NewBot(props: { botId?: string }) {
                     testID={`icon-${k()}`}
                     role="button"
                     accessibilityLabel={k()}
-                    onPress={() => icon.set(k())}
+                    onPress={() => choose(() => icon.set(k()))}
                     style={{
                       width: 52, height: 52, borderRadius: 26, alignItems: "center", justifyContent: "center",
-                      borderWidth: 2, borderColor: icon() === k() ? ring(color(), p()) : "transparent",
+                      borderWidth: 2, borderColor: !custom() && icon() === k() ? ring(color(), p()) : "transparent",
                     }}
                   >
                     <If
-                      when={icon() === k()}
+                      when={!custom() && icon() === k()}
                       else={<Glyph icon={k()} color={p().pill} stroke={p().hint} size={42} />}
                     >
                       <Glyph icon={k()} color={color()} size={42} hairline={p().hairline} />
@@ -103,6 +134,29 @@ export function NewBot(props: { botId?: string }) {
                 </View>
               )}
             </Each>
+            {/* Last: an image of the user's own, from the photo library. */}
+            <View style={{ width: "20%", alignItems: "center" }}>
+              <View
+                testID="icon-upload"
+                role="button"
+                accessibilityLabel={tr("上传图片")}
+                onPress={() => void pickImage()}
+                style={{
+                  width: 52, height: 52, borderRadius: 26, alignItems: "center", justifyContent: "center",
+                  borderWidth: 2, borderColor: custom() ? p().accent : "transparent",
+                }}
+              >
+                <AvatarImage
+                  src={customImage()}
+                  size={42}
+                  fallback={
+                    <View style={{ width: 42, height: 42, borderRadius: 21, backgroundColor: p().pill, alignItems: "center", justifyContent: "center" }}>
+                      <Icon name="plus" color={p().hint} size={22} />
+                    </View>
+                  }
+                />
+              </View>
+            </View>
           </View>
           <View style={{ height: 0.5, backgroundColor: p().separator, marginTop: 14, marginBottom: 14, marginLeft: 16 }} />
           <View style={{ flexDirection: "row", justifyContent: "space-between", paddingLeft: 16, paddingRight: 16 }}>
@@ -112,10 +166,10 @@ export function NewBot(props: { botId?: string }) {
                   testID={`color-${c()}`}
                   role="button"
                   accessibilityLabel={c()}
-                  onPress={() => color.set(c())}
+                  onPress={() => choose(() => color.set(c()))}
                   style={{
                     width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center",
-                    borderWidth: 2, borderColor: color() === c() ? ring(c(), p()) : "transparent",
+                    borderWidth: 2, borderColor: !custom() && color() === c() ? ring(c(), p()) : "transparent",
                   }}
                 >
                   <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: c(), borderWidth: 1, borderColor: p().hairline }} />

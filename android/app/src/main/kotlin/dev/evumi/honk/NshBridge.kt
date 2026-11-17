@@ -13,11 +13,13 @@ import com.longbridge.nsh.NshView
 import dev.evumi.honk.core.Bot
 import dev.evumi.honk.core.ChatSummary
 import dev.evumi.honk.core.Gateway
+import dev.evumi.honk.core.LocalAvatars
 import dev.evumi.honk.core.StoredMessage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import java.util.Base64
 
 /**
  * The host calls the nsh app makes (`host.call("honk.…")`) and the events it
@@ -28,7 +30,7 @@ import org.json.JSONObject
  * Calls: honk.status, honk.chats, honk.messages, honk.markRead, honk.focus,
  * honk.refresh, honk.bot.create, honk.bot.update, honk.bot.token,
  * honk.bot.resetToken, honk.bot.delete, honk.bot.setMuted, honk.bot.setPinned,
- * honk.message.delete, honk.chat.clear, honk.notifications.open,
+ * honk.message.delete, honk.chat.clear, honk.notifications.open, honk.avatar.save, honk.avatar.image,
  * honk.gateway.get, honk.gateway.test, honk.gateway.set, honk.register.retry.
  * Events: honk.changed (the store changed), honk.open { botId } (open a chat).
  *
@@ -135,6 +137,17 @@ class NshBridge(
         }
 
         // messages
+
+        // avatars (kept on this phone only)
+        handle("honk.avatar.save") { a ->
+            val bytes = try {
+                Base64.getDecoder().decode(a.requireString("data"))
+            } catch (e: IllegalArgumentException) {
+                throw LocalAvatars.SaveException(LocalAvatars.NOT_AN_IMAGE)
+            }
+            Notifier.localAvatars(activity).save(bytes)
+        }
+        handle("honk.avatar.image") { a -> Notifier.localAvatars(activity).dataUrl(a.requireString("avatar")) ?: JSONObject.NULL }
 
         handle("honk.message.delete") { a ->
             service.store.deleteMessage(a.require("messageId"))?.let { service.notifier.cancel(listOf(it)) }

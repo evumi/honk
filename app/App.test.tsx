@@ -2,7 +2,7 @@ import { expect, open, test } from "nsh/test";
 
 // The native host as NshBridge answers it, with one bot and one card message.
 function host(overrides: Record<string, unknown> = {}) {
-  const bot = { id: "aZ3kQ9xT", name: "Berth 部署", avatar: "preset:ship:#1c1c1e", defaultLevel: "active", createdAt: 1 };
+  const bot = { id: "aZ3kQ9xT", name: "Berth 部署", avatar: "preset:box:#1c1c1e", defaultLevel: "active", createdAt: 1 };
   const card = {
     id: 7, botId: "aZ3kQ9xT", title: "部署成功", body: "sub2api / sluice 已上线。",
     html: `<div><span>{{status}}</span><h3>{{service}}</h3><p>部署 ID <code>{{id}}</code></p><a href="https://example.com">在 Berth 中查看</a></div>`,
@@ -21,6 +21,8 @@ function host(overrides: Record<string, unknown> = {}) {
       "honk.bot.token": "aZ3kQ9xT:abcdefghijklmnop",
       "honk.bot.delete": true,
       "honk.message.delete": true,
+      "honk.avatar.save": (d: unknown) => ((d as { type: string }).type === "image/png" ? "local:a1b2.png" : "local:a1b2.jpg"),
+      "honk.avatar.image": null,
       "honk.gateway.get": { url: "https://gw.test/", defaultURL: "https://gw.test/", custom: false },
       "honk.gateway.test": (d: unknown) => {
         const url = (d as { url: string }).url;
@@ -63,7 +65,7 @@ test("a host event opens the chat", async () => {
 test("creates a bot and shows its token", async () => {
   const app = await open("./App.tsx", { locale: "zh-Hans-CN",  host: host() });
   await app.press("id:new-bot");
-  await app.press("id:icon-ship");
+  await app.press("id:icon-box");
   await app.press("id:color-#1c1c1e");
   await app.type("id:bot-name", "CI 构建");
   await app.press("id:create-bot");
@@ -74,7 +76,43 @@ test("creates a bot and shows its token", async () => {
   await app.wait(4000);
   expect(app.count("id:confetti")).toBe(0);
   const create = app.host.calls().find((c) => c.name === "honk.bot.create");
-  expect(create?.data).toMatchObject({ name: "CI 构建", avatar: "preset:ship:#1c1c1e", defaultLevel: "active" });
+  expect(create?.data).toMatchObject({ name: "CI 构建", avatar: "preset:box:#1c1c1e", defaultLevel: "active" });
+});
+
+test("the ship is gone and + picks an image kept on the phone", async () => {
+  const app = await open("./App.tsx", { locale: "zh-Hans-CN", host: host() });
+  await app.press("id:new-bot");
+  expect(app.count("id:icon-ship")).toBe(0);
+  // A 1×1 PNG.
+  const png = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="), (c) => c.charCodeAt(0));
+  app.onPick((pick) => {
+    expect(pick.kind).toBe("images");
+    return [{ name: "me.png", type: "image/png", data: png }];
+  });
+  await app.press("id:icon-upload");
+  await app.waitFor("id:custom-avatar");
+  const save = app.host.calls().find((c) => c.name === "honk.avatar.save");
+  expect((save?.data as { type: string }).type).toBe("image/png");
+  expect((save?.data as { data: string }).data.startsWith("iVBORw0KGgo")).toBe(true);
+  await app.type("id:bot-name", "我的 Bot");
+  await app.press("id:create-bot");
+  await app.waitFor("text:bQ7mN2pR:secret-token");
+  const create = app.host.calls().find((c) => c.name === "honk.bot.create");
+  expect(create?.data).toMatchObject({ name: "我的 Bot", avatar: "local:a1b2.png" });
+});
+
+test("choosing an icon after a picked image goes back to the preset", async () => {
+  const app = await open("./App.tsx", { locale: "zh-Hans-CN", host: host() });
+  await app.press("id:new-bot");
+  app.onPick(() => [{ name: "me.jpg", type: "image/jpeg", data: new Uint8Array([0xff, 0xd8, 0xff, 0xd9]) }]);
+  await app.press("id:icon-upload");
+  await app.waitFor("id:custom-avatar");
+  await app.press("id:icon-cloud");
+  expect(app.count("id:custom-avatar")).toBe(0);
+  await app.type("id:bot-name", "云");
+  await app.press("id:create-bot");
+  await app.waitFor("text:bQ7mN2pR:secret-token");
+  expect(app.host.calls().find((c) => c.name === "honk.bot.create")?.data).toMatchObject({ avatar: "preset:cloud:#0a6ed1" });
 });
 
 test("bot settings masks the stored token", async () => {
