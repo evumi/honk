@@ -1,6 +1,7 @@
 import { createNavStack } from "nsh/base";
 import { signal } from "nsh";
 import { api, on, type BotId, type Chat, type Status } from "./host";
+import { reuse } from "./stable";
 
 export type Route =
   | { name: "home" }
@@ -19,7 +20,7 @@ export const version = signal(0);
 
 export async function reload() {
   try {
-    chats.set(await api.chats());
+    chats.set(reuse(chats(), await api.chats(), (c) => c.bot.id));
   } catch (e) {
     console.error("chats", e);
   }

@@ -149,6 +149,7 @@ function ChatsTab(props: { p: Palette }) {
       <List
         each={shown()}
         keyExtractor={(c) => String(c.bot.id)}
+        estimatedItemSize={80}
         style={{ flex: 1 }}
         contentStyle={{ paddingBottom: safeArea().bottom + 100 } as never}
         refreshing={refreshing()}
