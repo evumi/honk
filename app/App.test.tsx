@@ -208,3 +208,43 @@ test("settings shows the installed version at the bottom", async () => {
   await app.press("id:tab-settings");
   await app.waitFor("text:Honk 0.2.0 (17)");
 });
+
+test("settings switches the language and remembers it", async () => {
+  const app = await open("./App.tsx", { locale: "zh-Hans-CN", host: host() });
+  await app.press("id:tab-settings");
+  app.onDialog(() => "English");
+  await app.press("id:language-row");
+  await app.waitFor("text:Language");
+  expect(app.storage()["honk.language"]).toBe("en");
+});
+
+test("the created page sends a test notification with the new token", async () => {
+  const app = await open("./App.tsx", { locale: "zh-Hans-CN", host: host() });
+  await app.press("id:new-bot");
+  await app.type("id:bot-name", "CI 构建");
+  await app.press("id:create-bot");
+  await app.waitFor("id:send-test");
+  await app.press("id:send-test");
+  await app.waitUntil(() => app.requests().some((r) => r.url.includes("/bot2:secret-token/sendMessage")));
+});
+
+
+test("swiping a chat left deletes the bot after confirming", async () => {
+  const app = await open("./App.tsx", { locale: "zh-Hans-CN", host: host() });
+  await app.waitFor("id:chat-1");
+  await app.drag("id:chat-1", { x: -160, y: 0 });
+  app.onDialog(() => "删除");
+  await app.press("id:swipe-delete-1");
+  await app.waitUntil(() => app.host.calls().some((c) => c.name === "honk.bot.delete"));
+  expect(app.host.calls().find((c) => c.name === "honk.bot.delete")?.data).toEqual({ botId: 1 });
+});
+
+test("cancelling the swipe delete keeps the bot", async () => {
+  const app = await open("./App.tsx", { locale: "zh-Hans-CN", host: host() });
+  await app.waitFor("id:chat-1");
+  await app.drag("id:chat-1", { x: -160, y: 0 });
+  app.onDialog(() => "取消");
+  await app.press("id:swipe-delete-1");
+  await app.wait(500);
+  expect(app.host.calls().some((c) => c.name === "honk.bot.delete")).toBe(false);
+});

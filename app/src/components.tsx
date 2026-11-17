@@ -1,5 +1,6 @@
 import type { JSX } from "nsh";
-import { Canvas, Image, Path2D, Text, View } from "nsh";
+import { Canvas, Image, keyboardFrame, Path2D, safeArea, Scroll, Text, View } from "nsh";
+import { tr } from "./i18n";
 import { palette, type Palette } from "./theme";
 
 /** Preset icons, drawn on a 24-unit grid. The names match HonkKit's Avatar.symbols. */
@@ -15,6 +16,129 @@ export const ICONS: Record<string, string> = {
   cloud: "M7 18h10a4 4 0 0 0 .5-7.97A6 6 0 0 0 6 9.5 4.25 4.25 0 0 0 7 18z",
   code: "M9 7l-5 5 5 5 M15 7l5 5-5 5",
 };
+
+/** Interface icons on the same 24-unit grid, stroked with no disc. */
+export const UI_ICONS: Record<string, string> = {
+  back: "M15 18l-6-6 6-6",
+  chevron: "M9 18l6-6-6-6",
+  bell: "M10.27 21a2 2 0 0 0 3.46 0 M3.26 15.33A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.67C19.41 13.96 18 12.5 18 8A6 6 0 0 0 6 8c0 4.5-1.41 5.96-2.74 7.33",
+  bellOff: "M10.27 21a2 2 0 0 0 3.46 0 M17 17H4a1 1 0 0 1-.74-1.67C4.59 13.96 6 12.5 6 8a6 6 0 0 1 .26-1.74 M8.67 3.01A6 6 0 0 1 18 8c0 2.69.77 4.65 1.71 6.05 M2 2l20 20",
+  check: "M20 6L9 17l-5-5",
+  copy: "M10 8h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-9a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2z M4 16a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2",
+  trash: "M3 6h18 M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6 M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2 M10 11v6 M14 11v6",
+  key: "M2.59 17.41A2 2 0 0 0 2 18.83V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.17a2 2 0 0 0 1.41-.59l.82-.81a6.5 6.5 0 1 0-4-4z M16.5 7a.5.5 0 1 0 0 1a.5.5 0 1 0 0-1z",
+};
+
+/** A bare stroked icon from `UI_ICONS` (or `ICONS`). */
+export function Icon(props: { name: string; color: string; size: number; weight?: number }) {
+  return (
+    <Canvas
+      style={{ width: props.size, height: props.size }}
+      draw={(cx, size) => {
+        const scale = size.width / 24;
+        cx.scale(scale, scale);
+        cx.strokeStyle = props.color;
+        cx.lineWidth = props.weight ?? 2;
+        cx.lineCap = "round";
+        cx.lineJoin = "round";
+        cx.stroke(new Path2D(UI_ICONS[props.name] ?? ICONS[props.name] ?? ""));
+      }}
+    />
+  );
+}
+
+/** The shadow under floating glass controls. */
+export const FLOAT_SHADOW = "0 2px 12px rgba(0,0,0,0.10)";
+
+/**
+ * A floating glass control's surface: Liquid Glass on iOS 26 and later, a
+ * translucent blur before that.
+ */
+export function glass(p: Palette) {
+  return {
+    backgroundColor: p.glass, backdropFilter: "blur(20px)", glassEffect: "regular" as const,
+    boxShadow: FLOAT_SHADOW, borderWidth: 0.5, borderColor: p.hairline,
+  };
+}
+
+/**
+ * A blur along the top or bottom edge that fades out towards the middle, so
+ * what scrolls under the floating controls softens instead of clashing.
+ */
+export function EdgeBlur(props: { edge: "top" | "bottom"; height: number }) {
+  return (
+    <View
+      style={{
+        position: "absolute", left: 0, right: 0, height: props.height, pointerEvents: "none",
+        ...(props.edge === "top" ? { top: 0 } : { bottom: 0 }),
+        backdropFilter: "blur(14px)",
+        maskImage: `linear-gradient(to ${props.edge === "top" ? "bottom" : "top"}, #000 45%, transparent)`,
+      }}
+    />
+  );
+}
+
+/**
+ * The floating navigation of a page (the app draws its own, as in the
+ * design): a round glass back button, the title in a glass pill, and an
+ * optional item on the right (an avatar), over a blurred top edge.
+ */
+export interface BarAction { label: string; onPress: () => void; testID?: string }
+
+export function TopBar(props: {
+  p: Palette; title?: string; subtitle?: string; onBack?: () => void; right?: JSX.Element; action?: BarAction; testID?: string;
+}) {
+  return (
+    <View style={{ position: "absolute", left: 0, right: 0, top: 0, height: safeArea().top + 64, pointerEvents: "box-none" }}>
+      <EdgeBlur edge="top" height={safeArea().top + 64} />
+      <View
+        testID={props.testID}
+        style={{ position: "absolute", left: 12, right: 12, top: safeArea().top + 4, flexDirection: "row", alignItems: "center", gap: 10 }}
+      >
+        <If when={props.onBack} else={<View style={{ width: 44 }} />}>
+          <View
+            testID="back"
+            role="button"
+            accessibilityLabel={tr("返回")}
+            onPress={() => props.onBack?.()}
+            activeStyle={{ opacity: 0.7 }}
+            style={{ width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center", ...glass(props.p) }}
+          >
+            <Icon name="back" color={props.p.text} size={24} weight={2.2} />
+          </View>
+        </If>
+        <If when={props.title} else={<View style={{ flex: 1 }} />}>
+          <View style={{ flex: 1, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center", paddingLeft: 12, paddingRight: 12, ...glass(props.p) }}>
+            <Text style={{ fontSize: 16, lineHeight: 20, fontWeight: "600", color: props.p.text, numberOfLines: 1 }}>{props.title}</Text>
+            <If when={props.subtitle}>
+              <Text style={{ fontSize: 12, lineHeight: 16, color: props.p.hint, numberOfLines: 1 }}>{props.subtitle}</Text>
+            </If>
+          </View>
+        </If>
+        <If
+          when={props.action}
+          else={
+            <If when={props.right} else={<View style={{ width: 44 }} />}>
+              <View style={{ width: 44, height: 44, borderRadius: 22, boxShadow: FLOAT_SHADOW }}>{props.right}</View>
+            </If>
+          }
+        >
+          {(a) => (
+            <View
+              testID={a().testID}
+              role="button"
+              onPress={() => a().onPress()}
+              activeStyle={{ opacity: 0.7 }}
+              style={{ height: 44, minWidth: 44, paddingLeft: 18, paddingRight: 18, borderRadius: 22, alignItems: "center", justifyContent: "center", ...glass(props.p) }}
+            >
+              <Text style={{ fontSize: 17, color: props.p.text }}>{a().label}</Text>
+            </View>
+          )}
+        </If>
+      </View>
+    </View>
+  );
+}
 
 /** Avatar colours; the first is the default for a new bot. */
 export const COLORS = ["#0a6ed1", "#2f6f3e", "#c2410c", "#6741d9", "#c2255c", "#5c6770", "#1c1c1e"];
@@ -38,17 +162,17 @@ export function presetAvatar(icon: string, color: string): string {
   return `preset:${icon}:${color}`;
 }
 
-export function Avatar(props: { avatar: string; size: number }) {
+export function Avatar(props: { avatar: string; size: number; iconScale?: number }) {
   const a = () => parseAvatar(props.avatar);
   return (
-    <If when={a().kind === "image"} else={<Glyph icon={a().icon} color={a().color} size={props.size} hairline={palette().hairline} />}>
+    <If when={a().kind === "image"} else={<Glyph icon={a().icon} color={a().color} size={props.size} hairline={palette().hairline} iconScale={props.iconScale} />}>
       <Image src={a().url} style={{ width: props.size, height: props.size, borderRadius: props.size / 2 }} />
     </If>
   );
 }
 
 /** A preset avatar: `icon` stroked in `stroke` (white) on a `color` disc, with an optional hairline edge. */
-export function Glyph(props: { icon: string; color: string; size: number; stroke?: string; hairline?: string }) {
+export function Glyph(props: { icon: string; color: string; size: number; stroke?: string; hairline?: string; iconScale?: number }) {
   return (
     <Canvas
       style={{ width: props.size, height: props.size }}
@@ -65,7 +189,7 @@ export function Glyph(props: { icon: string; color: string; size: number; stroke
           cx.arc(r, r, r - 0.5, 0, Math.PI * 2);
           cx.stroke();
         }
-        const scale = (size.width * 0.5) / 24;
+        const scale = (size.width * (props.iconScale ?? 0.5)) / 24;
         cx.save();
         cx.translate(r - 12 * scale, r - 12 * scale);
         cx.scale(scale, scale);
@@ -114,7 +238,7 @@ export function Section(props: { title?: string; footer?: string; p: Palette; ch
 /** One row of a Section. */
 export function Row(props: {
   p: Palette; label: string; value?: string; color?: string; first?: boolean; center?: boolean;
-  onPress?: () => void; right?: JSX.Element; testID?: string;
+  onPress?: () => void; right?: JSX.Element; testID?: string; chevron?: boolean; mono?: boolean;
 }) {
   return (
     <View
@@ -128,11 +252,54 @@ export function Row(props: {
         justifyContent: props.center ? "center" : "flex-start",
       }}
     >
-      <Text style={{ flex: props.center ? 0 : 1, fontSize: 16, color: props.color ?? props.p.text }}>{props.label}</Text>
+      <Text style={{ flex: props.center ? undefined : 1, textAlign: props.center ? "center" : undefined, fontSize: props.mono ? 15 : 16, fontFamily: props.mono ? "Menlo" : undefined, color: props.color ?? props.p.text }}>{props.label}</Text>
       <If when={props.value}>
         <Text style={{ fontSize: 16, color: props.p.hint }}>{props.value}</Text>
       </If>
       {props.right}
+      <If when={props.chevron}>
+        <Icon name="chevron" color={props.p.separator} size={18} weight={2.2} />
+      </If>
+    </View>
+  );
+}
+
+/**
+ * A grouped-style page: the floating `TopBar` (when it has a `title`), content
+ * that scrolls under it (so nothing is pushed off a small screen or under
+ * large text), and `footer` (the page's main button) pinned above the home
+ * indicator, or above the keyboard while it is up.
+ */
+export function FormBody(props: {
+  p: Palette;
+  children: JSX.Element;
+  title?: string;
+  onBack?: () => void;
+  action?: BarAction;
+  footer?: JSX.Element;
+}) {
+  const bar = () => props.title !== undefined || props.onBack !== undefined || props.action !== undefined;
+  const bottom = () => Math.max(safeArea().bottom, keyboardFrame().height);
+  return (
+    <View style={{ flex: 1, backgroundColor: props.p.groupedBg }}>
+      <Scroll
+        style={{ flex: 1 }}
+        contentStyle={{
+          paddingTop: safeArea().top + (bar() ? 60 : 16),
+          paddingBottom: props.footer ? 16 : bottom() + 24,
+        }}
+        keyboardDismissMode="interactive"
+      >
+        {props.children}
+      </Scroll>
+      <If when={props.footer}>
+        <View style={{ paddingLeft: 16, paddingRight: 16, paddingTop: 8, paddingBottom: bottom() + (bottom() > 0 ? 8 : 16), backgroundColor: props.p.groupedBg }}>
+          {props.footer}
+        </View>
+      </If>
+      <If when={bar()}>
+        <TopBar p={props.p} title={props.title} onBack={props.onBack} action={props.action} />
+      </If>
     </View>
   );
 }

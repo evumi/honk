@@ -1,6 +1,6 @@
 import { Clipboard, signal, Text, View } from "nsh";
 import { AlertDialog, NavPage, Switch } from "nsh/base";
-import { Avatar, Row, Section } from "../components";
+import { Avatar, FormBody, Icon, Row, Section } from "../components";
 import { LEVELS, levelLabel, maskToken } from "../format";
 import { api, type Level } from "../host";
 import { chatOf, nav, reload } from "../store";
@@ -49,45 +49,65 @@ export function BotSettings(props: { botId: number }) {
     nav.setRoutes([{ name: "home" }]);
   };
 
+  const created = () => {
+    const d = new Date(chat()?.bot.createdAt ?? Date.now());
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  };
+  const copyToken = async () => {
+    if (!token()) return;
+    await Clipboard.writeText(token()!);
+    copied.set(true);
+  };
+
   return (
-    <NavPage title={tr("Bot 设置")} testID="bot-settings">
-      <View style={{ flex: 1, backgroundColor: p().groupedBg, gap: 20 }}>
-        <View style={{ alignItems: "center", gap: 4, paddingTop: 12 }}>
-          <Avatar avatar={chat()?.bot.avatar ?? ""} size={88} />
-          <Text style={{ marginTop: 8, fontSize: 24, fontWeight: "700", color: p().text }}>{chat()?.bot.name ?? ""}</Text>
-          <Text style={{ fontSize: 15, color: p().hint }}>{tr("机器人 · ID {id}", { id: props.botId })}</Text>
+    <NavPage headerVisible={false} testID="bot-settings">
+      <FormBody
+        p={p()}
+        onBack={() => nav.pop()}
+        action={{ label: tr("编辑"), onPress: () => nav.push({ name: "newBot", botId: props.botId }), testID: "edit-bot" }}
+      >
+        <View style={{ gap: 20, paddingBottom: 8 }}>
+          <View style={{ alignItems: "center", gap: 4 }}>
+            <Avatar avatar={chat()?.bot.avatar ?? ""} size={88} />
+            <Text style={{ marginTop: 8, fontSize: 24, fontWeight: "700", color: p().text }}>{chat()?.bot.name ?? ""}</Text>
+            <Text style={{ fontSize: 15, color: p().hint }}>{tr("机器人 · 创建于 {date}", { date: created() })}</Text>
+          </View>
+
+          <Section title="TOKEN" p={p()}>
+            <Row
+              p={p()}
+              first
+              mono={!!token()}
+              testID="token-row"
+              label={token() ? maskToken(token()!) : tr("这台设备上没有保存 token")}
+              onPress={token() ? () => void copyToken() : undefined}
+              right={token() ? <Icon name={copied() ? "check" : "copy"} color={p().accent} size={19} weight={2} /> : undefined}
+            />
+            <Row p={p()} label={tr("重置 token")} color={p().accent} onPress={() => void resetToken()} testID="reset-token" />
+          </Section>
+
+          <Section title={tr("通知")} p={p()}>
+            <Row p={p()} first label={tr("默认提醒级别")} value={levelLabel(chat()?.bot.defaultLevel ?? "active")} onPress={() => void pickLevel()} chevron />
+            <ToggleRow p={p()} label={tr("静音")} checked={chat()?.muted ?? false} onChange={(v) => void api.setMuted(props.botId, v).then(reload)} />
+          </Section>
+
+          <Section title={tr("消息")} p={p()}>
+            <ToggleRow p={p()} first label={tr("置顶会话")} checked={chat()?.pinned ?? false} onChange={(v) => void api.setPinned(props.botId, v).then(reload)} />
+            <Row p={p()} label={tr("清空消息")} color={p().destructive} onPress={() => void clear()} />
+          </Section>
+
+          <Section p={p()} footer={tr("删除后 token 立即失效，网关队列里未拉取的消息一并删除。")}>
+            <Row p={p()} first center label={tr("删除 Bot")} color={p().destructive} onPress={() => void remove()} testID="delete-bot" />
+          </Section>
         </View>
-
-        <Section title="TOKEN" p={p()}>
-          <Row
-            p={p()}
-            first
-            testID="token-row"
-            label={token() ? maskToken(token()!) : tr("这台设备上没有保存 token")}
-            onPress={token() ? () => void Clipboard.writeText(token()!).then(() => copied.set(true)) : undefined}
-            right={token() ? <Text style={{ fontSize: 15, color: p().accent }}>{copied() ? tr("已复制") : tr("复制")}</Text> : undefined}
-          />
-          <Row p={p()} label={tr("重置 token")} color={p().accent} onPress={() => void resetToken()} testID="reset-token" />
-        </Section>
-
-        <Section title={tr("通知")} p={p()}>
-          <Row p={p()} first label={tr("默认提醒级别")} value={levelLabel(chat()?.bot.defaultLevel ?? "active")} onPress={() => void pickLevel()} />
-          <ToggleRow p={p()} label={tr("静音")} checked={chat()?.muted ?? false} onChange={(v) => void api.setMuted(props.botId, v).then(reload)} />
-          <ToggleRow p={p()} label={tr("置顶会话")} checked={chat()?.pinned ?? false} onChange={(v) => void api.setPinned(props.botId, v).then(reload)} />
-        </Section>
-
-        <Section p={p()} footer={tr("删除后 token 立即失效。")}>
-          <Row p={p()} first label={tr("清空消息")} color={p().destructive} onPress={() => void clear()} />
-          <Row p={p()} label={tr("删除 Bot")} color={p().destructive} onPress={() => void remove()} testID="delete-bot" />
-        </Section>
-      </View>
+      </FormBody>
     </NavPage>
   );
 }
 
-function ToggleRow(props: { p: Palette; label: string; checked: boolean; onChange: (v: boolean) => void }) {
+function ToggleRow(props: { p: Palette; label: string; checked: boolean; first?: boolean; onChange: (v: boolean) => void }) {
   return (
-    <View style={{ minHeight: 46, paddingLeft: 16, paddingRight: 16, flexDirection: "row", alignItems: "center", borderTopWidth: 0.5, borderTopColor: props.p.separator }}>
+    <View style={{ minHeight: 46, paddingLeft: 16, paddingRight: 16, flexDirection: "row", alignItems: "center", borderTopWidth: props.first ? 0 : 0.5, borderTopColor: props.p.separator }}>
       <Text style={{ flex: 1, fontSize: 16, color: props.p.text }}>{props.label}</Text>
       <Switch
         checked={props.checked}

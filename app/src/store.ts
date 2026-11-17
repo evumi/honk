@@ -5,7 +5,7 @@ import { api, on, type Chat, type Status } from "./host";
 export type Route =
   | { name: "home" }
   | { name: "chat"; botId: number }
-  | { name: "newBot" }
+  | { name: "newBot"; botId?: number }
   | { name: "botCreated"; botId: number; token: string; botName: string; avatar: string }
   | { name: "botSettings"; botId: number }
   | { name: "gateway" };

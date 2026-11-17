@@ -1,9 +1,9 @@
-import { safeArea, signal, Text, View } from "nsh";
+import { signal, Text, View } from "nsh";
 import { AlertDialog, Input, NavPage } from "nsh/base";
-import { COLORS, Glyph, ICONS, presetAvatar } from "../components";
+import { COLORS, FormBody, Glyph, ICONS, parseAvatar, presetAvatar } from "../components";
 import { LEVELS } from "../format";
 import { api, type Level } from "../host";
-import { nav, reload } from "../store";
+import { chatOf, nav, reload } from "../store";
 import { palette, type Palette } from "../theme";
 import { tr } from "../i18n";
 
@@ -14,12 +14,15 @@ function ring(c: string, p: Palette): string {
   return c === "#1c1c1e" ? p.text : c;
 }
 
-export function NewBot() {
+/** Creates a bot, or with `botId` edits that one's name, look and default level. */
+export function NewBot(props: { botId?: number }) {
   const p = palette;
-  const name = signal("");
-  const icon = signal("bell");
-  const color = signal(COLORS[0]);
-  const level = signal<Level>("active");
+  const editing = props.botId !== undefined ? chatOf(props.botId)?.bot : undefined;
+  const look = editing ? parseAvatar(editing.avatar) : undefined;
+  const name = signal(editing?.name ?? "");
+  const icon = signal(look?.kind === "preset" ? look.icon : "bell");
+  const color = signal(look?.kind === "preset" ? look.color : COLORS[0]);
+  const level = signal<Level>(editing?.defaultLevel ?? "active");
   const busy = signal(false);
   const ready = () => name().trim() !== "" && !busy();
 
@@ -27,19 +30,45 @@ export function NewBot() {
     if (!ready()) return;
     busy.set(true);
     try {
+      if (editing) {
+        // An uploaded image avatar stays unless a preset was picked.
+        const avatar = look?.kind === "image" && icon() === "bell" && color() === COLORS[0] ? editing.avatar : presetAvatar(icon(), color());
+        await api.updateBot(editing.id, { name: name().trim(), avatar, defaultLevel: level() });
+        await reload();
+        nav.pop();
+        return;
+      }
       const { bot, token } = await api.createBot(name().trim(), presetAvatar(icon(), color()), level());
       await reload();
       nav.replace({ name: "botCreated", botId: bot.id, token, botName: bot.name, avatar: bot.avatar });
     } catch (e) {
-      await AlertDialog.show({ title: tr("创建失败"), description: String((e as Error)?.message ?? e), actions: [{ id: "ok", label: tr("好") }] });
+      await AlertDialog.show({ title: editing ? tr("保存失败") : tr("创建失败"), description: String((e as Error)?.message ?? e), actions: [{ id: "ok", label: tr("好") }] });
     } finally {
       busy.set(false);
     }
   };
 
   return (
-    <NavPage title={tr("新建 Bot")} testID="new-bot-page">
-      <View style={{ flex: 1, backgroundColor: p().groupedBg }}>
+    <NavPage headerVisible={false} testID="new-bot-page">
+      <FormBody
+        p={p()}
+        title={editing ? tr("编辑 Bot") : tr("新建 Bot")}
+        onBack={() => nav.pop()}
+        footer={
+          <View
+            testID="create-bot"
+            role="button"
+            onPress={() => void create()}
+            activeStyle={{ opacity: 0.85 }}
+            style={{
+              height: 52, borderRadius: 14, alignItems: "center", justifyContent: "center",
+              backgroundColor: ready() ? p().accent : p().pill,
+            }}
+          >
+            <Text style={{ fontSize: 17, fontWeight: "600", color: ready() ? "#ffffff" : p().hint }}>{busy() ? (editing ? tr("保存中…") : tr("创建中…")) : editing ? tr("保存") : tr("创建 Bot")}</Text>
+          </View>
+        }
+      >
         {/* What the bot will look like in the chat list. */}
         <View style={{ alignItems: "center", gap: 10, paddingTop: 20, paddingBottom: 8 }}>
           <Glyph icon={icon()} color={color()} size={88} hairline={p().hairline} />
@@ -131,23 +160,7 @@ export function NewBot() {
           </Each>
         </View>
         <Footer p={p()} text={tr("静默只进通知中心，不响铃不亮屏；时效性可以穿透专注模式。发送时用 level 参数可以单条覆盖。")} />
-
-        <View style={{ flex: 1 }} />
-        <View style={{ paddingLeft: 16, paddingRight: 16, paddingBottom: safeArea().bottom + 16 }}>
-          <View
-            testID="create-bot"
-            role="button"
-            onPress={() => void create()}
-            activeStyle={{ opacity: 0.85 }}
-            style={{
-              height: 52, borderRadius: 14, alignItems: "center", justifyContent: "center",
-              backgroundColor: ready() ? p().accent : p().pill,
-            }}
-          >
-            <Text style={{ fontSize: 17, fontWeight: "600", color: ready() ? "#ffffff" : p().hint }}>{busy() ? tr("创建中…") : tr("创建 Bot")}</Text>
-          </View>
-        </View>
-      </View>
+      </FormBody>
     </NavPage>
   );
 }

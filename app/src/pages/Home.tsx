@@ -1,13 +1,13 @@
 import type { JSX } from "nsh";
-import { Canvas, List, Path2D, safeArea, signal, Text, View } from "nsh";
+import { Canvas, createAnimatedValue, effect, List, Path2D, safeArea, signal, Text, View } from "nsh";
 import { AlertDialog, Input, NavPage } from "nsh/base";
-import { Avatar, Badge, Glyph, Row, Section } from "../components";
+import { Avatar, Badge, EdgeBlur, Glyph, glass, Row, Section, UI_ICONS } from "../components";
 import { listTime } from "../format";
 import { createDissolve, Dissolve } from "../fx/Dissolve";
 import { api, type Chat } from "../host";
 import { chats, loadStatus, nav, reload, status } from "../store";
 import { palette, type Palette } from "../theme";
-import { lang, tr } from "../i18n";
+import { lang, langChoice, setLangChoice, tr, type LangChoice } from "../i18n";
 
 type Tab = "chats" | "settings";
 
@@ -53,6 +53,7 @@ export function Home() {
         <If when={tab() === "chats"} else={<SettingsTab p={p()} />}>
           <ChatsTab p={p()} />
         </If>
+        <EdgeBlur edge="bottom" height={safeArea().bottom + 88} />
         <TabBar tab={tab()} onSelect={(t) => tab.set(t)} p={p()} />
       </View>
     </NavPage>
@@ -173,10 +174,32 @@ function Empty(props: { p: Palette }) {
   );
 }
 
+/** The row swiped open to show its delete button (one at a time). */
+const swipedRow = signal<number | null>(null);
+/** How far a row slides to show its delete button, in points. */
+const ACTION_W = 88;
+
 function ChatRow(props: { chat: Chat; p: Palette; editing: boolean }) {
   const c = () => props.chat;
   const dissolving = signal(false);
   const dust = createDissolve();
+  // Swipe left to reveal Delete: the drag drives `drag` natively; the row only
+  // moves left, and settles open or shut when the finger lifts.
+  const drag = createAnimatedValue(0);
+  const shift = drag.interpolate({ inputRange: [-ACTION_W * 3, 0, 1], outputRange: [-ACTION_W * 3, 0, 0], extrapolate: "clamp" });
+  const open = signal(false);
+  const settle = (to: boolean) => {
+    open.set(to);
+    if (to) swipedRow.set(c().bot.id);
+    else if (swipedRow() === c().bot.id) swipedRow.set(null);
+    void drag.spring(to ? -ACTION_W : 0, { damping: 22, stiffness: 260 });
+  };
+  effect(() => {
+    if (open() && swipedRow() !== c().bot.id) settle(false);
+  });
+  effect(() => {
+    if (props.editing && open()) settle(false);
+  });
   const preview = () => {
     const m = c().last;
     if (!m) return tr("还没有消息");
@@ -204,26 +227,50 @@ function ChatRow(props: { chat: Chat; p: Palette; editing: boolean }) {
       description: tr("token 立即失效，网关队列里未拉取的消息一并删除。"),
       actions: [{ id: "cancel", label: tr("取消"), role: "cancel" }, { id: "delete", label: tr("删除"), role: "destructive" }],
     });
-    if (action !== "delete") return;
+    if (action !== "delete") {
+      settle(false);
+      return;
+    }
     dissolving.set(true);
     try {
-      // The request runs while the dust plays; a failure brings the row back.
-      await Promise.all([dust.play(), api.deleteBot(c().bot.id)]);
+      // Dust first, then the request: deleting tells the host, which reloads the
+      // list at once and would drop the row before it could dissolve. A failed
+      // delete brings the row back.
+      await dust.play();
+      await api.deleteBot(c().bot.id);
       await reload();
     } finally {
       dissolving.set(false);
       dust.reset();
+      open.set(false);
+      void drag.timing(0, { duration: 0 });
     }
   };
   return (
     <Dissolve active={dissolving()} progress={dust.progress}>
+    <View style={{ height: 80, backgroundColor: props.p.destructive }}>
+    {/* The delete button under the row, shown as the row slides left. */}
+    <View
+      testID={`swipe-delete-${c().bot.id}`}
+      role="button"
+      accessibilityLabel={tr("删除")}
+      onPress={() => void remove()}
+      activeStyle={{ opacity: 0.7 }}
+      style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: ACTION_W, alignItems: "center", justifyContent: "center", gap: 4 }}
+    >
+      <Icon path={UI_ICONS.trash} color="#ffffff" size={22} width={2} />
+      <Text style={{ fontSize: 13, fontWeight: "600", color: "#ffffff" }}>{tr("删除")}</Text>
+    </View>
     <View
       testID={`chat-${c().bot.id}`}
       role="button"
-      onPress={() => (props.editing ? void actions() : nav.push({ name: "chat", botId: c().bot.id }))}
+      pan={props.editing ? undefined : { x: drag }}
+      panActivation={{ activeOffsetX: 12, failOffsetY: 10 }}
+      onPanEnd={(e) => settle(!e.cancelled && ((e.value?.x ?? e.translation.x) < -ACTION_W / 2 || e.velocity.x < -600))}
+      onPress={() => (open() ? settle(false) : props.editing ? void actions() : nav.push({ name: "chat", botId: c().bot.id }))}
       onLongPress={() => void actions()}
       activeStyle={{ backgroundColor: props.p.pill }}
-      style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingLeft: 16, height: 80 }}
+      style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingLeft: 16, height: 80, backgroundColor: props.p.bg, translate: [shift, 0] }}
     >
       <Avatar avatar={c().bot.avatar} size={56} />
       <View
@@ -252,13 +299,16 @@ function ChatRow(props: { chat: Chat; p: Palette; editing: boolean }) {
               testID={`delete-${c().bot.id}`}
               role="button"
               onPress={() => void remove()}
-              style={{ height: 32, paddingLeft: 14, paddingRight: 14, borderRadius: 16, backgroundColor: props.p.destructive, justifyContent: "center" }}
+              accessibilityLabel={tr("删除")}
+              activeStyle={{ opacity: 0.6 }}
+              style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: props.p.destructiveSoft, alignItems: "center", justifyContent: "center" }}
             >
-              <Text style={{ fontSize: 14, fontWeight: "600", color: "#ffffff" }}>{tr("删除")}</Text>
+              <Icon path={UI_ICONS.trash} color={props.p.destructive} size={19} width={2} />
             </View>
           </If>
         </View>
       </View>
+    </View>
     </View>
     </Dissolve>
   );
@@ -309,15 +359,18 @@ function SettingsTab(props: { p: Palette }) {
               : tr("通知被关闭时，消息仍会在打开 App 时同步过来。")
         }
       >
-        <Row p={p()} first label={tr("系统通知")} value={permission()} onPress={() => void api.openNotificationSettings()} />
+        <Row p={p()} first label={tr("系统通知")} value={permission()} onPress={() => void api.openNotificationSettings()} chevron />
         <Row p={p()} label={tr("设备注册")} value={registration()} color={status()?.registration === "failed" ? p().destructive : undefined} testID="registration" />
         <If when={status()?.registration !== "registered"}>
           <Row p={p()} label={retrying() ? tr("正在重试…") : tr("重试注册")} color={p().accent} onPress={() => void retry()} testID="retry-registration" />
         </If>
       </Section>
       <Section title={tr("网关")} p={p()}>
-        <Row p={p()} first label={host()} value={tr("更改")} onPress={() => nav.push({ name: "gateway" })} testID="gateway-row" />
+        <Row p={p()} first label={host()} value={tr("更改")} onPress={() => nav.push({ name: "gateway" })} testID="gateway-row" chevron />
         <Row p={p()} label={tr("立即同步")} color={p().accent} onPress={() => void api.refresh().then(reload)} />
+      </Section>
+      <Section title={tr("通用")} p={p()}>
+        <Row p={p()} first label={tr("语言")} value={languageLabel(langChoice())} onPress={() => void pickLanguage()} testID="language-row" chevron />
       </Section>
       <View style={{ flex: 1 }} />
       <If when={status()?.appVersion}>
@@ -332,6 +385,25 @@ function SettingsTab(props: { p: Palette }) {
   );
 }
 
+const LANGUAGES: { id: LangChoice; label: () => string }[] = [
+  { id: "system", label: () => tr("跟随系统") },
+  { id: "zh", label: () => "简体中文" },
+  { id: "en", label: () => "English" },
+];
+
+function languageLabel(c: LangChoice): string {
+  return LANGUAGES.find((l) => l.id === c)?.label() ?? "";
+}
+
+async function pickLanguage() {
+  const { action } = await AlertDialog.show({
+    title: tr("语言"),
+    presentation: "actionSheet",
+    actions: [...LANGUAGES.map((l) => ({ id: l.id, label: l.label() })), { id: "cancel", label: tr("取消"), role: "cancel" as const }],
+  });
+  if (action === "system" || action === "zh" || action === "en") await setLangChoice(action);
+}
+
 function TabBar(props: { tab: Tab; onSelect: (t: Tab) => void; p: Palette }) {
   const unread = () => chats().reduce((n, c) => n + (c.muted ? 0 : c.unread), 0);
   const color = (t: Tab) => (props.tab === t ? props.p.accent : props.p.text);
@@ -339,8 +411,8 @@ function TabBar(props: { tab: Tab; onSelect: (t: Tab) => void; p: Palette }) {
     <View
       style={{
         position: "absolute", left: 24, right: 24, bottom: safeArea().bottom + 8, height: 64,
-        borderRadius: 32, backgroundColor: props.p.glass, flexDirection: "row",
-        boxShadow: "0 4px 24px rgba(0,0,0,0.12)",
+        borderRadius: 32, flexDirection: "row",
+        ...glass(props.p), boxShadow: "0 4px 24px rgba(0,0,0,0.12)",
       }}
     >
       <View testID="tab-chats" role="tab" onPress={() => props.onSelect("chats")} style={{ flex: 1, alignItems: "center", justifyContent: "center", gap: 2 }}>

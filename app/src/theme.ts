@@ -10,6 +10,7 @@ export interface Palette {
   accent: string;
   accentText: string;
   destructive: string;
+  destructiveSoft: string;
   good: string;
   chatWall: string;
   bubble: string;
@@ -33,11 +34,12 @@ const light: Palette = {
   accent: "#0a6ed1",
   accentText: "#ffffff",
   destructive: "#c42b2b",
+  destructiveSoft: "rgba(196,43,43,0.12)",
   good: "#1a9e6e",
   chatWall: "#d7e4c6",
   bubble: "#ffffff",
   pill: "#f2f2f7",
-  glass: "rgba(255,255,255,0.88)",
+  glass: "rgba(255,255,255,0.62)",
   segment: "#ffffff",
   segmentTrack: "#e3e3e8",
   hairline: "rgba(0,0,0,0.08)",
@@ -53,11 +55,12 @@ const dark: Palette = {
   accent: "#3a95f0",
   accentText: "#ffffff",
   destructive: "#ff6961",
+  destructiveSoft: "rgba(255,105,97,0.18)",
   good: "#30c48d",
   chatWall: "#0f1a12",
   bubble: "#1c1c1e",
   pill: "#2c2c2e",
-  glass: "rgba(28,28,30,0.88)",
+  glass: "rgba(44,44,46,0.62)",
   segment: "#636366",
   segmentTrack: "#2c2c2e",
   hairline: "rgba(255,255,255,0.16)",
