@@ -21,4 +21,4 @@ scripts/brand/capture-screens.sh build/screens-zh zh-Hans-CN
 swift scripts/brand/render.swift build/screens-en build/screens-zh
 ```
 
-The copy is in `shots` in `scripts/brand/render.swift`. The lock screen is drawn, not captured.
+The copy is in `shots` in `scripts/brand/render.swift`. It writes these images and the iOS app icon as RGB PNGs: App Store Connect rejects ones with an alpha channel (`alpha_channel`), even fully opaque. `scripts/check-app-store-assets.sh` checks that (CI runs it); the other brand PNGs keep their transparency. The lock screen is drawn, not captured.

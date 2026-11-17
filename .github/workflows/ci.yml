@@ -20,6 +20,7 @@ jobs:
       gateway: ${{ steps.filter.outputs.gateway }}
       ios: ${{ steps.filter.outputs.ios }}
       app: ${{ steps.filter.outputs.app }}
+      assets: ${{ steps.filter.outputs.assets }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -34,6 +35,12 @@ jobs:
               - '.github/workflows/ci.yml'
             app:
               - 'app/**'
+              - '.github/workflows/ci.yml'
+            assets:
+              - 'ios/App/Assets.xcassets/**'
+              - 'public/appstore/**'
+              - 'scripts/brand/**'
+              - 'scripts/check-app-store-assets.sh'
               - '.github/workflows/ci.yml'
 
   gateway:
@@ -71,3 +78,11 @@ jobs:
       - run: brew install longbridge/tap/nsh
       - run: nsh check App.tsx && nsh test
         working-directory: app
+
+  assets:
+    needs: changes
+    if: needs.changes.outputs.assets == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/check-app-store-assets.sh

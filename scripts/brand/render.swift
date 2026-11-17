@@ -75,9 +75,13 @@ struct Mark {
 
 // MARK: drawing helpers (top-left origin)
 
-func canvas(_ w: Int, _ h: Int, _ draw: (CGContext) -> Void) -> Data {
+/// Draws a PNG. `opaque` ones have no alpha channel (RGB): App Store Connect
+/// rejects an app icon or screenshot with one, even when every pixel is opaque.
+/// Draw a full background into those; what is left undrawn comes out black.
+func canvas(_ w: Int, _ h: Int, opaque: Bool = false, _ draw: (CGContext) -> Void) -> Data {
+    let alpha: CGImageAlphaInfo = opaque ? .noneSkipLast : .premultipliedLast
     let cx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
-                       space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+                       space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: alpha.rawValue)!
     cx.translateBy(x: 0, y: CGFloat(h))
     cx.scaleBy(x: 1, y: -1)
     let ns = NSGraphicsContext(cgContext: cx, flipped: true)
@@ -159,7 +163,7 @@ for size in [1024, 512, 256, 128] {
 }
 
 // iOS: one full-bleed 1024 icon; the system rounds it.
-let appIcon = canvas(1024, 1024) { cx in Mark.draw(cx, in: CGRect(x: 0, y: 0, width: 1024, height: 1024), background: ink, cornerRadius: nil) }
+let appIcon = canvas(1024, 1024, opaque: true) { cx in Mark.draw(cx, in: CGRect(x: 0, y: 0, width: 1024, height: 1024), background: ink, cornerRadius: nil) }
 write(appIcon, "ios/App/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png")
 write("""
 {
@@ -410,7 +414,7 @@ func drawTerminal(_ cx: CGContext, lines: [(String, UInt32)], frame: CGRect) {
 
 for lang in ["en", "zh-Hans"] {
     for shot in shots {
-        let png = canvas(Int(W), Int(H)) { cx in
+        let png = canvas(Int(W), Int(H), opaque: true) { cx in
             cx.setFillColor(base)
             cx.fill(CGRect(x: 0, y: 0, width: W, height: H))
             glow(cx, center: CGPoint(x: W * 0.92, y: 260), radius: 1100, color: shot.glowColor, alpha: 0.30)
