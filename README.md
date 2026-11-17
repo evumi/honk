@@ -2,6 +2,8 @@
 
 [中文](README.zh-CN.md)
 
+![Honk: chat list, a chat with cards, new bot, bot settings](docs/screenshots/en.png)
+
 Honk is a push notification service built around bots: each bot is its own channel, and a message can carry a small HTML card in the format of Telegram's HTML widgets (Bot API 10.4). iOS receives pushes through APNs; Android through FCM (GMS devices only).
 
 ## Layout
