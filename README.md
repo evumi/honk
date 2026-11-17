@@ -11,7 +11,7 @@ Honk is a push notification service built around bots: each bot is its own chann
 | `gateway/` | Go + SQLite gateway: bot API, app API, short-term queue, APNs/FCM push | first version |
 | `app/` | nsh app (TSX): chat list, message stream, card rendering | first version |
 | `ios/` | Swift host, Notification Service Extension, shared HonkKit package | first version (not yet built in Xcode) |
-| `android/` | Kotlin host and FirebaseMessagingService | not started |
+| `android/` | Kotlin host embedding the nsh app, FirebaseMessagingService, shared `:core` module (gateway client, local store, sync) | first version (`:core` tested on the JVM; the app is not yet built with the Android SDK) |
 
 The development design (Chinese) is [docs/DESIGN.zh-CN.md](docs/DESIGN.zh-CN.md); mockups and screenshots are in [docs/design](docs/design/).
 
