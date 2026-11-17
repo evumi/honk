@@ -68,7 +68,9 @@ export function glass(p: Palette) {
 }
 
 /** Progressive blur: each layer blurs more and covers a band nearer the edge. */
-const BLUR_STEPS = [0.5, 1, 2, 4, 8, 16];
+// Three layers: each is a backdrop blur redone every frame while content
+// scrolls under it, so more of them cost smoothness for little gain.
+const BLUR_STEPS = [1, 4, 12];
 
 /**
  * A progressive blur along the top or bottom edge, as iOS draws under its

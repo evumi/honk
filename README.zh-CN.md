@@ -2,6 +2,8 @@
 
 [English](README.md)
 
+![Honk：会话列表、带卡片的会话、新建 Bot、Bot 设置](docs/screenshots/zh.png)
+
 Honk 是一个以 bot 为渠道的推送通知服务：每个 bot 都是一个独立的通知渠道，消息可以附带一张小型 HTML 卡片，格式参照 Telegram Bot API 10.4 的 HTML widget。iOS 通过 APNs 推送，Android 通过 FCM 推送（只支持带 GMS 的设备）。
 
 ## 仓库结构

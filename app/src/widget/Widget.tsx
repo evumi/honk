@@ -291,8 +291,21 @@ function renderBlock(el: ElementNode, ctx: Ctx, inherited: Style, listTag?: stri
 }
 
 /** Renders a card, or nothing when the HTML is empty or over the limits. */
+// Parsed cards by their HTML: rows are rebuilt as they scroll back in, and
+// parsing is the costly part.
+const parsed = new Map<string, WidgetNode[]>();
+function parseCached(html: string): WidgetNode[] {
+  let nodes = parsed.get(html);
+  if (!nodes) {
+    nodes = parse(html);
+    if (parsed.size >= 200) parsed.delete(parsed.keys().next().value!);
+    parsed.set(html, nodes);
+  }
+  return nodes;
+}
+
 export function Widget(props: { html: string; data: string; palette: Palette }): JSX.Element {
-  const nodes = parse(props.html);
+  const nodes = parseCached(props.html);
   if (nodes.length === 0 || countNodes(nodes) > MAX_NODES) return <View />;
   const ctx: Ctx = { data: parseData(props.data), vars: widgetVars(props.palette), p: props.palette };
   const base: Style = { color: props.palette.text, fontSize: 15, lineHeight: 21 };

@@ -1,5 +1,5 @@
 import type { ListRef } from "nsh";
-import { Clipboard, cleanup, List, openUrl, signal, Text, View, effect, safeArea } from "nsh";
+import { Clipboard, cleanup, computed, List, openUrl, signal, Text, View, effect, safeArea } from "nsh";
 import { AlertDialog, NavPage } from "nsh/base";
 import { Avatar, Badge, EdgeBlur, glass, Icon, TopBar } from "../components";
 import { clock, dayLabel, sameDay } from "../format";
@@ -7,8 +7,11 @@ import { api, type Message } from "../host";
 import { chatOf, nav, reload, version } from "../store";
 import { palette, type Palette } from "../theme";
 import { tr } from "../i18n";
+import { reuse } from "../stable";
 import { Widget } from "../widget/Widget";
 import { createDissolve, Dissolve } from "../fx/Dissolve";
+
+interface Row { m: Message; day: boolean }
 
 export function ChatPage(props: { botId: string }) {
   const p = palette;
@@ -33,7 +36,7 @@ export function ChatPage(props: { botId: string }) {
       const at = next.findIndex((m) => m.id === lastBefore);
       if (at >= 0) fresh.set(fresh() + next.length - 1 - at);
     }
-    messages.set(next);
+    messages.set(reuse(messages(), next, (m) => String(m.id)));
     if (!away()) measureEnd();
     reachedStart = latest.length < 50;
     // Only when something is unread: marking read announces a change, which
@@ -72,6 +75,25 @@ export function ChatPage(props: { botId: string }) {
     measureEnd();
   };
 
+  // Rows carry whether they start a day, so a row depends on its own item only
+  // (reading the whole array from every row re-ran all of them on any change).
+  // Unchanged rows keep their object, so the list leaves them alone.
+  let rowCache = new Map<string, Row>();
+  const rows = computed<Row[]>(() => {
+    const ms = messages();
+    const next = new Map<string, Row>();
+    const out = ms.map((m, i) => {
+      const day = i === 0 || !sameDay(ms[i - 1].date, m.date);
+      const key = String(m.id);
+      const old = rowCache.get(key);
+      const row = old && old.m === m && old.day === day ? old : { m, day };
+      next.set(key, row);
+      return row;
+    });
+    rowCache = next;
+    return out;
+  });
+
   const toggleMute = async () => {
     await api.setMuted(props.botId, !chat()?.muted);
     await reload();
@@ -81,8 +103,9 @@ export function ChatPage(props: { botId: string }) {
     <NavPage headerVisible={false} testID="chat">
       <View style={{ flex: 1, backgroundColor: p().chatWall }}>
         <List
-          each={messages()}
-          keyExtractor={(m) => String(m.id)}
+          each={rows()}
+          keyExtractor={(r) => String(r.m.id)}
+          estimatedItemSize={150}
           initialScrollAtEnd
           ref={(r: ListRef) => (list = r)}
           onScrollEnd={() => void checkPosition()}
@@ -95,12 +118,12 @@ export function ChatPage(props: { botId: string }) {
             </View>
           }
         >
-          {(m, i) => (
+          {(r) => (
             <View style={{ gap: 10 }}>
-              <If when={i() === 0 || !sameDay(messages()[i() - 1]?.date ?? 0, m().date)}>
-                <DayChip ms={m().date} />
+              <If when={r().day}>
+                <DayChip ms={r().m.date} />
               </If>
-              <Bubble message={m()} p={p()} />
+              <Bubble message={r().m} p={p()} />
             </View>
           )}
         </List>
@@ -206,11 +229,15 @@ function Bubble(props: { message: Message; p: Palette }) {
       onPress={m().url && !m().html ? () => void openUrl(m().url).catch(() => {}) : undefined}
       style={{ backgroundColor: props.p.bubble, borderRadius: 18, overflow: "hidden" }}
     >
-      <If when={m().html}>
-        <View style={{ paddingTop: 12, paddingBottom: 12, paddingLeft: 16, paddingRight: 16, borderBottomWidth: 0.5, borderBottomColor: props.p.separator }}>
-          <Widget html={m().html} data={m().data} palette={props.p} />
-        </View>
-      </If>
+      {/* The card is built once per message: keyed by the message, so a recycled
+          row shows its new message's card and an unchanged one is left alone. */}
+      <Each of={m().html ? [m()] : []} key={(x) => `${x.id}\u0000${x.html}\u0000${x.data}`}>
+        {(x) => (
+          <View style={{ paddingTop: 12, paddingBottom: 12, paddingLeft: 16, paddingRight: 16, borderBottomWidth: 0.5, borderBottomColor: props.p.separator }}>
+            <Widget html={x().html} data={x().data} palette={props.p} />
+          </View>
+        )}
+      </Each>
       <View style={{ paddingTop: 10, paddingBottom: 8, paddingLeft: 14, paddingRight: 14, gap: 2 }}>
         <If when={m().title && !m().html}>
           <Text style={{ fontSize: 16, fontWeight: "600", color: props.p.text }}>{m().title}</Text>
