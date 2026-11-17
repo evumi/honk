@@ -16,6 +16,7 @@ export interface Palette {
   bubble: string;
   pill: string;
   glass: string;
+  glassRim: string;
   /** The selected segment of a segmented control. */
   segment: string;
   /** The track behind a segmented control. */
@@ -39,7 +40,8 @@ const light: Palette = {
   chatWall: "#d7e4c6",
   bubble: "#ffffff",
   pill: "#f2f2f7",
-  glass: "rgba(255,255,255,0.62)",
+  glass: "rgba(255,255,255,0.55)",
+  glassRim: "rgba(255,255,255,0.9)",
   segment: "#ffffff",
   segmentTrack: "#e3e3e8",
   hairline: "rgba(0,0,0,0.08)",
@@ -60,7 +62,8 @@ const dark: Palette = {
   chatWall: "#0f1a12",
   bubble: "#1c1c1e",
   pill: "#2c2c2e",
-  glass: "rgba(44,44,46,0.62)",
+  glass: "rgba(44,44,46,0.55)",
+  glassRim: "rgba(255,255,255,0.14)",
   segment: "#636366",
   segmentTrack: "#2c2c2e",
   hairline: "rgba(255,255,255,0.16)",

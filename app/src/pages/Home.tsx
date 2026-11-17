@@ -53,7 +53,7 @@ export function Home() {
         <If when={tab() === "chats"} else={<SettingsTab p={p()} />}>
           <ChatsTab p={p()} />
         </If>
-        <EdgeBlur edge="bottom" height={safeArea().bottom + 88} />
+        <EdgeBlur edge="bottom" height={safeArea().bottom + 92} tint={p().bg} />
         <TabBar tab={tab()} onSelect={(t) => tab.set(t)} p={p()} />
       </View>
     </NavPage>

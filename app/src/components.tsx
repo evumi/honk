@@ -21,6 +21,7 @@ export const ICONS: Record<string, string> = {
 export const UI_ICONS: Record<string, string> = {
   back: "M15 18l-6-6 6-6",
   chevron: "M9 18l6-6-6-6",
+  down: "M6 9l6 6 6-6",
   bell: "M10.27 21a2 2 0 0 0 3.46 0 M3.26 15.33A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.67C19.41 13.96 18 12.5 18 8A6 6 0 0 0 6 8c0 4.5-1.41 5.96-2.74 7.33",
   bellOff: "M10.27 21a2 2 0 0 0 3.46 0 M17 17H4a1 1 0 0 1-.74-1.67C4.59 13.96 6 12.5 6 8a6 6 0 0 1 .26-1.74 M8.67 3.01A6 6 0 0 1 18 8c0 2.69.77 4.65 1.71 6.05 M2 2l20 20",
   check: "M20 6L9 17l-5-5",
@@ -48,7 +49,10 @@ export function Icon(props: { name: string; color: string; size: number; weight?
 }
 
 /** The shadow under floating glass controls. */
-export const FLOAT_SHADOW = "0 2px 12px rgba(0,0,0,0.10)";
+export const FLOAT_SHADOW = "0 4px 16px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06)";
+
+/** The size of the floating bar's controls (back button, title pill, avatar). */
+export const BAR_H = 46;
 
 /**
  * A floating glass control's surface: Liquid Glass on iOS 26 and later, a
@@ -56,25 +60,57 @@ export const FLOAT_SHADOW = "0 2px 12px rgba(0,0,0,0.10)";
  */
 export function glass(p: Palette) {
   return {
-    backgroundColor: p.glass, backdropFilter: "blur(20px)", glassEffect: "regular" as const,
-    boxShadow: FLOAT_SHADOW, borderWidth: 0.5, borderColor: p.hairline,
+    backgroundColor: p.glass, backdropFilter: "blur(14px) saturate(1.5)", glassEffect: "regular" as const,
+    // A bright rim on top, as light catches the edge of glass.
+    boxShadow: `inset 0 1px 0 ${p.glassRim}, ${FLOAT_SHADOW}`, borderWidth: 0.5, borderColor: p.hairline,
   };
 }
 
+/** Progressive blur: each layer blurs more and covers a band nearer the edge. */
+const BLUR_STEPS = [0.5, 1, 2, 4, 8, 16];
+
 /**
- * A blur along the top or bottom edge that fades out towards the middle, so
- * what scrolls under the floating controls softens instead of clashing.
+ * A progressive blur along the top or bottom edge, as iOS draws under its
+ * bars: stacked layers, each blurring more and masked to a band nearer the
+ * edge, so the blur grows smoothly instead of a blurred copy fading in over a
+ * sharp one. `tint` (the page's background) washes in lightly towards the
+ * edge so the floating controls stay readable over busy content.
  */
-export function EdgeBlur(props: { edge: "top" | "bottom"; height: number }) {
+export function EdgeBlur(props: { edge: "top" | "bottom"; height: number; tint?: string }) {
+  // Gradients run from the inner side (0%) to the edge (100%).
+  const dir = props.edge === "top" ? "to top" : "to bottom";
+  const n = BLUR_STEPS.length;
+  const band = (i: number) => {
+    const at = (k: number) => `${Math.max(0, Math.min(100, (k * 100) / (n + 1))).toFixed(1)}%`;
+    return `linear-gradient(${dir}, transparent ${at(i)}, #000 ${at(i + 1)}, #000 ${at(i + 2)}, transparent ${at(i + 3)})`;
+  };
   return (
     <View
       style={{
         position: "absolute", left: 0, right: 0, height: props.height, pointerEvents: "none",
         ...(props.edge === "top" ? { top: 0 } : { bottom: 0 }),
-        backdropFilter: "blur(14px)",
-        maskImage: `linear-gradient(to ${props.edge === "top" ? "bottom" : "top"}, #000 45%, transparent)`,
       }}
-    />
+    >
+      {BLUR_STEPS.map((r, i) => (
+        <View
+          style={{
+            position: "absolute", left: 0, right: 0, top: 0, bottom: 0,
+            backdropFilter: `blur(${r}px)`,
+            // The last layer runs all the way to the edge.
+            maskImage: i === n - 1 ? `linear-gradient(${dir}, transparent ${((i * 100) / (n + 1)).toFixed(1)}%, #000 ${(((i + 1) * 100) / (n + 1)).toFixed(1)}%)` : band(i),
+          }}
+        />
+      ))}
+      <If when={props.tint}>
+        <View
+          style={{
+            position: "absolute", left: 0, right: 0, top: 0, bottom: 0,
+            backgroundImage: `linear-gradient(${dir}, transparent, ${props.tint})`,
+            opacity: 0.55,
+          }}
+        />
+      </If>
+    </View>
   );
 }
 
@@ -86,40 +122,43 @@ export function EdgeBlur(props: { edge: "top" | "bottom"; height: number }) {
 export interface BarAction { label: string; onPress: () => void; testID?: string }
 
 export function TopBar(props: {
+  /** The page's background, washed in lightly behind the bar. */
+  tint?: string;
   p: Palette; title?: string; subtitle?: string; onBack?: () => void; right?: JSX.Element; action?: BarAction; testID?: string;
 }) {
   return (
-    <View style={{ position: "absolute", left: 0, right: 0, top: 0, height: safeArea().top + 64, pointerEvents: "box-none" }}>
-      <EdgeBlur edge="top" height={safeArea().top + 64} />
+    <View style={{ position: "absolute", left: 0, right: 0, top: 0, height: safeArea().top + BAR_H + 26, pointerEvents: "box-none" }}>
+      <EdgeBlur edge="top" height={safeArea().top + BAR_H + 30} tint={props.tint} />
       <View
         testID={props.testID}
-        style={{ position: "absolute", left: 12, right: 12, top: safeArea().top + 4, flexDirection: "row", alignItems: "center", gap: 10 }}
+        style={{ position: "absolute", left: 12, right: 12, top: safeArea().top + 2, flexDirection: "row", alignItems: "center", gap: 10 }}
       >
-        <If when={props.onBack} else={<View style={{ width: 44 }} />}>
+        <If when={props.onBack} else={<View style={{ width: BAR_H }} />}>
           <View
             testID="back"
             role="button"
             accessibilityLabel={tr("返回")}
             onPress={() => props.onBack?.()}
             activeStyle={{ opacity: 0.7 }}
-            style={{ width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center", ...glass(props.p) }}
+            style={{ width: BAR_H, height: BAR_H, borderRadius: BAR_H / 2, alignItems: "center", justifyContent: "center", ...glass(props.p) }}
           >
-            <Icon name="back" color={props.p.text} size={24} weight={2.2} />
+            <Icon name="back" color={props.p.text} size={28} weight={2} />
           </View>
         </If>
         <If when={props.title} else={<View style={{ flex: 1 }} />}>
-          <View style={{ flex: 1, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center", paddingLeft: 12, paddingRight: 12, ...glass(props.p) }}>
-            <Text style={{ fontSize: 16, lineHeight: 20, fontWeight: "600", color: props.p.text, numberOfLines: 1 }}>{props.title}</Text>
+          <View style={{ flex: 1, height: BAR_H, borderRadius: BAR_H / 2, alignItems: "center", justifyContent: "center", paddingLeft: 14, paddingRight: 14, ...glass(props.p) }}>
+            <Text style={{ fontSize: 17, lineHeight: 21, fontWeight: "600", color: props.p.text, numberOfLines: 1 }}>{props.title}</Text>
             <If when={props.subtitle}>
-              <Text style={{ fontSize: 12, lineHeight: 16, color: props.p.hint, numberOfLines: 1 }}>{props.subtitle}</Text>
+              <Text style={{ fontSize: 13, lineHeight: 16, color: props.p.hint, numberOfLines: 1 }}>{props.subtitle}</Text>
             </If>
           </View>
         </If>
         <If
           when={props.action}
           else={
-            <If when={props.right} else={<View style={{ width: 44 }} />}>
-              <View style={{ width: 44, height: 44, borderRadius: 22, boxShadow: FLOAT_SHADOW }}>{props.right}</View>
+            <If when={props.right} else={<View style={{ width: BAR_H }} />}>
+              {/* A glass ring around the avatar, as the other controls. */}
+              <View style={{ width: BAR_H, height: BAR_H, borderRadius: BAR_H / 2, padding: 3, ...glass(props.p) }}>{props.right}</View>
             </If>
           }
         >
@@ -129,7 +168,7 @@ export function TopBar(props: {
               role="button"
               onPress={() => a().onPress()}
               activeStyle={{ opacity: 0.7 }}
-              style={{ height: 44, minWidth: 44, paddingLeft: 18, paddingRight: 18, borderRadius: 22, alignItems: "center", justifyContent: "center", ...glass(props.p) }}
+              style={{ height: BAR_H, minWidth: BAR_H, paddingLeft: 18, paddingRight: 18, borderRadius: BAR_H / 2, alignItems: "center", justifyContent: "center", ...glass(props.p) }}
             >
               <Text style={{ fontSize: 17, color: props.p.text }}>{a().label}</Text>
             </View>
@@ -298,7 +337,7 @@ export function FormBody(props: {
         </View>
       </If>
       <If when={bar()}>
-        <TopBar p={props.p} title={props.title} onBack={props.onBack} action={props.action} />
+        <TopBar p={props.p} tint={props.p.groupedBg} title={props.title} onBack={props.onBack} action={props.action} />
       </If>
     </View>
   );
