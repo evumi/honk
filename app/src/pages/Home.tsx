@@ -84,6 +84,18 @@ function matches(c: Chat, q: string): boolean {
 function ChatsTab(props: { p: Palette }) {
   const p = () => props.p;
   const query = signal("");
+  // The pull-to-refresh spinner is the app's to stop: it shows while this is true.
+  const refreshing = signal(false);
+  const refresh = async () => {
+    if (refreshing()) return;
+    refreshing.set(true);
+    try {
+      await api.refresh();
+      await reload();
+    } finally {
+      refreshing.set(false);
+    }
+  };
   const editing = signal(false);
   const shown = () => chats().filter((c) => matches(c, query().trim()));
   return (
@@ -139,8 +151,8 @@ function ChatsTab(props: { p: Palette }) {
         keyExtractor={(c) => String(c.bot.id)}
         style={{ flex: 1 }}
         contentStyle={{ paddingBottom: safeArea().bottom + 100 } as never}
-        refreshing={false}
-        onRefresh={() => void api.refresh().then(reload)}
+        refreshing={refreshing()}
+        onRefresh={() => void refresh()}
         empty={
           <If when={query().trim()} else={<Empty p={p()} />}>
             <Text style={{ textAlign: "center", paddingTop: 60, fontSize: 15, color: p().hint }}>{tr("没有匹配的会话")}</Text>

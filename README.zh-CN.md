@@ -76,7 +76,7 @@ docker run -p 8080:8080 -v honk-data:/data \
 | `level` | | `passive`、`active` 或 `timeSensitive`；不填用 bot 的默认级别 |
 | `group` | | 同一 bot 内的通知分组 |
 | `id` | | 可替换 id：同一个 bot 再发相同 `id` 的消息，会替换掉之前那条 |
-| `url` | | 点击通知时打开的链接，http(s) |
+| `url` | | 消息的链接，http(s)：在会话里点这条消息时打开 |
 | `copy` | | 长按菜单里「复制」用的文字 |
 | `icon` | | 这条消息的头像，必须是 https；不填用 bot 头像 |
 

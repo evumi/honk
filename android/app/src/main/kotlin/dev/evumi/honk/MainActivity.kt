@@ -3,7 +3,6 @@ package dev.evumi.honk
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
@@ -87,27 +86,19 @@ class MainActivity : ComponentActivity() {
         handleOpen(intent)
     }
 
-    /** A tapped notification: a message with a url opens it; otherwise its chat. */
+    /** A tapped notification opens its chat; the message's url is one tap away in there. */
     private fun handleOpen(intent: Intent?) {
         if (intent?.action != ACTION_OPEN) return
         // Notifications and shortcuts from before short ids carry the bot id as a Long.
         val extra = intent.getStringExtra(EXTRA_BOT_ID)
             ?: intent.getLongExtra(EXTRA_BOT_ID, 0).takeIf { it > 0 }?.toString()
             ?: ""
-        val messageId = intent.getLongExtra(EXTRA_MESSAGE_ID, 0)
         intent.action = null // not again after a configuration change
         if (extra.isEmpty()) return
         lifecycleScope.launch(Dispatchers.IO) {
             val botId = service.store.currentBotId(extra)
-            val url = if (messageId > 0) service.store.message(messageId)?.url.orEmpty() else ""
-            launch(Dispatchers.Main) {
-                if (url.startsWith("https://") || url.startsWith("http://")) {
-                    runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
-                } else {
-                    // Kept by nsh until the app listens, so this works before it has loaded.
-                    bridge.openChat(botId)
-                }
-            }
+            // Kept by nsh until the app listens, so this works before it has loaded.
+            launch(Dispatchers.Main) { bridge.openChat(botId) }
         }
     }
 
