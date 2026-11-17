@@ -73,9 +73,12 @@ public final class LocalStore: @unchecked Sendable {
     deinit { sqlite3_close(db) }
 
     private func migrate() throws {
-        let version = try scalar("PRAGMA user_version") ?? 0
-        guard version < 1 else { return }
+        guard try scalar("PRAGMA user_version") ?? 0 < 1 else { return }
+        // The app and the extension may open a new file at the same moment:
+        // read the version again under the write lock, so the second waits for
+        // the first and then finds the tables already there.
         try transaction {
+            guard try scalar("PRAGMA user_version") ?? 0 < 1 else { return }
             try exec("""
             CREATE TABLE bots (
               id            INTEGER PRIMARY KEY,
@@ -287,6 +290,11 @@ public final class LocalStore: @unchecked Sendable {
         try locked {
             Int(try scalar("SELECT COUNT(*) FROM messages m JOIN bots b ON b.id = m.bot_id WHERE m.read = 0 AND b.muted = 0") ?? 0)
         }
+    }
+
+    /// How many of a bot's messages are unread.
+    public func unreadCount(botID: Int64) throws -> Int {
+        try locked { Int(try scalar("SELECT COUNT(*) FROM messages WHERE bot_id = ? AND read = 0", [botID]) ?? 0) }
     }
 
     /// Marks a bot's messages read and returns their notification ids, to clear them.

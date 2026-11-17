@@ -19,7 +19,9 @@ export function ChatPage(props: { botId: number }) {
     const latest = await api.messages(props.botId);
     messages.set([...latest].reverse());
     reachedStart = latest.length < 50;
-    await api.markRead(props.botId);
+    // Only when something is unread: marking read announces a change, which
+    // reloads this page, which would mark read again.
+    if (latest.some((m) => !m.read)) await api.markRead(props.botId);
   };
   const loadOlder = async () => {
     if (loadingOlder || reachedStart || messages().length === 0) return;

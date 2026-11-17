@@ -61,7 +61,10 @@ func run(log *slog.Logger) error {
 		log.Warn("FCM not configured: Android devices get no pushes (set HONK_FCM_CREDENTIALS_FILE)")
 	}
 
-	srv := api.New(st, router, log, api.Options{Version: version, MessageTTL: cfg.MessageTTL, SendRate: cfg.SendRate, SendBurst: cfg.SendBurst})
+	srv := api.New(st, router, log, api.Options{
+		Version: version, MessageTTL: cfg.MessageTTL, SendRate: cfg.SendRate, SendBurst: cfg.SendBurst,
+		RegisterPerHour: cfg.RegisterPerHour, MaxBotsPerDevice: cfg.MaxBotsPerDevice,
+	})
 	httpSrv := &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           srv.Handler(),
@@ -71,7 +74,7 @@ func run(log *slog.Logger) error {
 		IdleTimeout:       120 * time.Second,
 	}
 
-	go cleanup(ctx, st, cfg.AckedKeep, log)
+	go cleanup(ctx, st, srv, cfg.AckedKeep, log)
 
 	errc := make(chan error, 1)
 	go func() {
@@ -88,11 +91,14 @@ func run(log *slog.Logger) error {
 	log.Info("shutting down")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	return httpSrv.Shutdown(shutdownCtx)
+	err = httpSrv.Shutdown(shutdownCtx)
+	srv.Wait() // pushes still in flight (each has its own 10 s timeout)
+	return err
 }
 
-// cleanup drops expired and long-acked queue items once at start, then hourly.
-func cleanup(ctx context.Context, st *store.Store, ackedKeep time.Duration, log *slog.Logger) {
+// cleanup drops expired and long-acked queue items and idle rate limiters
+// once at start, then hourly.
+func cleanup(ctx context.Context, st *store.Store, srv *api.Server, ackedKeep time.Duration, log *slog.Logger) {
 	t := time.NewTicker(time.Hour)
 	defer t.Stop()
 	for {
@@ -103,6 +109,7 @@ func cleanup(ctx context.Context, st *store.Store, ackedKeep time.Duration, log 
 		} else if n > 0 {
 			log.Info("cleanup", "deleted", n)
 		}
+		srv.PruneLimiters(time.Hour)
 		select {
 		case <-ctx.Done():
 			return

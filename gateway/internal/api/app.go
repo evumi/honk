@@ -64,6 +64,10 @@ func (s *Server) registerDevice(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
+	if !s.allowRegistration(r) {
+		s.fail(w, r, apiError{http.StatusTooManyRequests, "Too Many Requests: too many devices registered from this address"})
+		return
+	}
 	if in.Platform != "ios" && in.Platform != "android" {
 		s.fail(w, r, badRequest("platform must be ios or android"))
 		return
@@ -171,6 +175,13 @@ func (s *Server) createBot(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
+	if n, err := s.store.CountBots(r.Context(), device(r).ID); err != nil {
+		s.fail(w, r, err)
+		return
+	} else if n >= s.opts.MaxBotsPerDevice {
+		s.fail(w, r, badRequest(fmt.Sprintf("a device can have at most %d bots", s.opts.MaxBotsPerDevice)))
+		return
+	}
 	b, token, err := s.store.CreateBot(r.Context(), device(r).ID, in.Name, in.Avatar, in.DefaultLevel)
 	if err != nil {
 		s.fail(w, r, err)
@@ -222,6 +233,7 @@ func (s *Server) deleteBot(w http.ResponseWriter, r *http.Request) {
 	id, err := botID(r)
 	if err == nil {
 		if err = s.store.DeleteBot(r.Context(), device(r).ID, id); err == nil {
+			s.forgetBot(id)
 			ok(w, true)
 			return
 		}

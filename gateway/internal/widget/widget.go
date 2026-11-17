@@ -57,7 +57,10 @@ var (
 	// @import and expression() reach the network or run code from CSS; so does
 	// url() unless it holds an inline data: image.
 	cssImport = regexp.MustCompile(`(?i)@import|expression\s*\(|\\`)
-	cssURL    = regexp.MustCompile(`(?i)url\s*\(\s*['"]?\s*([^'")\s]*)`)
+	// Functions besides url() that take an image or resource as a string:
+	// image-set("https://…" 1x) would fetch without any url().
+	cssLoaders = regexp.MustCompile(`(?i)(?:^|[^\w-])(?:-webkit-)?(?:image-set|cross-fade|image|element|src)\s*\(`)
+	cssURL     = regexp.MustCompile(`(?i)url\s*\(\s*['"]?\s*([^'")\s]*)`)
 )
 
 // Clean checks the size limits and returns the cleaned HTML. An empty input
@@ -183,7 +186,7 @@ func okHref(el, v string) bool {
 // badCSSText reports CSS that loads anything other than an inline data: image.
 func badCSSText(css string) bool {
 	// A backslash escape could spell "url" or "@import" past the patterns.
-	if cssImport.MatchString(css) {
+	if cssImport.MatchString(css) || cssLoaders.MatchString(css) {
 		return true
 	}
 	for _, m := range cssURL.FindAllStringSubmatch(css, -1) {

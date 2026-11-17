@@ -54,6 +54,8 @@ docker run -p 8080:8080 -v honk-data:/data \
 | `HONK_MESSAGE_TTL` | `168h` | 消息在队列里保存多久 |
 | `HONK_ACKED_KEEP` | `24h` | 已 ack 的消息再保留多久 |
 | `HONK_SEND_RATE` / `HONK_SEND_BURST` | `5` / `20` | 每个 bot 每秒最多发几条 / 突发上限 |
+| `HONK_REGISTER_PER_HOUR` | `10` | 每个 IP 每小时最多注册几台设备（突发 5） |
+| `HONK_MAX_BOTS_PER_DEVICE` | `100` | 每台设备最多几个 bot |
 | `HONK_APNS_KEY_FILE` | | APNs `.p8` key 文件路径；不设就不推 iOS |
 | `HONK_APNS_KEY_ID` / `HONK_APNS_TEAM_ID` / `HONK_APNS_TOPIC` | | 设置了 key 文件时必填；topic 就是 bundle ID |
 | `HONK_APNS_SANDBOX` | `false` | 用 APNs 开发环境，开发版构建要设为 true |

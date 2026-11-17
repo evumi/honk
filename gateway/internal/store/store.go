@@ -243,6 +243,13 @@ func (s *Store) ListBots(ctx context.Context, deviceID string) ([]Bot, error) {
 	return bots, rows.Err()
 }
 
+// CountBots returns how many bots a device has.
+func (s *Store) CountBots(ctx context.Context, deviceID string) (int, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM bots WHERE device_id = ?`, deviceID).Scan(&n)
+	return n, err
+}
+
 // GetBot returns one of a device's bots.
 func (s *Store) GetBot(ctx context.Context, deviceID string, botID int64) (Bot, error) {
 	return scanBot(s.db.QueryRowContext(ctx, `SELECT `+botCols+` FROM bots WHERE id = ? AND device_id = ?`, botID, deviceID))

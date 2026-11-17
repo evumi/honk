@@ -100,6 +100,15 @@ class LocalStoreTest {
         assertEquals(listOf(3L), store.messages(2, limit = 1).map { it.id })
     }
 
+    @Test fun unreadCountFollowsMarkRead() {
+        val store = tempStore()
+        store.apply(QueuedMessage(id = 1, botId = 1, body = "a"))
+        store.apply(QueuedMessage(id = 2, botId = 1, body = "b"))
+        assertEquals(2, store.unreadCount(1))
+        store.markRead(1)
+        assertEquals(0, store.unreadCount(1))
+    }
+
     @Test fun markReadReturnsUnreadNotifications() {
         val store = tempStore()
         store.apply(QueuedMessage(1, 1, body = "a"), "n1")

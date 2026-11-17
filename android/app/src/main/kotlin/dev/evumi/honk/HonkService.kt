@@ -282,7 +282,13 @@ class HonkService private constructor(context: Context) {
 
     // local changes
 
+    /**
+     * Marks a bot's messages read. Announces a change only when something was
+     * unread: the chat page reloads on changes and marks read on load, so an
+     * unconditional announcement would loop.
+     */
     fun markRead(botId: Long) {
+        if (store.unreadCount(botId) == 0) return
         notifier.cancel(store.markRead(botId))
         changed()
     }

@@ -17,6 +17,9 @@ type Config struct {
 	SendRate   float64       // HONK_SEND_RATE, messages per second per bot, default 5
 	SendBurst  int           // HONK_SEND_BURST, default 20
 
+	RegisterPerHour  float64 // HONK_REGISTER_PER_HOUR: device registrations per client IP, default 10
+	MaxBotsPerDevice int     // HONK_MAX_BOTS_PER_DEVICE, default 100
+
 	APNs APNs
 	FCM  FCM
 }
@@ -40,10 +43,12 @@ type FCM struct {
 // Load reads the configuration from the environment.
 func Load() (Config, error) {
 	c := Config{
-		Addr:      env("HONK_ADDR", ":8080"),
-		DBPath:    env("HONK_DB", "./data/honk.db"),
-		SendRate:  5,
-		SendBurst: 20,
+		Addr:             env("HONK_ADDR", ":8080"),
+		DBPath:           env("HONK_DB", "./data/honk.db"),
+		SendRate:         5,
+		SendBurst:        20,
+		RegisterPerHour:  10,
+		MaxBotsPerDevice: 100,
 		APNs: APNs{
 			KeyFile: os.Getenv("HONK_APNS_KEY_FILE"),
 			KeyID:   os.Getenv("HONK_APNS_KEY_ID"),
@@ -67,6 +72,16 @@ func Load() (Config, error) {
 	if v := os.Getenv("HONK_SEND_BURST"); v != "" {
 		if c.SendBurst, err = strconv.Atoi(v); err != nil || c.SendBurst <= 0 {
 			return c, fmt.Errorf("HONK_SEND_BURST: want a positive integer, got %q", v)
+		}
+	}
+	if v := os.Getenv("HONK_REGISTER_PER_HOUR"); v != "" {
+		if c.RegisterPerHour, err = strconv.ParseFloat(v, 64); err != nil || c.RegisterPerHour <= 0 {
+			return c, fmt.Errorf("HONK_REGISTER_PER_HOUR: want a positive number, got %q", v)
+		}
+	}
+	if v := os.Getenv("HONK_MAX_BOTS_PER_DEVICE"); v != "" {
+		if c.MaxBotsPerDevice, err = strconv.Atoi(v); err != nil || c.MaxBotsPerDevice <= 0 {
+			return c, fmt.Errorf("HONK_MAX_BOTS_PER_DEVICE: want a positive integer, got %q", v)
 		}
 	}
 	if v := os.Getenv("HONK_APNS_SANDBOX"); v != "" {

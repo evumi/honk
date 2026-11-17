@@ -42,6 +42,8 @@ See `gateway/Dockerfile` for the container. Settings:
 | `HONK_MESSAGE_TTL` | `168h` | how long a message stays queued |
 | `HONK_ACKED_KEEP` | `24h` | how long an acked message is kept |
 | `HONK_SEND_RATE` / `HONK_SEND_BURST` | `5` / `20` | per-bot messages per second / burst |
+| `HONK_REGISTER_PER_HOUR` | `10` | device registrations per client IP per hour (burst 5) |
+| `HONK_MAX_BOTS_PER_DEVICE` | `100` | bots one device can own |
 | `HONK_APNS_KEY_FILE` | | APNs `.p8` key; iOS push is off without it |
 | `HONK_APNS_KEY_ID` / `HONK_APNS_TEAM_ID` / `HONK_APNS_TOPIC` | | required with the key; the topic is the bundle ID |
 | `HONK_APNS_SANDBOX` | `false` | use the APNs development gateway (debug builds) |
