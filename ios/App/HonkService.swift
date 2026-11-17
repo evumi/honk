@@ -257,9 +257,14 @@ final class HonkService {
         syncing = true
         defer { syncing = false }
         do {
+            let api = self.api
             let bots = try await api.listBots()
-            await renameLegacyBots(known: Set(bots.map(\.id)))
-            try store.replaceBots(bots)
+            // Bots still stored by integer id move to their short id; one whose
+            // rename failed for now (offline, 5xx) is kept for the next refresh.
+            let renamed = await LegacyBotIDs.rename(store: store, tokens: botTokens, serverBots: bots) {
+                try await api.getMe(token: $0)
+            }
+            try store.replaceBots(bots, keeping: renamed.pending)
             let out = try await SyncEngine(api: api, store: store).run()
             removeNotifications(out.staleNotificationIDs)
             LocalAvatars(appGroup: config.appGroup).prune(keeping: Set(bots.map(\.avatar)))
@@ -269,28 +274,11 @@ final class HonkService {
         changed()
     }
 
-    /// Bots stored under an integer id from before short ids would otherwise be
-    /// dropped, messages and all, once the gateway lists them by short id. Old
-    /// tokens keep working, so ask the gateway who each one is and move the
-    /// local data and the token over. A bot whose token is not stored is lost.
-    private func renameLegacyBots(known: Set<String>) async {
-        guard let local = try? store.botIDs() else { return }
-        for old in local where BotID.isLegacy(old) && !known.contains(old) {
-            guard let token = botTokens.token(botID: old),
-                  let bot = try? await api.getMe(token: token), known.contains(bot.id) else { continue }
-            do {
-                try store.renameBot(from: old, to: bot.id)
-                botTokens.save(token, botID: bot.id)
-                botTokens.remove(botID: old)
-            } catch {
-                NSLog("honk: renaming bot \(old) failed: \(error)")
-            }
-        }
-    }
-
     /// Handles a background push (an edit or delete): fetch it, apply it.
     func handleSilentPush(_ info: PushInfo) async -> Bool {
         guard isRegistered else { return false }
+        await LegacyBotIDs.renameBeforePush(store: store, tokens: botTokens,
+                                            api: APIClient(baseURL: config.gatewayURL, secret: credentials.load()?.secret, timeout: 5))
         do {
             let m = try await api.message(id: info.messageID)
             let r = try store.apply(m)

@@ -244,6 +244,30 @@ final class MockGateway: URLProtocol {
         #expect(MockGateway.requests.first?.value(forHTTPHeaderField: "Authorization") == nil)
     }
 
+    @Test func pushBeforeTheRefreshRenamesFirst() async throws {
+        let store = try legacyStore()
+        try store.setMuted(botID: "4", true)
+        MockGateway.handler = { req in
+            switch req.url!.path {
+            case "/v1/bots":
+                return (200, #"{"ok":true,"result":[{"id":"aZ3kQ9xT","name":"部署","created_at":100,"updated_at":1}]}"#)
+            case "/bot4:sec/getMe":
+                return (200, #"{"ok":true,"result":{"id":"aZ3kQ9xT","name":"部署","created_at":100,"updated_at":1}}"#)
+            default:
+                return (404, #"{"ok":false,"error_code":404,"description":"Not Found"}"#)
+            }
+        }
+        let api = APIClient(baseURL: URL(string: "https://gw.test/")!, secret: "s", session: MockGateway.session())
+        await LegacyBotIDs.renameBeforePush(store: store, tokens: MemoryTokens(["4": "4:sec"]), api: api)
+        #expect(try store.bot(id: "aZ3kQ9xT")?.name == "部署")
+        #expect(try store.isMuted(botID: "aZ3kQ9xT"), "the push sees the bot's mute flag")
+        #expect(try store.bot(id: "5") == nil, "a legacy bot the list lacks goes, as in a refresh")
+        // Nothing to do once renamed: no more requests.
+        MockGateway.requests = []
+        await LegacyBotIDs.renameBeforePush(store: store, tokens: MemoryTokens(), api: api)
+        #expect(MockGateway.requests.isEmpty)
+    }
+
     @Test func gatewayError() async throws {
         MockGateway.handler = { _ in (401, #"{"ok":false,"error_code":401,"description":"Unauthorized"}"#) }
         let api = APIClient(baseURL: URL(string: "https://gw.test/")!, secret: "bad", session: MockGateway.session())
@@ -331,5 +355,114 @@ final class MockGateway: URLProtocol {
         #expect(avatars.data(for: b) == nil)
         #expect(avatars.data(for: webp) == nil)
         #expect(avatars.data(for: a) != nil)
+    }
+}
+
+final class MemoryTokens: BotTokenStoring, @unchecked Sendable {
+    var map: [String: String]
+    init(_ map: [String: String] = [:]) { self.map = map }
+    func token(botID: String) -> String? { map[botID] }
+    func save(_ token: String, botID: String) { map[botID] = token }
+    func remove(botID: String) { map[botID] = nil }
+}
+
+struct Offline: Error {}
+
+/// A store with legacy bots "4" (token "4:sec", pinned, one message) and "5" (no token).
+func legacyStore() throws -> LocalStore {
+    let path = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".sqlite").path
+    let store = try LocalStore(path: path)
+    try store.saveBot(Bot(id: "4", name: "部署", createdAt: 100))
+    try store.saveBot(Bot(id: "5", name: "告警", createdAt: 200))
+    try store.setPinned(botID: "4", true)
+    try store.apply(QueuedMessage(id: 1, botID: "4", body: "old"), notificationID: "n1")
+    return store
+}
+
+let serverBots = [Bot(id: "aZ3kQ9xT", name: "部署", createdAt: 100), Bot(id: "bQ7mN2pR", name: "告警", createdAt: 200)]
+
+@Suite struct LegacyBotIDTests {
+    @Test func renamesByTokenAndByCreationAndName() async throws {
+        let store = try legacyStore()
+        let tokens = MemoryTokens(["4": "4:sec"])
+        let out = await LegacyBotIDs.rename(store: store, tokens: tokens, serverBots: serverBots) { token in
+            #expect(token == "4:sec")
+            return serverBots[0]
+        }
+        #expect(out.renamed == [.init(old: "4", new: "aZ3kQ9xT"), .init(old: "5", new: "bQ7mN2pR")])
+        #expect(out.pending.isEmpty)
+        try store.replaceBots(serverBots, keeping: out.pending)
+        #expect(try store.messages(botID: "aZ3kQ9xT").map(\.body) == ["old"])
+        #expect(try store.chats().first { $0.bot.id == "aZ3kQ9xT" }?.pinned == true)
+        #expect(tokens.map == ["aZ3kQ9xT": "4:sec"])
+        // Taps on notifications from before the rename still find the bot.
+        #expect(store.currentBotID("4") == "aZ3kQ9xT")
+        #expect(store.currentBotID("aZ3kQ9xT") == "aZ3kQ9xT")
+        #expect(store.currentBotID("9") == "9")
+        // The old notification id still removes it.
+        #expect(try store.markRead(botID: "aZ3kQ9xT") == ["n1"])
+    }
+
+    @Test func transientFailureKeepsTheBot() async throws {
+        let store = try legacyStore()
+        try store.saveBot(Bot(id: "6", name: "部署", createdAt: 100)) // a twin: no safe match by name
+        let tokens = MemoryTokens(["4": "4:sec"])
+        let out = await LegacyBotIDs.rename(store: store, tokens: tokens, serverBots: serverBots) { _ in throw Offline() }
+        #expect(out.pending == ["4"])
+        try store.replaceBots(serverBots, keeping: out.pending)
+        #expect(try store.messages(botID: "4").map(\.body) == ["old"], "kept for the next try")
+        #expect(tokens.map == ["4": "4:sec"])
+        #expect(try store.bot(id: "6") == nil, "an unmatched bot without a pending rename goes")
+    }
+
+    @Test func pendingBotMergesIntoItsListedRowLater() async throws {
+        // Refresh 1: getMe is offline, so "4" stays pending while the list's short id is stored too.
+        let store = try legacyStore()
+        try store.saveBot(Bot(id: "6", name: "部署", createdAt: 100)) // a twin: no safe match by name
+        try store.setMuted(botID: "4", true)
+        let tokens = MemoryTokens(["4": "4:sec"])
+        let first = await LegacyBotIDs.rename(store: store, tokens: tokens, serverBots: serverBots) { _ in throw Offline() }
+        try store.replaceBots(serverBots, keeping: first.pending)
+        try store.apply(QueuedMessage(id: 2, botID: "aZ3kQ9xT", body: "new"))
+        #expect(try store.bot(id: "aZ3kQ9xT") != nil && store.bot(id: "4") != nil)
+        // Refresh 2: getMe answers; the two rows merge instead of the old one being dropped.
+        let second = await LegacyBotIDs.rename(store: store, tokens: tokens, serverBots: serverBots) { _ in serverBots[0] }
+        #expect(second.renamed == [.init(old: "4", new: "aZ3kQ9xT")])
+        try store.replaceBots(serverBots, keeping: second.pending)
+        #expect(try store.messages(botID: "aZ3kQ9xT").map(\.body) == ["new", "old"])
+        #expect(try store.isMuted(botID: "aZ3kQ9xT"))
+        #expect(try store.chats().first { $0.bot.id == "aZ3kQ9xT" }?.pinned == true)
+        #expect(try store.bot(id: "4") == nil)
+        #expect(tokens.map == ["aZ3kQ9xT": "4:sec"])
+    }
+
+    @Test func getMeAnswerIsNotSecondGuessedByName() async throws {
+        // The token names a bot the gateway no longer lists: no matching by name and time.
+        let store = try legacyStore()
+        let out = await LegacyBotIDs.rename(store: store, tokens: MemoryTokens(["4": "4:sec"]), serverBots: serverBots) { _ in
+            Bot(id: "gone1234", name: "部署", createdAt: 100)
+        }
+        #expect(out.renamed == [.init(old: "5", new: "bQ7mN2pR")])
+    }
+
+    @Test func goneTokenFallsBackToCreationAndName() async throws {
+        let store = try legacyStore()
+        let out = await LegacyBotIDs.rename(store: store, tokens: MemoryTokens(["4": "4:old"]), serverBots: serverBots) { _ in
+            throw APIError.gateway(code: 401, description: "Unauthorized")
+        }
+        #expect(out.renamed.map(\.new) == ["aZ3kQ9xT", "bQ7mN2pR"])
+        #expect(out.pending.isEmpty)
+    }
+
+    @Test func noMatchIsDropped() async throws {
+        let store = try legacyStore()
+        let others = [Bot(id: "cX1", name: "别的", createdAt: 100)]
+        let out = await LegacyBotIDs.rename(store: store, tokens: MemoryTokens(), serverBots: others) { _ in
+            Issue.record("no token, no getMe")
+            throw Offline()
+        }
+        #expect(out == .init())
+        try store.replaceBots(others, keeping: out.pending)
+        #expect(try store.botIDs() == ["cX1"])
     }
 }

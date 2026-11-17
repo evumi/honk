@@ -124,12 +124,23 @@ func (s *Server) deleteDevice(w http.ResponseWriter, r *http.Request) {
 
 // ---- bots ----
 
-func botID(r *http.Request) (string, error) {
+// botID reads the {id} of /v1/bots/{id}. The integer id a client knew
+// before v2 still names the device's own bot: an app whose local rename to the
+// short id is still pending (offline at the first sync) can delete or edit it.
+func (s *Server) botID(r *http.Request) (string, error) {
 	id := chi.URLParam(r, "id")
-	if !store.ValidBotID(id) {
+	if store.ValidBotID(id) {
+		return id, nil
+	}
+	key, err := strconv.ParseUint(id, 10, 63)
+	if err != nil || key == 0 {
 		return "", errNotFound
 	}
-	return id, nil
+	public, err := s.store.BotIDByKey(r.Context(), device(r).ID, int64(key))
+	if err == nil {
+		s.log.Info("integer bot id", "path", r.URL.Path, "bot", public)
+	}
+	return public, err
 }
 
 func checkBotFields(name, avatar, lvl *string) error {
@@ -191,7 +202,7 @@ func (s *Server) createBot(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getBot(w http.ResponseWriter, r *http.Request) {
-	id, err := botID(r)
+	id, err := s.botID(r)
 	if err == nil {
 		var b store.Bot
 		if b, err = s.store.GetBot(r.Context(), device(r).ID, id); err == nil {
@@ -203,7 +214,7 @@ func (s *Server) getBot(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) updateBot(w http.ResponseWriter, r *http.Request) {
-	id, err := botID(r)
+	id, err := s.botID(r)
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -230,7 +241,7 @@ func (s *Server) updateBot(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) deleteBot(w http.ResponseWriter, r *http.Request) {
-	id, err := botID(r)
+	id, err := s.botID(r)
 	if err == nil {
 		if err = s.store.DeleteBot(r.Context(), device(r).ID, id); err == nil {
 			s.forgetBot(id)
@@ -242,7 +253,7 @@ func (s *Server) deleteBot(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) resetBotToken(w http.ResponseWriter, r *http.Request) {
-	id, err := botID(r)
+	id, err := s.botID(r)
 	if err == nil {
 		var token string
 		if token, err = s.store.ResetBotToken(r.Context(), device(r).ID, id); err == nil {

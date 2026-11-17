@@ -14,6 +14,7 @@ import dev.evumi.honk.core.BotTokenStore
 import dev.evumi.honk.core.CredentialStore
 import dev.evumi.honk.core.DeviceRegistrar
 import dev.evumi.honk.core.Gateway
+import dev.evumi.honk.core.HttpTransport
 import dev.evumi.honk.core.LegacyBotIds
 import dev.evumi.honk.core.LocalStore
 import dev.evumi.honk.core.PushInfo
@@ -199,9 +200,13 @@ class HonkService private constructor(context: Context) {
     fun refresh() {
         if (!isRegistered || !syncing.compareAndSet(false, true)) return
         try {
-            val bots = api.listBots()
-            notifier.cancel(LegacyBotIds.rename(store, botTokens, api, bots.map { it.id }.toSet()))
-            store.replaceBots(bots)
+            val client = api
+            val bots = client.listBots()
+            // Bots still stored by integer id move to their short id; one whose
+            // rename failed for now (offline, 5xx) is kept for the next refresh.
+            val renamed = LegacyBotIds.rename(store, botTokens, bots) { client.getMe(it) }
+            renamed.renamed.forEach { notifier.moveChannel(it.old, it.new) }
+            store.replaceBots(bots, keeping = renamed.pending)
             notifier.syncChannels(store.chats().map { it.bot })
             val out = SyncEngine(api, store).run()
             notifier.cancel(out.staleNotificationIds)
@@ -236,7 +241,19 @@ class HonkService private constructor(context: Context) {
         }
     }
 
+    /**
+     * The app may not have synced since the gateway gave its bots short ids:
+     * rename first so the push's bot name, avatar and mute apply. A short
+     * timeout keeps a slow gateway from holding up the notification.
+     */
+    private fun renameBeforePush() {
+        if (!isRegistered) return
+        val client = ApiClient(gatewayUrl, credentials.load()?.secret, HttpTransport(timeoutMs = 5_000))
+        LegacyBotIds.renameBeforePush(store, botTokens, client).renamed.forEach { notifier.moveChannel(it.old, it.new) }
+    }
+
     private fun handleMessage(info: PushInfo) {
+        renameBeforePush()
         val tag = Notifier.tag(info.botId, info.messageId, info.collapseId)
         val stored = try {
             val r = store.apply(api.message(info.messageId), tag)
@@ -274,6 +291,7 @@ class HonkService private constructor(context: Context) {
 
     private fun handleSilent(info: PushInfo) {
         if (!isRegistered) return
+        renameBeforePush()
         try {
             val r = store.apply(api.message(info.messageId))
             notifier.cancel(r.staleNotificationIds)

@@ -356,6 +356,17 @@ func (s *Store) GetBot(ctx context.Context, deviceID string, botID string) (Bot,
 	return scanBot(s.db.QueryRowContext(ctx, `SELECT `+botCols+` FROM bots WHERE public_id = ? AND device_id = ?`, botID, deviceID))
 }
 
+// BotIDByKey returns the public id of one of a device's bots by its row id:
+// the integer id clients knew before v2.
+func (s *Store) BotIDByKey(ctx context.Context, deviceID string, key int64) (string, error) {
+	var id string
+	err := s.db.QueryRowContext(ctx, `SELECT public_id FROM bots WHERE id = ? AND device_id = ?`, key, deviceID).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return id, err
+}
+
 // BotPatch holds the fields to change; nil leaves a field as it is.
 type BotPatch struct {
 	Name         *string

@@ -67,7 +67,7 @@ bot id 是 8 位随机 base62 字符、以字母开头（如 `aZ3kQ9xT`），生
 
 bot token 形如 `<bot id>:<32 位随机串>`；token 和 device secret 都只存 sha256。查 token 时按整串的哈希查，所以 v2 迁移前发出的 `<整数 id>:<secret>` 旧 token 继续有效，直到重置。
 
-迁移：`schema.sql` 是 v1；之后的版本在 `store.go` 的 `migrate` 里按 `PRAGMA user_version` 逐步执行，每步一个事务。v2 给 bots 加 `public_id` 列、为已有 bot 补上短 id、建唯一索引。App 解码 bot id 时也接受数字（旧网关），所以要先发 App 再升级网关。
+迁移：`schema.sql` 是 v1；之后的版本在 `store.go` 的 `migrate` 里按 `PRAGMA user_version` 逐步执行，每步一个事务。v2 给 bots 加 `public_id` 列、为已有 bot 补上短 id、建唯一索引。App 解码 bot id 时也接受数字（旧网关），所以要先发 App 再升级网关。`/v1/info` 的 `api` 从 1 升到 2。`/v1/bots/:id` 仍接受 v2 之前的整数 id，但只认本设备自己的 bot（按库内主键查），这样改名还在 pending 的 bot 也能删除、修改。
 
 ### 接口
 
@@ -79,7 +79,7 @@ bot token 形如 `<bot id>:<32 位随机串>`；token 和 device secret 都只�
 | `/bot<token>/editMessageData` | 发送方 | `message_id` 或 `id` + `data`，卡片原地更新，不弹通知 |
 | `/bot<token>/deleteMessage` | 发送方 | `message_id` 或 `id` |
 | `/bot<token>/getMe` | 发送方 | 测试 token |
-| `GET /v1/info` | App | `{name:"honk", version, api}`，切换网关前用来确认地址是 Honk 网关 |
+| `GET /v1/info` | App | `{name:"honk", version, api}`，切换网关前用来确认地址是 Honk 网关；`api` 2 表示 bot id 是字符串 |
 | `POST /v1/devices` | App | 注册，返回 `device_secret`（只返回这一次） |
 | `GET` / `PUT` / `DELETE /v1/devices/me` | App | 读取；更新 push token；删除设备及全部数据 |
 | `GET` / `POST /v1/bots`，`GET` / `PATCH` / `DELETE /v1/bots/:id`，`POST /v1/bots/:id/token` | App | bot 管理；token 只在创建和重置时返回 |
@@ -111,7 +111,7 @@ bot token 形如 `<bot id>:<32 位随机串>`；token 和 device secret 都只�
 | --- | --- |
 | `APIClient.swift` | `/v1` 接口客户端 |
 | `Credentials.swift` | 设备凭据和各 bot token 存 Keychain，用共享 access group，`AfterFirstUnlock`，NSE 在锁屏时也能读 |
-| `LocalStore.swift` | App Group 里的 SQLite，WAL + busy timeout，App 和 NSE 两个进程共用。`apply()` 处理 message / edit / delete，重复调用安全，返回需要撤掉的系统通知 id。bot id 是 TEXT；v2 迁移把 v1 的整数 bot id 转成文本，`renameBot` 再把它们换成短 id |
+| `LocalStore.swift` | App Group 里的 SQLite，WAL + busy timeout，App 和 NSE 两个进程共用。`apply()` 处理 message / edit / delete，重复调用安全，返回需要撤掉的系统通知 id。bot id 是 TEXT；v2 迁移把 v1 的整数 bot id 转成文本，`renameBot` 再把它们换成短 id，并在 `meta` 里记下旧 id → 新 id（`currentBotID`）。改名规则在 `LegacyBotIDs.swift`，App 和 NSE 共用 |
 | `Honk.swift` | `HonkConfig`（从 Info.plist 读网关地址、App Group、Keychain 组）；`ChangeSignal`（Darwin 通知，NSE 写库后通知 App 刷新）；`SyncEngine`（分页拉取、应用、ack） |
 | `Avatar.swift` | 头像格式 `preset:<icon>:<#rrggbb>`、https URL 或 `local:<文件名>`；https 图片缓存到 App Group。`LocalAvatars`：用户从相册选的头像只存在本机 App Group 的 `Library/Avatars`（NSE 也能读），网关的 `avatar` 字段只存 `local:<文件名>` 这个字符串；只收 JPEG / PNG / WebP / GIF（按文件头判断），≤ 1MB；刷新时删掉没有 bot 在用、且超过 1 小时的文件。预设图标里已去掉船，旧的 `preset:ship:<颜色>` 显示为同色的铃铛 |
 | `CommunicationNotification.swift` | iOS 15 通讯通知：`INSendMessageIntent` + bot 头像 |
@@ -186,7 +186,16 @@ Gradle 工程，minSdk 26，compileSdk / targetSdk 35。只支持有 GMS 的设�
   - 通知 tag：有 collapse id 时是 `c<bot>:<collapse id>`，同 id 的新消息原地替换旧通知；否则是 `m<msg_id>`。tag 存在本地库的 `notif_id` 里，删除、替换、标记已读时据此撤掉通知。
   - `level=passive` 或 bot 静音时不响铃、不弹横幅（`setSilent`）。正在看的会话来消息时不发通知，直接标为已读。
 - `MainActivity`：全屏 `NshView`，按 `assets/nsh/capabilities.json` 授权后 `loadAssetBundle("nsh")`；debug 构建可以用 intent extra `nshDevUrl` 连 `nsh dev` 热更新。Android 13+ 首次启动申请 `POST_NOTIFICATIONS`，被拒后在设置页里引导去系统设置。点击通知：消息有 `url` 就打开，否则发 `honk.open` 进入会话。
-- 旧 bot id：刷新时，本地还有纯数字 id、而网关列表里没有它的 bot，就用本机存的 token 调 `getMe` 查出短 id，`LocalStore.renameBot` 把消息和静音 / 置顶迁过去，token 改存到新 id 下（`LegacyBotIds`；iOS 在 `HonkService.renameLegacyBots`）。没有 token 的旧 bot 照常被删除。旧的 `bot-<整数>` channel 会被 `syncChannels` 删掉，用户对它的设置不保留。
+- 旧 bot id（`core/Sync.kt` 的 `LegacyBotIds`，与 HonkKit 的 `LegacyBotIDs.swift` 规则相同）：本地还有纯数字 id、而网关列表里没有它的 bot 时：
+  1. 有 token 就调 `getMe` 查出短 id（旧 token 仍有效）；
+  2. 没有 token，或网关答 401 / 404（token 已失效），就按 `created_at` + 名称匹配：网关列表里恰好一个本机还没有的 bot 两者都相同，本机也只有这一个旧 bot 是这个组合，才算匹配；
+  3. 其他失败（离线、超时、5xx）又没匹配上的，记为 pending：`replaceBots(keeping:)` 保留它和它的消息，下次刷新再试。真正匹配不上的才删除。
+  - 匹配上后 `renameBot` 迁移消息和静音 / 置顶，token 改存到新 id 下，`meta` 记下旧 id → 新 id。点开改名前的通知或快捷方式（Android 旧 intent 里是 Long，iOS 是数字 `bot_id`）时用 `currentBotId` 换成新 id。
+  - 已显示的旧通知两个平台都不动：`notif_id` 里存的 tag / request id 仍能撤掉它们；同一 collapse id 的新消息到达时，旧通知按 stale 撤掉。
+  - 网关列表里的短 id 已经存进本机（上次刷新时旧 bot 还在 pending）时，`renameBot` 把两行合并：消息移过去，静音 / 置顶取两者之一为真；token 只在短 id 下还没有时才搬过去。
+  - `getMe` 有答复就以它为准，不再按名称和创建时间匹配。
+  - 刷新时调用；推送到达时只要本机还有旧 id，就先拉 bot 列表改名，再像刷新一样应用列表（匹配不上的旧 bot 删掉，之后的推送不再请求），这样静音、名称、头像都对。iOS 在 NSE 和后台推送里，Android 在 `handlePush` 里；这一步用 5 秒超时的客户端，避免拖慢通知。
+  - Android 改名时 `Notifier.moveChannel` 用旧 `bot-<整数>` channel 的重要性、声音、振动、指示灯、锁屏可见性和角标设置建 `bot-<短 id>`，再删掉旧的。
 - `NshBridge`：`honk.*` 宿主函数和事件，行为对照 iOS 的 `NshBridge.swift`，见第 6 节。处理函数在 UI 线程被调用，实际工作放到 IO 线程，再通过 `NshHostReply` 回复。
 
 #### 配置

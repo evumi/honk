@@ -91,8 +91,9 @@ func (s *Server) Handler() http.Handler {
 
 	r.Route("/v1", func(r chi.Router) {
 		// Lets the app check that an address is a Honk gateway before switching to it.
+		// api 2: bot ids are short strings (1: integers).
 		r.Get("/info", func(w http.ResponseWriter, r *http.Request) {
-			ok(w, map[string]any{"name": "honk", "version": s.opts.Version, "api": 1})
+			ok(w, map[string]any{"name": "honk", "version": s.opts.Version, "api": APIVersion})
 		})
 		r.Post("/devices", s.registerDevice)
 		r.Group(func(r chi.Router) {
@@ -116,6 +117,10 @@ func (s *Server) Handler() http.Handler {
 	r.HandleFunc("/{bot}/{method}", s.botAPI)
 	return r
 }
+
+// APIVersion is what /v1/info reports. 2: bot ids are short strings; app
+// builds for 1 (integer ids) cannot read the bot list any more.
+const APIVersion = 2
 
 // SimulatorTokenPrefix marks the push token of a Debug iOS simulator build
 // that has no APNs token: the device is registered but gets no pushes.

@@ -266,8 +266,14 @@ func TestAppAuthAndOwnership(t *testing.T) {
 	if !store.ValidBotID(id) || !strings.HasPrefix(tokenA, id+":") {
 		t.Errorf("bot id %q, token %q: want a short id that prefixes the token", id, tokenA)
 	}
-	if r := e.do("GET", "/v1/bots/1", a, nil); r.ErrorCode != 404 {
-		t.Errorf("integer bot id: %d", r.ErrorCode)
+	// The integer id from before v2 still names the device's own bot, and only its own.
+	if legacy := must[store.Bot](t, e.do("GET", "/v1/bots/1", a, nil)); legacy.ID != id {
+		t.Errorf("integer bot id = %q, want %q", legacy.ID, id)
+	}
+	for _, path := range []string{"/v1/bots/2", "/v1/bots/-1", "/v1/bots/0", "/v1/bots/nope"} {
+		if r := e.do("GET", path, a, nil); r.ErrorCode != 404 {
+			t.Errorf("%s: %d", path, r.ErrorCode)
+		}
 	}
 	sent := must[store.Message](t, e.do("POST", "/bot"+tokenA+"/sendMessage", "", map[string]string{"body": "x"}))
 	if sent.BotID != id || e.pusher.last(t).BotID != id {
@@ -317,7 +323,7 @@ func TestGoneTokenStopsPushes(t *testing.T) {
 func TestInfo(t *testing.T) {
 	e := setup(t)
 	info := must[map[string]any](t, e.do("GET", "/v1/info", "", nil))
-	if info["name"] != "honk" || info["api"] != float64(1) {
+	if info["name"] != "honk" || info["api"] != float64(APIVersion) {
 		t.Errorf("info = %v", info)
 	}
 }
