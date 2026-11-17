@@ -176,6 +176,8 @@ class NshBridge(
         put("pushMode", "apns")
         put("gatewayURL", service.gatewayUrl)
         put("notifications", notificationStatus())
+        put("appVersion", BuildConfig.VERSION_NAME)
+        put("appBuild", BuildConfig.VERSION_CODE.toString())
     }
 
     private fun notificationStatus(): String {

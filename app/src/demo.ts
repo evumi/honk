@@ -1,6 +1,7 @@
 // An in-memory stand-in for the native host, used when the app runs without
 // one (`nsh run App.tsx` on a desktop). Same names and shapes as NshBridge.
 import type { Bot, Chat, Message } from "./host";
+import { appInfo } from "nsh";
 import { lang } from "./i18n";
 
 const now = Date.now();
@@ -79,7 +80,7 @@ export async function demo<T>(name: string, args: unknown): Promise<T> {
   const out = ((): unknown => {
     switch (name) {
       case "honk.status":
-        return { registered: true, registration: "registered", pushMode: "apns", gatewayURL: gateway, notifications: "authorized" };
+        return { registered: true, registration: "registered", pushMode: "apns", gatewayURL: gateway, notifications: "authorized", appVersion: appInfo().version, appBuild: String(appInfo().build ?? "") };
       case "honk.register.retry":
         return { registered: true, registration: "registered", pushMode: "apns", gatewayURL: gateway, notifications: "authorized" };
       case "honk.gateway.get":

@@ -307,6 +307,15 @@ function SettingsTab(props: { p: Palette }) {
         <Row p={p()} first label={host()} value={tr("更改")} onPress={() => nav.push({ name: "gateway" })} testID="gateway-row" />
         <Row p={p()} label={tr("立即同步")} color={p().accent} onPress={() => void api.refresh().then(reload)} />
       </Section>
+      <View style={{ flex: 1 }} />
+      <If when={status()?.appVersion}>
+        <Text
+          testID="app-version"
+          style={{ textAlign: "center", fontSize: 13, color: p().hint, paddingBottom: safeArea().bottom + 96 }}
+        >
+          {`Honk ${status()?.appVersion}${status()?.appBuild ? ` (${status()?.appBuild})` : ""}`}
+        </Text>
+      </If>
     </View>
   );
 }

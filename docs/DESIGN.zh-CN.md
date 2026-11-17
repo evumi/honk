@@ -209,7 +209,7 @@ App 用 TSX 写，跑在 QuickJS 上。页面：
 
 | 调用 | 参数 | 返回 |
 | --- | --- | --- |
-| `honk.status` | | `{registered, registration, registrationError?, pushMode, gatewayURL, notifications}` |
+| `honk.status` | | `{registered, registration, registrationError?, pushMode, gatewayURL, notifications, appVersion, appBuild}`（设置页底部显示版本号） |
 | `honk.chats` | | `Chat[]`：`{bot, muted, pinned, unread, last}` |
 | `honk.messages` | `{botId, before?, limit?}` | `Message[]`，新的在前 |
 | `honk.markRead` / `honk.focus` | `{botId}` | |

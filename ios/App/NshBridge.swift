@@ -179,6 +179,8 @@ final class NshBridge {
             "pushMode": service.pushMode.rawValue,
             "gatewayURL": service.config.gatewayURL.absoluteString,
             "notifications": Self.authorization(settings.authorizationStatus),
+            "appVersion": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "",
+            "appBuild": Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "",
         ]
         if case let .failed(reason) = service.registration { out["registrationError"] = reason }
         return out

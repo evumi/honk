@@ -38,6 +38,22 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 60
     steps:
+      - name: Check secrets and variables
+        env:
+          IOS_TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
+          IOS_DIST_P12_B64: ${{ secrets.IOS_DIST_P12_B64 }}
+          IOS_DIST_P12_PASSWORD: ${{ secrets.IOS_DIST_P12_PASSWORD }}
+          HONK_GATEWAY_URL: ${{ vars.HONK_GATEWAY_URL }}
+        run: |
+          missing=""
+          for name in ASC_KEY_ID ASC_ISSUER_ID ASC_PRIVATE_KEY_B64 ASC_APP_ID IOS_TEAM_ID IOS_DIST_P12_B64 IOS_DIST_P12_PASSWORD HONK_GATEWAY_URL; do
+            [ -n "$(printenv "$name")" ] || missing="$missing $name"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Missing secrets or variables:$missing (see docs/DEPLOY.zh-CN.md)"
+            exit 1
+          fi
+
       - uses: actions/checkout@v4
 
       - uses: rudrankriyam/setup-asc@v1
