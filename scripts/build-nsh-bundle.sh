@@ -6,7 +6,7 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 out="$root/app/dist/nsh"
 mkdir -p "$out"
 if ! command -v nsh >/dev/null 2>&1; then
-  for p in /opt/homebrew/bin /usr/local/bin "$HOME/.nsh/bin"; do
+  for p in /opt/homebrew/bin /usr/local/bin "$HOME/.local/bin"; do
     [ -x "$p/nsh" ] && PATH="$p:$PATH" && break
   done
 fi
