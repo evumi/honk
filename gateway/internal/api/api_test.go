@@ -296,3 +296,24 @@ func TestInfo(t *testing.T) {
 		t.Errorf("info = %v", info)
 	}
 }
+
+func TestSimulatorTokenGetsNoPush(t *testing.T) {
+	e := setup(t)
+	reg := must[struct {
+		Secret string `json:"device_secret"`
+	}](t, e.do("POST", "/v1/devices", "", map[string]string{"platform": "ios", "push_token": SimulatorTokenPrefix + "abc"}))
+	bot := must[struct {
+		Token string `json:"token"`
+	}](t, e.do("POST", "/v1/bots", reg.Secret, map[string]string{"name": "sim"}))
+	sent := must[store.Message](t, e.do("POST", "/bot"+bot.Token+"/sendMessage", "", map[string]string{"body": "x"}))
+	if len(e.pusher.sent) != 0 {
+		t.Errorf("pushed to a simulator token: %+v", e.pusher.sent)
+	}
+	// The message still syncs.
+	page := must[struct {
+		Messages []store.Message `json:"messages"`
+	}](t, e.do("GET", "/v1/sync", reg.Secret, nil))
+	if len(page.Messages) != 1 || page.Messages[0].ID != sent.ID {
+		t.Errorf("sync = %+v", page.Messages)
+	}
+}

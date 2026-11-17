@@ -87,6 +87,10 @@ func (s *Server) Handler() http.Handler {
 	return r
 }
 
+// SimulatorTokenPrefix marks the push token of a Debug iOS simulator build
+// that has no APNs token: the device is registered but gets no pushes.
+const SimulatorTokenPrefix = "simulator-"
+
 // ---- responses ----
 
 type apiError struct {
@@ -134,6 +138,10 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 // failed push is logged, not returned: the message stays queued for /sync.
 func (s *Server) notify(ctx context.Context, d store.Device, n push.Notification) {
 	if !d.PushOK || d.PushToken == "" {
+		return
+	}
+	// Debug simulator builds register without APNs; they poll /v1/sync instead.
+	if strings.HasPrefix(d.PushToken, SimulatorTokenPrefix) {
 		return
 	}
 	n.Platform, n.Token = d.Platform, d.PushToken

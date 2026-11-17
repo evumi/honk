@@ -203,3 +203,17 @@ final class MockGateway: URLProtocol {
         #expect(store.syncCursor == 0)
     }
 }
+
+@Suite struct KeychainTests {
+    @Test func credentialsRoundTripWithoutTheGroupEntitlement() throws {
+        // This test binary has no keychain-access-groups entitlement, like an
+        // unsigned simulator build: the store must still save and read.
+        let store = CredentialStore(service: "dev.evumi.honk.test.\(UUID().uuidString)", accessGroup: "ABCDE12345.dev.evumi.honk.shared")
+        defer { store.clear() }
+        let c = Credentials(deviceID: "d", secret: "s", pushToken: "t")
+        try store.save(c)
+        #expect(store.load() == c)
+        store.clear()
+        #expect(store.load() == nil)
+    }
+}

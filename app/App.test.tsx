@@ -117,3 +117,24 @@ test("the gateway page tests an address before switching", async () => {
   await app.waitUntil(() => app.host.calls().some((c) => c.name === "honk.gateway.set"));
   expect(app.host.calls().find((c) => c.name === "honk.gateway.set")?.data).toEqual({ url: "https://mine.example/" });
 });
+
+test("settings shows a failed registration and retries it", async () => {
+  let registered = false;
+  const status = () => registered
+    ? { registered: true, registration: "registered", pushMode: "apns", gatewayURL: "https://gw.test/", notifications: "authorized" }
+    : { registered: false, registration: "failed", registrationError: "连不上网关", pushMode: "apns", gatewayURL: "https://gw.test/", notifications: "authorized" };
+  const app = await open("./App.tsx", {
+    host: host({
+      "honk.status": () => status(),
+      "honk.register.retry": () => {
+        registered = true;
+        return status();
+      },
+    }),
+  });
+  await app.press("id:tab-settings");
+  await app.waitFor("text:注册失败");
+  expect(app.texts().some((t) => t.includes("连不上网关"))).toBe(true);
+  await app.press("id:retry-registration");
+  await app.waitFor("text:已注册");
+});

@@ -9,8 +9,8 @@ public enum APIError: Error, Equatable, LocalizedError {
     public var errorDescription: String? {
         switch self {
         case let .gateway(code, desc): return "\(code) \(desc)"
-        case .notRegistered: return "This device is not registered with the gateway"
-        case .badResponse: return "The gateway sent a response that could not be read"
+        case .notRegistered: return "这台设备还没有注册到网关。到「设置 → 设备注册」查看原因并重试。"
+        case .badResponse: return "网关的响应无法解析，请确认地址是 Honk 网关"
         }
     }
 

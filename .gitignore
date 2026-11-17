@@ -13,3 +13,6 @@ ios/Config/Local.xcconfig
 app/dist/
 app/.nsh/
 xcuserdata/
+ios/App/Info.plist
+ios/NotificationService/Info.plist
+ios/build/
