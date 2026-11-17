@@ -148,3 +148,30 @@ test("an English locale gets the English UI", async () => {
   await app.waitFor("text:Registered");
   expect(app.texts()).toContain("Sync now");
 });
+
+test("an open chat does not mark read again on every change", async () => {
+  let unread = true;
+  let marks = 0;
+  const message = () => ({
+    id: 7, botId: 1, title: "t", body: "b", html: "", data: "", level: "active", group: "", url: "", copy: "",
+    icon: "", collapseId: "", date: Date.now(), read: !unread,
+  });
+  const app = await open("./App.tsx", {
+    locale: "zh-Hans-CN",
+    host: host({
+      "honk.messages": () => [message()],
+      "honk.markRead": () => {
+        marks++;
+        unread = false;
+        return true;
+      },
+    }),
+  });
+  await app.press("id:chat-1");
+  await app.waitUntil(() => marks === 1);
+  // The native side announces the read (and any other change); the page reloads.
+  await app.host.send("honk.changed");
+  await app.host.send("honk.changed");
+  await app.wait(300);
+  expect(marks).toBe(1);
+});

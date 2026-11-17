@@ -83,6 +83,29 @@ func tempStore() throws -> LocalStore {
         #expect(store.syncCursor == 42)
     }
 
+    @Test func concurrentFirstOpensAllMigrate() throws {
+        // The app and the extension opening a new file together must both succeed.
+        let path = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".sqlite").path
+        let errors = NSLock()
+        var failures: [Error] = []
+        DispatchQueue.concurrentPerform(iterations: 8) { _ in
+            do { _ = try LocalStore(path: path) } catch {
+                errors.lock(); failures.append(error); errors.unlock()
+            }
+        }
+        #expect(failures.isEmpty, "\(failures)")
+        #expect(try LocalStore(path: path).chats().isEmpty)
+    }
+
+    @Test func unreadCount() throws {
+        let store = try tempStore()
+        try store.apply(QueuedMessage(id: 1, botID: 1, body: "a"))
+        try store.apply(QueuedMessage(id: 2, botID: 1, body: "b"))
+        #expect(try store.unreadCount(botID: 1) == 2)
+        try store.markRead(botID: 1)
+        #expect(try store.unreadCount(botID: 1) == 0)
+    }
+
     @Test func twoConnectionsShareTheFile() throws {
         // The app and the extension each open the file.
         let path = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".sqlite").path

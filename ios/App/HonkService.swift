@@ -90,6 +90,13 @@ final class HonkService {
                     } catch let e as APIError where e.isUnauthorized {
                         // The gateway forgot this device: register again below.
                         credentials.clear()
+                    } catch {
+                        // Offline or a gateway error: the device is still registered.
+                        // The stored token stays the old one, so the next launch
+                        // (which reports the token again) retries the update.
+                        NSLog("honk: push token update failed, will retry: \(error)")
+                        setRegistration(.registered)
+                        return
                     }
                 }
                 if credentials.load() != nil {
@@ -291,7 +298,11 @@ final class HonkService {
         }
     }
 
+    /// Marks a bot's messages read. Announces a change only when something was
+    /// unread: the chat page reloads on changes and marks read on load, so an
+    /// unconditional announcement would loop.
     func markRead(botID: Int64) {
+        guard ((try? store.unreadCount(botID: botID)) ?? 0) > 0 else { return }
         removeNotifications((try? store.markRead(botID: botID)) ?? [])
         changed()
     }

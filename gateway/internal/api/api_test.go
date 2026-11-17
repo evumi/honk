@@ -21,12 +21,19 @@ import (
 )
 
 type fakePusher struct {
-	mu   sync.Mutex
-	sent []push.Notification
-	err  error
+	mu    sync.Mutex
+	sent  []push.Notification
+	err   error
+	block chan struct{} // when set, Push waits for it to close
 }
 
 func (f *fakePusher) Push(_ context.Context, n push.Notification) error {
+	f.mu.Lock()
+	block := f.block
+	f.mu.Unlock()
+	if block != nil {
+		<-block
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.sent = append(f.sent, n)
@@ -45,21 +52,26 @@ func (f *fakePusher) last(t *testing.T) push.Notification {
 
 type env struct {
 	t      *testing.T
+	s      *Server
 	srv    *httptest.Server
 	pusher *fakePusher
 }
 
 func setup(t *testing.T) *env {
+	return setupWith(t, Options{MessageTTL: time.Hour, SendRate: 100, SendBurst: 3})
+}
+
+func setupWith(t *testing.T, opts Options) *env {
 	st, err := store.Open(filepath.Join(t.TempDir(), "honk.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.Close() })
 	p := &fakePusher{}
-	s := New(st, p, slog.New(slog.NewTextHandler(io.Discard, nil)), Options{MessageTTL: time.Hour, SendRate: 100, SendBurst: 3})
+	s := New(st, p, slog.New(slog.NewTextHandler(io.Discard, nil)), opts)
 	srv := httptest.NewServer(s.Handler())
 	t.Cleanup(srv.Close)
-	return &env{t: t, srv: srv, pusher: p}
+	return &env{t: t, s: s, srv: srv, pusher: p}
 }
 
 type envelope struct {
@@ -93,6 +105,8 @@ func (e *env) send(req *http.Request) envelope {
 		e.t.Fatal(err)
 	}
 	defer res.Body.Close()
+	// Pushes run in the background; let them finish so tests can look at them.
+	e.s.Wait()
 	var out envelope
 	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
 		e.t.Fatalf("%s %s: bad JSON: %v", req.Method, req.URL.Path, err)
@@ -315,5 +329,83 @@ func TestSimulatorTokenGetsNoPush(t *testing.T) {
 	}](t, e.do("GET", "/v1/sync", reg.Secret, nil))
 	if len(page.Messages) != 1 || page.Messages[0].ID != sent.ID {
 		t.Errorf("sync = %+v", page.Messages)
+	}
+}
+
+func TestRegistrationIsRateLimitedPerIP(t *testing.T) {
+	e := setupWith(t, Options{MessageTTL: time.Hour, SendRate: 100, SendBurst: 3, RegisterPerHour: 1, RegisterBurst: 2})
+	body := map[string]string{"platform": "ios", "push_token": "t"}
+	for i := 0; i < 2; i++ {
+		must[map[string]any](t, e.do("POST", "/v1/devices", "", body))
+	}
+	if r := e.do("POST", "/v1/devices", "", body); r.ErrorCode != 429 {
+		t.Errorf("third registration from one IP: %d %s", r.ErrorCode, r.Description)
+	}
+}
+
+func TestBotsPerDeviceAreCapped(t *testing.T) {
+	e := setupWith(t, Options{MessageTTL: time.Hour, SendRate: 100, SendBurst: 3, MaxBotsPerDevice: 2})
+	secret, _ := e.register("ios") // one bot
+	must[map[string]any](t, e.do("POST", "/v1/bots", secret, map[string]string{"name": "two"}))
+	if r := e.do("POST", "/v1/bots", secret, map[string]string{"name": "three"}); r.ErrorCode != 400 {
+		t.Errorf("third bot: %d %s", r.ErrorCode, r.Description)
+	}
+}
+
+func TestPushDoesNotHoldTheResponse(t *testing.T) {
+	e := setup(t)
+	_, token := e.register("ios")
+	block := make(chan struct{})
+	e.pusher.mu.Lock()
+	e.pusher.block = block
+	e.pusher.mu.Unlock()
+	done := make(chan envelope, 1)
+	go func() {
+		req, _ := http.NewRequest("POST", e.srv.URL+"/bot"+token+"/sendMessage", strings.NewReader(`{"body":"x"}`))
+		req.Header.Set("Content-Type", "application/json")
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer res.Body.Close()
+		var out envelope
+		_ = json.NewDecoder(res.Body).Decode(&out)
+		done <- out
+	}()
+	select {
+	case r := <-done:
+		if !r.OK {
+			t.Errorf("send failed: %s", r.Description)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("sendMessage waited for the push")
+	}
+	close(block)
+	e.s.Wait()
+	if n := e.pusher.last(t); n.Body != "x" {
+		t.Errorf("push = %+v", n)
+	}
+}
+
+func TestPruneLimiters(t *testing.T) {
+	e := setup(t)
+	secret, token := e.register("ios")
+	must[store.Message](t, e.do("POST", "/bot"+token+"/sendMessage", "", map[string]string{"body": "x"}))
+	if n := e.s.PruneLimiters(time.Hour); n != 0 {
+		t.Errorf("pruned %d fresh limiters", n)
+	}
+	if n := e.s.PruneLimiters(0); n != 2 { // the bot's and the registering IP's
+		t.Errorf("pruned %d idle limiters, want 2", n)
+	}
+	// Deleting a bot drops its limiter at once.
+	must[store.Message](t, e.do("POST", "/bot"+token+"/sendMessage", "", map[string]string{"body": "y"}))
+	bots := must[[]store.Bot](t, e.do("GET", "/v1/bots", secret, nil))
+	must[bool](t, e.do("DELETE", fmt.Sprintf("/v1/bots/%d", bots[0].ID), secret, nil))
+	e.s.mu.Lock()
+	_, kept := e.s.limiters[bots[0].ID]
+	e.s.mu.Unlock()
+	if kept {
+		t.Error("deleted bot's limiter kept")
 	}
 }

@@ -187,6 +187,11 @@ class LocalStore(private val sql: Sql) {
         (scalar("SELECT COUNT(*) FROM messages m JOIN bots b ON b.id = m.bot_id WHERE m.read = 0 AND b.muted = 0") ?: 0).toInt()
     }
 
+    /** How many of a bot's messages are unread. */
+    fun unreadCount(botId: Long): Int = locked {
+        (scalar("SELECT COUNT(*) FROM messages WHERE bot_id = ? AND read = 0", listOf(botId)) ?: 0).toInt()
+    }
+
     /** Marks a bot's messages read and returns their notification ids, to clear them. */
     fun markRead(botId: Long): List<String> = locked {
         transaction {
