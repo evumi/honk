@@ -1,0 +1,10 @@
+// Copy to Local.xcconfig (ignored by git) and fill in.
+
+DEVELOPMENT_TEAM = ABCDE12345
+// Change these if dev.evumi.honk is not registered to your team.
+// HONK_BUNDLE_ID = com.example.honk
+// HONK_APP_GROUP = group.com.example.honk
+// HONK_KEYCHAIN_GROUP = com.example.honk.shared
+
+// The gateway the app talks to. `$()` keeps the // from starting a comment.
+HONK_GATEWAY_URL = https:/$()/honk.example.com/

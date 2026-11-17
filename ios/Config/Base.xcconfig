@@ -1,0 +1,14 @@
+// Shared settings. Put your own team and gateway in Local.xcconfig (not
+// committed); see Local.xcconfig.example.
+
+MARKETING_VERSION = 0.1.0
+CURRENT_PROJECT_VERSION = 1
+SWIFT_VERSION = 5.0
+
+HONK_BUNDLE_ID = dev.evumi.honk
+HONK_APP_GROUP = group.dev.evumi.honk
+// The keychain group without the team prefix; Info.plist adds $(AppIdentifierPrefix).
+HONK_KEYCHAIN_GROUP = dev.evumi.honk.shared
+HONK_GATEWAY_URL = http:/$()/127.0.0.1:8080/
+
+#include? "Local.xcconfig"

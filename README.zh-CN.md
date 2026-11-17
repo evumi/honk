@@ -9,9 +9,11 @@ Honk 是一个以 bot 为渠道的推送通知服务：每个 bot 都是一个�
 | 目录 | 内容 | 状态 |
 | --- | --- | --- |
 | `gateway/` | Go + SQLite 网关：bot API、App API、短期消息队列、APNs/FCM 推送 | 第一版 |
-| `app/` | nsh App（TSX）：会话列表、消息流、卡片渲染 | 未开始 |
-| `ios/` | Swift 宿主和 Notification Service Extension | 未开始 |
+| `app/` | nsh App（TSX）：会话列表、消息流、卡片渲染 | 第一版 |
+| `ios/` | Swift 宿主、Notification Service Extension、共享包 HonkKit | 第一版（未在 Xcode 中编译验证） |
 | `android/` | Kotlin 宿主和 FirebaseMessagingService | 未开始 |
+
+开发设计文档见 [docs/DESIGN.zh-CN.md](docs/DESIGN.zh-CN.md)，界面稿和截图见 [docs/design](docs/design/)。
 
 ## 工作方式
 

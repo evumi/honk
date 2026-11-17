@@ -1,0 +1,19 @@
+{
+  "name": "Honk",
+  "id": "dev.evumi.honk",
+  "version": "0.1.0",
+  "build": 1,
+  "capabilities": {
+    "host": [
+      "honk.*"
+    ],
+    "clipboard": true,
+    "openUrl": true,
+    "network": {
+      "hosts": [
+        "*"
+      ]
+    },
+    "statusBar": true
+  }
+}
