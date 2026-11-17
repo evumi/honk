@@ -44,7 +44,7 @@ final class NshBridge {
             return true
         }
         handle("honk.focus") { [service] args in
-            service.focusedBotID = Args(args).int("botId")
+            service.focusedBotID = Args(args).string("botId")
             return true
         }
         handle("honk.refresh") { [service] _ in
@@ -97,13 +97,13 @@ final class NshBridge {
             return NSNull()
         }
         handle("honk.bot.resetToken") { [service] args in
-            let id: Int64 = try Args(args).require("botId")
+            let id: String = try Args(args).require("botId")
             let token = try await service.api.resetToken(botID: id)
             service.botTokens.save(token, botID: id)
             return token
         }
         handle("honk.bot.delete") { [service] args in
-            let id: Int64 = try Args(args).require("botId")
+            let id: String = try Args(args).require("botId")
             try await service.api.deleteBot(id: id)
             service.removeNotifications((try? service.store.clearMessages(botID: id)) ?? [])
             try service.store.deleteBot(id: id)
@@ -146,7 +146,7 @@ final class NshBridge {
         }
     }
 
-    func openChat(botID: Int64) {
+    func openChat(botID: String) {
         app.send("honk.open", ["botId": botID])
     }
 
@@ -154,7 +154,7 @@ final class NshBridge {
         app.handle(name) { data in try await body(data) }
     }
 
-    // MARK: JSON shapes (camelCase, numbers for ids)
+    // MARK: JSON shapes (camelCase; bot ids are strings, message ids numbers)
 
     static func bot(_ b: Bot) -> [String: Any] {
         ["id": b.id, "name": b.name, "avatar": b.avatar, "defaultLevel": b.defaultLevel, "createdAt": b.createdAt]
@@ -201,7 +201,13 @@ struct Args {
 
     init(_ data: Any?) { dict = data as? [String: Any] ?? [:] }
 
-    func string(_ k: String) -> String? { dict[k] as? String }
+    func string(_ k: String) -> String? {
+        switch dict[k] {
+        case let s as String: return s
+        case let n as NSNumber where CFGetTypeID(n) != CFBooleanGetTypeID(): return n.stringValue
+        default: return nil
+        }
+    }
     func bool(_ k: String) -> Bool? { (dict[k] as? NSNumber)?.boolValue }
     func int(_ k: String) -> Int64? {
         switch dict[k] {

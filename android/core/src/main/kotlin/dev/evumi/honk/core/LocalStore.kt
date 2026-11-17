@@ -20,11 +20,17 @@ class LocalStore(private val sql: Sql) {
     }
 
     private fun migrate() {
-        val version = scalar("PRAGMA user_version") ?: 0
-        if (version >= 1) return
-        transaction {
-            SCHEMA_V1.forEach { sql.exec(it) }
-            sql.exec("PRAGMA user_version = 1")
+        if ((scalar("PRAGMA user_version") ?: 0) < 1) {
+            transaction {
+                SCHEMA_V1.forEach { sql.exec(it) }
+                sql.exec("PRAGMA user_version = 1")
+            }
+        }
+        if ((scalar("PRAGMA user_version") ?: 0) < 2) {
+            transaction {
+                MIGRATE_V2.forEach { sql.exec(it) }
+                sql.exec("PRAGMA user_version = 2")
+            }
         }
     }
 
@@ -101,13 +107,36 @@ class LocalStore(private val sql: Sql) {
     fun replaceBots(bots: List<Bot>) = locked {
         transaction {
             bots.forEach(::upsert)
-            val ids = bots.joinToString(",") { it.id.toString() }
-            val keep = if (ids.isEmpty()) "" else " WHERE id NOT IN ($ids)"
-            val keepMsg = if (ids.isEmpty()) "" else " WHERE bot_id NOT IN ($ids)"
-            sql.exec("DELETE FROM messages$keepMsg")
-            sql.exec("DELETE FROM bots$keep")
+            val ids = bots.map { it.id }
+            val marks = ids.joinToString(",") { "?" }
+            val keep = if (ids.isEmpty()) "" else " WHERE id NOT IN ($marks)"
+            val keepMsg = if (ids.isEmpty()) "" else " WHERE bot_id NOT IN ($marks)"
+            sql.run("DELETE FROM messages$keepMsg", ids)
+            sql.run("DELETE FROM bots$keep", ids)
         }
     }
+
+    /**
+     * Moves a bot's local data (flags, messages) from [old] to [new]: the
+     * gateway gave a bot known by a legacy integer id its short id. Returns
+     * the renamed messages' notification tags, which name the old id.
+     */
+    fun renameBot(old: String, new: String): List<String> = locked {
+        transaction {
+            if (old == new || scalar("SELECT COUNT(*) FROM bots WHERE id = ?", listOf(old)) != 1L ||
+                scalar("SELECT COUNT(*) FROM bots WHERE id = ?", listOf(new)) != 0L
+            ) return@transaction emptyList()
+            val tags = sql.query("SELECT notif_id FROM messages WHERE bot_id = ? AND notif_id IS NOT NULL", listOf(old)) {
+                it.text(0)
+            }.filterNotNull()
+            sql.run("UPDATE bots SET id = ? WHERE id = ?", listOf(new, old))
+            sql.run("UPDATE messages SET bot_id = ? WHERE bot_id = ?", listOf(new, old))
+            tags
+        }
+    }
+
+    /** The ids of the stored bots. */
+    fun botIds(): List<String> = locked { sql.query("SELECT id FROM bots") { it.text(0).orEmpty() } }
 
     fun saveBot(b: Bot) = locked { upsert(b) }
 
@@ -122,24 +151,24 @@ class LocalStore(private val sql: Sql) {
         )
     }
 
-    fun bot(id: Long): Bot? = locked {
+    fun bot(id: String): Bot? = locked {
         sql.query("SELECT id, name, avatar, default_level, created_at, updated_at FROM bots WHERE id = ?", listOf(id)) {
-            Bot(it.long(0), it.text(1).orEmpty(), it.text(2).orEmpty(), it.text(3) ?: "active", it.long(4), it.long(5))
+            Bot(it.text(0).orEmpty(), it.text(1).orEmpty(), it.text(2).orEmpty(), it.text(3) ?: "active", it.long(4), it.long(5))
         }.firstOrNull()
     }
 
-    fun deleteBot(id: Long) = locked {
+    fun deleteBot(id: String) = locked {
         transaction {
             sql.run("DELETE FROM messages WHERE bot_id = ?", listOf(id))
             sql.run("DELETE FROM bots WHERE id = ?", listOf(id))
         }
     }
 
-    fun setMuted(botId: Long, muted: Boolean) = locked { sql.run("UPDATE bots SET muted = ? WHERE id = ?", listOf(muted, botId)) }
+    fun setMuted(botId: String, muted: Boolean) = locked { sql.run("UPDATE bots SET muted = ? WHERE id = ?", listOf(muted, botId)) }
 
-    fun setPinned(botId: Long, pinned: Boolean) = locked { sql.run("UPDATE bots SET pinned = ? WHERE id = ?", listOf(pinned, botId)) }
+    fun setPinned(botId: String, pinned: Boolean) = locked { sql.run("UPDATE bots SET pinned = ? WHERE id = ?", listOf(pinned, botId)) }
 
-    fun isMuted(botId: Long): Boolean = locked { scalar("SELECT muted FROM bots WHERE id = ?", listOf(botId)) == 1L }
+    fun isMuted(botId: String): Boolean = locked { scalar("SELECT muted FROM bots WHERE id = ?", listOf(botId)) == 1L }
 
     // reading
 
@@ -149,7 +178,7 @@ class LocalStore(private val sql: Sql) {
         sql.query("SELECT $MESSAGE_COLS FROM messages WHERE id = ?", listOf(id), ::readMessage).firstOrNull()
 
     /** A bot's messages, newest first, older than [before] when given. */
-    fun messages(botId: Long, before: Long? = null, limit: Int = 50): List<StoredMessage> = locked {
+    fun messages(botId: String, before: Long? = null, limit: Int = 50): List<StoredMessage> = locked {
         sql.query(
             "SELECT $MESSAGE_COLS FROM messages WHERE bot_id = ? AND id < ? ORDER BY id DESC LIMIT ?",
             listOf(botId, before ?: Long.MAX_VALUE, limit),
@@ -168,7 +197,7 @@ class LocalStore(private val sql: Sql) {
             """.trimIndent(),
         ) { r ->
             ChatSummary(
-                bot = Bot(r.long(0), r.text(1).orEmpty(), r.text(2).orEmpty(), r.text(3) ?: "active", r.long(4), r.long(5)),
+                bot = Bot(r.text(0).orEmpty(), r.text(1).orEmpty(), r.text(2).orEmpty(), r.text(3) ?: "active", r.long(4), r.long(5)),
                 muted = r.long(6) != 0L,
                 pinned = r.long(7) != 0L,
                 last = null,
@@ -188,12 +217,12 @@ class LocalStore(private val sql: Sql) {
     }
 
     /** How many of a bot's messages are unread. */
-    fun unreadCount(botId: Long): Int = locked {
+    fun unreadCount(botId: String): Int = locked {
         (scalar("SELECT COUNT(*) FROM messages WHERE bot_id = ? AND read = 0", listOf(botId)) ?: 0).toInt()
     }
 
     /** Marks a bot's messages read and returns their notification ids, to clear them. */
-    fun markRead(botId: Long): List<String> = locked {
+    fun markRead(botId: String): List<String> = locked {
         transaction {
             val ids = sql.query(
                 "SELECT notif_id FROM messages WHERE bot_id = ? AND read = 0 AND notif_id IS NOT NULL",
@@ -214,7 +243,7 @@ class LocalStore(private val sql: Sql) {
     }
 
     /** Deletes a bot's messages on this device; returns their notification ids. */
-    fun clearMessages(botId: Long): List<String> = locked {
+    fun clearMessages(botId: String): List<String> = locked {
         transaction {
             val ids = sql.query("SELECT notif_id FROM messages WHERE bot_id = ? AND notif_id IS NOT NULL", listOf(botId)) {
                 it.text(0)
@@ -274,7 +303,7 @@ class LocalStore(private val sql: Sql) {
             "id, bot_id, title, body, html, data, level, group_key, url, copy_text, icon, collapse_id, date, read"
 
         private fun readMessage(r: Sql.Row) = StoredMessage(
-            id = r.long(0), botId = r.long(1), title = r.text(2).orEmpty(), body = r.text(3).orEmpty(),
+            id = r.long(0), botId = r.text(1).orEmpty(), title = r.text(2).orEmpty(), body = r.text(3).orEmpty(),
             html = r.text(4).orEmpty(), data = r.text(5).orEmpty(), level = r.text(6).orEmpty(),
             group = r.text(7).orEmpty(), url = r.text(8).orEmpty(), copy = r.text(9).orEmpty(),
             icon = r.text(10).orEmpty(), collapseId = r.text(11).orEmpty(), date = r.long(12), read = r.long(13) != 0L,
@@ -316,6 +345,57 @@ class LocalStore(private val sql: Sql) {
             "CREATE INDEX messages_bot ON messages(bot_id, id)",
             "CREATE INDEX messages_collapse ON messages(bot_id, collapse_id) WHERE collapse_id <> ''",
             "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+        )
+
+        /**
+         * Version 2: bot ids are short strings. Rebuilds both tables with TEXT
+         * bot ids (an INTEGER column would turn "123" back into a number); the
+         * integer ids already stored become their decimal text until the
+         * gateway's list renames them ([renameBot]). Same as LocalStore.swift.
+         */
+        val MIGRATE_V2 = listOf(
+            """
+            CREATE TABLE bots_v2 (
+              id            TEXT PRIMARY KEY,
+              name          TEXT NOT NULL,
+              avatar        TEXT NOT NULL DEFAULT '',
+              default_level TEXT NOT NULL DEFAULT 'active',
+              muted         INTEGER NOT NULL DEFAULT 0,
+              pinned        INTEGER NOT NULL DEFAULT 0,
+              created_at    INTEGER NOT NULL DEFAULT 0,
+              updated_at    INTEGER NOT NULL DEFAULT 0
+            )
+            """.trimIndent(),
+            "INSERT INTO bots_v2 SELECT CAST(id AS TEXT), name, avatar, default_level, muted, pinned, created_at, updated_at FROM bots",
+            "DROP TABLE bots",
+            "ALTER TABLE bots_v2 RENAME TO bots",
+            """
+            CREATE TABLE messages_v2 (
+              id          INTEGER PRIMARY KEY,
+              bot_id      TEXT NOT NULL,
+              title       TEXT NOT NULL DEFAULT '',
+              body        TEXT NOT NULL DEFAULT '',
+              html        TEXT NOT NULL DEFAULT '',
+              data        TEXT NOT NULL DEFAULT '',
+              level       TEXT NOT NULL DEFAULT '',
+              group_key   TEXT NOT NULL DEFAULT '',
+              url         TEXT NOT NULL DEFAULT '',
+              copy_text   TEXT NOT NULL DEFAULT '',
+              icon        TEXT NOT NULL DEFAULT '',
+              collapse_id TEXT NOT NULL DEFAULT '',
+              date        INTEGER NOT NULL,
+              read        INTEGER NOT NULL DEFAULT 0,
+              notif_id    TEXT
+            )
+            """.trimIndent(),
+            """
+            INSERT INTO messages_v2 SELECT id, CAST(bot_id AS TEXT), title, body, html, data, level, group_key, url,
+              copy_text, icon, collapse_id, date, read, notif_id FROM messages
+            """.trimIndent(),
+            "DROP TABLE messages",
+            "ALTER TABLE messages_v2 RENAME TO messages",
+            "CREATE INDEX messages_bot ON messages(bot_id, id)",
+            "CREATE INDEX messages_collapse ON messages(bot_id, collapse_id) WHERE collapse_id <> ''",
         )
     }
 }

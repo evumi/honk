@@ -19,29 +19,29 @@ const card = `<div style="padding:4px 0">
 </div>`;
 
 const bots: Bot[] = [
-  { id: 1, name: L("Berth 部署", "Berth Deploys"), avatar: "preset:ship:#1c1c1e", defaultLevel: "active", createdAt: now - 864e5 * 5 },
-  { id: 2, name: L("服务器告警", "Server Alerts"), avatar: "preset:alert:#c2410c", defaultLevel: "timeSensitive", createdAt: now - 864e5 * 4 },
-  { id: 3, name: L("CI 构建", "CI Builds"), avatar: "preset:check:#2f6f3e", defaultLevel: "active", createdAt: now - 864e5 * 3 },
+  { id: "Bx7kQ2mT", name: L("Berth 部署", "Berth Deploys"), avatar: "preset:ship:#1c1c1e", defaultLevel: "active", createdAt: now - 864e5 * 5 },
+  { id: "aR4nW9pZ", name: L("服务器告警", "Server Alerts"), avatar: "preset:alert:#c2410c", defaultLevel: "timeSensitive", createdAt: now - 864e5 * 4 },
+  { id: "Kc3vH8sL", name: L("CI 构建", "CI Builds"), avatar: "preset:check:#2f6f3e", defaultLevel: "active", createdAt: now - 864e5 * 3 },
 ];
 
 let nextId = 100;
-const msg = (botId: number, minutesAgo: number, m: Partial<Message>): Message => ({
+const msg = (botId: string, minutesAgo: number, m: Partial<Message>): Message => ({
   id: nextId++, botId, title: "", body: "", html: "", data: "", level: "active", group: "", url: "", copy: "",
   icon: "", collapseId: "", date: now - minutesAgo * 6e4, read: false, ...m,
 });
 
 const messages: Message[] = [
-  msg(3, 60 * 30, { title: L("main #482 通过", "main #482 passed"), body: L("3 分 12 秒 · 128 个测试全部通过", "3m 12s · all 128 tests passed"), read: true }),
-  msg(1, 95, {
+  msg("Kc3vH8sL", 60 * 30, { title: L("main #482 通过", "main #482 passed"), body: L("3 分 12 秒 · 128 个测试全部通过", "3m 12s · all 128 tests passed"), read: true }),
+  msg("Bx7kQ2mT", 95, {
     title: L("部署失败", "Deploy failed"), body: L("fluxship / queue 未通过健康检查，已自动回滚。", "fluxship / queue failed its health check and was rolled back."), html: card, read: true,
     data: JSON.stringify({ status: L("部署失败", "Failed"), dot: "#d9480f", service: "fluxship / queue", env: "production", deploy_id: "dep_r8kq2", url: "https://example.com" }),
   }),
-  msg(2, 75, { title: "hk-edge-02 CPU 92%", body: L("持续 5 分钟超过阈值 85%，负载 7.8。", "Above the 85% threshold for 5 minutes, load 7.8.") }),
-  msg(1, 38, {
+  msg("aR4nW9pZ", 75, { title: "hk-edge-02 CPU 92%", body: L("持续 5 分钟超过阈值 85%，负载 7.8。", "Above the 85% threshold for 5 minutes, load 7.8.") }),
+  msg("Bx7kQ2mT", 38, {
     title: L("部署成功", "Deployed"), body: L("部署成功：evumi / sluice (production) 已上线。", "evumi / sluice is live in production."), html: card,
     data: JSON.stringify({ status: L("已上线", "Live"), dot: "#1a9e6e", service: "evumi / sluice", env: "production", deploy_id: "dep_w3tn2cnlrvwtspmjmpol", url: "https://example.com" }),
   }),
-  msg(1, 25, { title: L("每日部署汇总", "Daily deploy summary"), body: L("今天共 6 次部署，5 次成功，1 次回滚。", "6 deploys today: 5 succeeded, 1 rolled back.") }),
+  msg("Bx7kQ2mT", 25, { title: L("每日部署汇总", "Daily deploy summary"), body: L("今天共 6 次部署，5 次成功，1 次回滚。", "6 deploys today: 5 succeeded, 1 rolled back.") }),
 ];
 const DEFAULT_GATEWAY = "https://honk.example.com/";
 let gateway = DEFAULT_GATEWAY;
@@ -54,15 +54,25 @@ function normalize(u: string): string | null {
   return t.endsWith("/") ? t : t + "/";
 }
 
-const flags = new Map<number, { muted: boolean; pinned: boolean }>();
-const tokens = new Map<number, string>([[1, "1:bQx9fK2mT4vLr8Wz1pYs6NcHa3Ue0JdG"]]);
+const flags = new Map<string, { muted: boolean; pinned: boolean }>();
+const tokens = new Map<string, string>([["Bx7kQ2mT", "Bx7kQ2mT:bQx9fK2mT4vLr8Wz1pYs6NcHa3Ue0JdG"]]);
+
+function randomString(abc: string, n: number): string {
+  let t = "";
+  for (let i = 0; i < n; i++) t += abc[Math.floor(Math.random() * abc.length)];
+  return t;
+}
+
+const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+
+/** A bot id shaped like the gateway's: 8 base62 characters starting with a letter. */
+function demoBotId(): string {
+  return randomString(LETTERS, 1) + randomString(LETTERS + "0123456789", 7);
+}
 
 /** A token shaped like the gateway's: `<bot id>:` and 32 URL-safe characters. */
-function demoToken(botId: number): string {
-  const abc = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-  let t = "";
-  for (let i = 0; i < 32; i++) t += abc[Math.floor(Math.random() * abc.length)];
-  return `${botId}:${t}`;
+function demoToken(botId: string): string {
+  return `${botId}:${randomString(LETTERS + "0123456789-_", 32)}`;
 }
 
 function chats(): Chat[] {
@@ -108,7 +118,7 @@ export async function demo<T>(name: string, args: unknown): Promise<T> {
         messages.forEach((m) => m.botId === a.botId && (m.read = true));
         return true;
       case "honk.bot.create": {
-        const bot: Bot = { id: bots.length + 1, name: a.name, avatar: a.avatar, defaultLevel: a.defaultLevel, createdAt: Date.now() };
+        const bot: Bot = { id: demoBotId(), name: a.name, avatar: a.avatar, defaultLevel: a.defaultLevel, createdAt: Date.now() };
         bots.push(bot);
         const token = demoToken(bot.id);
         tokens.set(bot.id, token);

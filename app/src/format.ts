@@ -39,7 +39,7 @@ export function sameDay(a: number, b: number): boolean {
   return x.getFullYear() === y.getFullYear() && x.getMonth() === y.getMonth() && x.getDate() === y.getDate();
 }
 
-/** `7351902846:bQx9••••••••JdG`. */
+/** `aZ3kQ9xT:bQx9••••••••JdG`. */
 export function maskToken(t: string): string {
   const i = t.indexOf(":");
   if (i < 0 || t.length - i < 10) return t;

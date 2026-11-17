@@ -175,7 +175,7 @@ function Empty(props: { p: Palette }) {
 }
 
 /** The row swiped open to show its delete button (one at a time). */
-const swipedRow = signal<number | null>(null);
+const swipedRow = signal<string | null>(null);
 /** How far a row slides to show its delete button, in points. */
 const ACTION_W = 88;
 

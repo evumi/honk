@@ -25,6 +25,13 @@ class FakeGateway(private val handler: (method: String, path: String, body: Stri
     }
 }
 
+class MemoryTokens(val map: MutableMap<String, String> = mutableMapOf()) : BotTokenStore {
+    override fun token(botId: String) = map[botId]
+    override fun save(botId: String, token: String) { map[botId] = token }
+    override fun remove(botId: String) { map.remove(botId) }
+    override fun removeAll() = map.clear()
+}
+
 class MemoryCredentials(var value: Credentials? = null) : CredentialStore {
     override fun load() = value
     override fun save(c: Credentials) { value = c }
@@ -34,17 +41,17 @@ class MemoryCredentials(var value: Credentials? = null) : CredentialStore {
 class GatewayTest {
     @Test fun syncAppliesPagesAndAcks() {
         val store = tempStore()
-        store.apply(QueuedMessage(1, 1, body = "old", collapseId = "dep"), "c1:dep-old")
+        store.apply(QueuedMessage(1, "b1", body = "old", collapseId = "dep"), "c1:dep-old")
         val gw = FakeGateway { method, path, _ ->
             when {
                 path == "v1/sync?cursor=0&limit=2" -> FakeGateway.ok(
                     """{"messages":[
-                        {"message_id":2,"bot_id":1,"kind":"message","body":"new","id":"dep","date":10},
-                        {"message_id":3,"bot_id":2,"kind":"message","body":"x","date":11}
+                        {"message_id":2,"bot_id":"b1","kind":"message","body":"new","id":"dep","date":10},
+                        {"message_id":3,"bot_id":"b2","kind":"message","body":"x","date":11}
                        ],"cursor":3,"has_more":true}""",
                 )
                 path == "v1/sync?cursor=3&limit=2" -> FakeGateway.ok(
-                    """{"messages":[{"message_id":4,"bot_id":2,"kind":"delete","target_id":3,"date":12}],"cursor":4,"has_more":false}""",
+                    """{"messages":[{"message_id":4,"bot_id":"b2","kind":"delete","target_id":3,"date":12}],"cursor":4,"has_more":false}""",
                 )
                 method == "POST" && path == "v1/ack" -> FakeGateway.ok("""{"acked":2}""")
                 else -> FakeGateway.fail(404, "Not Found")
@@ -55,8 +62,8 @@ class GatewayTest {
         assertEquals(3, out.applied)
         assertEquals(listOf("c1:dep-old"), out.staleNotificationIds)
         assertEquals(4L, store.syncCursor)
-        assertEquals(listOf(2L), store.messages(1).map { it.id })
-        assertTrue(store.messages(2).isEmpty())
+        assertEquals(listOf(2L), store.messages("b1").map { it.id })
+        assertTrue(store.messages("b2").isEmpty())
         val acks = gw.requests.filter { it.path == "v1/ack" }.map { it.body }
         assertEquals(listOf("""{"up_to":3}""", """{"up_to":4}"""), acks)
         assertTrue(gw.requests.all { it.headers["Authorization"] == "Bearer s3cret" })
@@ -79,7 +86,7 @@ class GatewayTest {
         val gw = FakeGateway { _, path, _ ->
             when {
                 path.startsWith("v1/sync") -> FakeGateway.ok(
-                    """{"messages":[{"message_id":2,"bot_id":1,"kind":"message","body":"a"}],"cursor":2,"has_more":false}""",
+                    """{"messages":[{"message_id":2,"bot_id":"b1","kind":"message","body":"a"}],"cursor":2,"has_more":false}""",
                 )
                 path == "v1/ack" && ackFails -> FakeGateway.fail(500, "Internal Server Error")
                 else -> FakeGateway.ok("""{"acked":1}""")
@@ -89,7 +96,7 @@ class GatewayTest {
         assertThrows(ApiException.Gateway::class.java) { engine.run() }
         ackFails = false
         engine.run()
-        assertEquals(listOf(2L), store.messages(1).map { it.id })
+        assertEquals(listOf(2L), store.messages("b1").map { it.id })
     }
 
     @Test fun gatewayErrorsAndNotRegistered() {
@@ -104,24 +111,68 @@ class GatewayTest {
     @Test fun decodesGatewayShapes() {
         val gw = FakeGateway { _, path, _ ->
             when (path) {
-                "v1/bots" -> FakeGateway.ok("""[{"id":1,"name":"部署","avatar":"preset:ship:#1c1c1e","default_level":"timeSensitive","created_at":5,"updated_at":6}]""")
-                "v1/messages/7" -> FakeGateway.ok("""{"message_id":7,"bot_id":1,"kind":"edit","target_id":3,"data":"{\"a\":1}","id":"dep","date":99}""")
-                "v1/bots/1/token" -> FakeGateway.ok("""{"token":"1:abc"}""")
+                "v1/bots" -> FakeGateway.ok("""[{"id":"b1","name":"部署","avatar":"preset:ship:#1c1c1e","default_level":"timeSensitive","created_at":5,"updated_at":6}]""")
+                "v1/messages/7" -> FakeGateway.ok("""{"message_id":7,"bot_id":"b1","kind":"edit","target_id":3,"data":"{\"a\":1}","id":"dep","date":99}""")
+                "v1/bots/b1/token" -> FakeGateway.ok("""{"token":"b1:abc"}""")
                 else -> FakeGateway.fail(404, "Not Found")
             }
         }
         val api = ApiClient(FakeGateway.BASE, "s", gw)
-        assertEquals(listOf(Bot(1, "部署", "preset:ship:#1c1c1e", "timeSensitive", 5, 6)), api.listBots())
+        assertEquals(listOf(Bot("b1", "部署", "preset:ship:#1c1c1e", "timeSensitive", 5, 6)), api.listBots())
         assertEquals(
-            QueuedMessage(7, 1, QueuedMessage.Kind.EDIT, targetId = 3, data = """{"a":1}""", collapseId = "dep", date = 99),
+            QueuedMessage(7, "b1", QueuedMessage.Kind.EDIT, targetId = 3, data = """{"a":1}""", collapseId = "dep", date = 99),
             api.message(7),
         )
-        assertEquals("1:abc", api.resetToken(1))
+        assertEquals("b1:abc", api.resetToken("b1"))
+        // A gateway from before short ids sends integers.
+        val legacy = ApiClient.JSON.decodeFromString(Bot.serializer(), """{"id":4,"name":"b"}""")
+        assertEquals("4", legacy.id)
+        assertTrue(BotIds.isLegacy(legacy.id))
+        assertTrue(!BotIds.isLegacy("aZ3kQ9xT"))
+    }
+
+    @Test fun legacyBotsAreRenamedThroughTheirTokens() {
+        val store = LocalStore(JdbcSql(tempPath()))
+        store.replaceBots(listOf(Bot("4", "部署"), Bot("5", "无 token")))
+        store.setPinned("4", true)
+        store.apply(QueuedMessage(1, "4", body = "old", collapseId = "dep"), "c4:dep")
+        val tokens = MemoryTokens(mutableMapOf("4" to "4:sec"))
+        val gw = FakeGateway { _, path, _ ->
+            if (path == "bot4:sec/getMe") FakeGateway.ok("""{"id":"aZ3kQ9xT","name":"部署"}""") else FakeGateway.fail(401, "Unauthorized")
+        }
+        val tags = LegacyBotIds.rename(store, tokens, ApiClient(FakeGateway.BASE, "s", gw), setOf("aZ3kQ9xT", "bQ7mN2pR"))
+        assertEquals(listOf("c4:dep"), tags)
+        assertEquals(listOf("old"), store.messages("aZ3kQ9xT").map { it.body })
+        assertTrue(store.chats().first { it.bot.id == "aZ3kQ9xT" }.pinned)
+        assertEquals(mapOf("aZ3kQ9xT" to "4:sec"), tokens.map)
+        assertNull("no auth header on the bot API", gw.requests.single().headers["Authorization"])
+        // Already renamed: nothing more to ask.
+        store.replaceBots(listOf(Bot("aZ3kQ9xT", "部署")))
+        assertEquals(emptyList<String>(), LegacyBotIds.rename(store, tokens, ApiClient(FakeGateway.BASE, "s", gw), setOf("aZ3kQ9xT")))
+        assertEquals(1, gw.requests.size)
+    }
+
+    @Test fun migratesIntegerBotIds() {
+        val path = tempPath()
+        JdbcSql(path).apply {
+            LocalStore.SCHEMA_V1.forEach(::exec)
+            exec("INSERT INTO bots (id, name) VALUES (4, 'b')")
+            exec("INSERT INTO messages (id, bot_id, body, date) VALUES (1, 4, 'old', 1)")
+            exec("PRAGMA user_version = 1")
+            close()
+        }
+        val store = LocalStore(JdbcSql(path))
+        assertEquals(listOf("4"), store.botIds())
+        assertEquals(listOf("old"), store.messages("4").map { it.body })
+        // Text ids that look like numbers stay text.
+        store.saveBot(Bot("123", "n"))
+        store.apply(QueuedMessage(2, "123", body = "x"))
+        assertEquals(1, store.messages("123").size)
     }
 
     @Test fun updateBotSendsOnlyGivenFields() {
         val gw = FakeGateway { _, _, _ -> FakeGateway.ok("""{"id":1,"name":"n"}""") }
-        ApiClient(FakeGateway.BASE, "s", gw).updateBot(1, name = "n")
+        ApiClient(FakeGateway.BASE, "s", gw).updateBot("b1", name = "n")
         assertEquals("PATCH", gw.requests.single().method)
         assertEquals("""{"name":"n"}""", gw.requests.single().body)
     }
@@ -168,10 +219,11 @@ class GatewayTest {
 class ModelTest {
     @Test fun pushInfoFromFcmData() {
         val p = PushInfo.parse(mapOf("kind" to "message", "msg_id" to "7", "bot_id" to "1", "bot_name" to "部署", "title" to "t", "body" to "b", "id" to "dep"))
-        assertEquals(PushInfo(QueuedMessage.Kind.MESSAGE, 7, 1, collapseId = "dep", botName = "部署", title = "t", body = "b"), p)
+        assertEquals(PushInfo(QueuedMessage.Kind.MESSAGE, 7, "1", collapseId = "dep", botName = "部署", title = "t", body = "b"), p)
         assertEquals(7L, PushInfo.parse(mapOf("kind" to "delete", "msg_id" to "8", "bot_id" to "1", "target_id" to "7"))?.targetId)
         assertNull(PushInfo.parse(mapOf("kind" to "other", "msg_id" to "8", "bot_id" to "1")))
         assertNull(PushInfo.parse(mapOf("kind" to "message", "bot_id" to "1")))
+        assertEquals("aZ3kQ9xT", PushInfo.parse(mapOf("kind" to "message", "msg_id" to "7", "bot_id" to "aZ3kQ9xT"))?.botId)
     }
 
     @Test fun avatar() {

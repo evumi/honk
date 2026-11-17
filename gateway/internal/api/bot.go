@@ -63,7 +63,6 @@ func (s *Server) botAPI(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request, bot store.Bot, dev store.Device, p url.Values) {
 	m := store.Message{
-		BotID:      bot.ID,
 		DeviceID:   dev.ID,
 		Title:      strings.TrimSpace(p.Get("title")),
 		Body:       strings.TrimSpace(p.Get("body")),
@@ -91,7 +90,7 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request, bot store.B
 		s.fail(w, r, apiError{http.StatusTooManyRequests, "Too Many Requests"})
 		return
 	}
-	m, err = s.store.AddMessage(r.Context(), m, s.opts.MessageTTL)
+	m, err = s.store.AddMessage(r.Context(), bot, m, s.opts.MessageTTL)
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -134,9 +133,9 @@ func (s *Server) changeMessage(w http.ResponseWriter, r *http.Request, bot store
 			s.fail(w, r, badRequest(fmt.Sprintf("data is longer than %d bytes", widget.MaxData)))
 			return
 		}
-		m, err = s.store.EditData(r.Context(), bot.ID, dev.ID, t, data, s.opts.MessageTTL)
+		m, err = s.store.EditData(r.Context(), bot, dev.ID, t, data, s.opts.MessageTTL)
 	} else {
-		m, err = s.store.DeleteMessage(r.Context(), bot.ID, dev.ID, t, s.opts.MessageTTL)
+		m, err = s.store.DeleteMessage(r.Context(), bot, dev.ID, t, s.opts.MessageTTL)
 	}
 	if err != nil {
 		s.fail(w, r, err)

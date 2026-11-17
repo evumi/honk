@@ -2,7 +2,9 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -74,16 +76,16 @@ func TestQueueCollapseEditDelete(t *testing.T) {
 	b, _, _ := s.CreateBot(ctx, d.ID, "部署", "", "active")
 	ttl := time.Hour
 
-	m1, err := s.AddMessage(ctx, Message{BotID: b.ID, DeviceID: d.ID, Body: "部署中", CollapseID: "dep-1", Data: `{"status":"部署中"}`}, ttl)
+	m1, err := s.AddMessage(ctx, b, Message{DeviceID: d.ID, Body: "部署中", CollapseID: "dep-1", Data: `{"status":"部署中"}`}, ttl)
 	if err != nil {
 		t.Fatal(err)
 	}
-	m2, _ := s.AddMessage(ctx, Message{BotID: b.ID, DeviceID: d.ID, Body: "部署中（重试）", CollapseID: "dep-1"}, ttl)
+	m2, _ := s.AddMessage(ctx, b, Message{DeviceID: d.ID, Body: "部署中（重试）", CollapseID: "dep-1"}, ttl)
 	if _, err := s.GetMessage(ctx, d.ID, m1.ID); err != ErrNotFound {
 		t.Errorf("collapsed message still queued: %v", err)
 	}
 
-	e, err := s.EditData(ctx, b.ID, d.ID, Target{CollapseID: "dep-1"}, `{"status":"已上线"}`, ttl)
+	e, err := s.EditData(ctx, b, d.ID, Target{CollapseID: "dep-1"}, `{"status":"已上线"}`, ttl)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +96,7 @@ func TestQueueCollapseEditDelete(t *testing.T) {
 		t.Errorf("queued copy data = %q", got.Data)
 	}
 
-	del, err := s.DeleteMessage(ctx, b.ID, d.ID, Target{MessageID: m2.ID}, ttl)
+	del, err := s.DeleteMessage(ctx, b, d.ID, Target{MessageID: m2.ID}, ttl)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,14 +106,14 @@ func TestQueueCollapseEditDelete(t *testing.T) {
 	}
 
 	// An edit whose message was already cleaned up is still queued for the client.
-	e2, err := s.EditData(ctx, b.ID, d.ID, Target{MessageID: 9999}, "x", ttl)
+	e2, err := s.EditData(ctx, b, d.ID, Target{MessageID: 9999}, "x", ttl)
 	if err != nil || e2.TargetID != 9999 {
 		t.Errorf("edit of a delivered message = %+v, %v", e2, err)
 	}
 	// A bot cannot reach another bot's message by id.
 	b2, _, _ := s.CreateBot(ctx, d.ID, "other", "", "active")
-	m3, _ := s.AddMessage(ctx, Message{BotID: b.ID, DeviceID: d.ID, Body: "x"}, ttl)
-	if _, err := s.DeleteMessage(ctx, b2.ID, d.ID, Target{MessageID: m3.ID}, ttl); err != nil {
+	m3, _ := s.AddMessage(ctx, b, Message{DeviceID: d.ID, Body: "x"}, ttl)
+	if _, err := s.DeleteMessage(ctx, b2, d.ID, Target{MessageID: m3.ID}, ttl); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.GetMessage(ctx, d.ID, m3.ID); err != nil {
@@ -126,7 +128,7 @@ func TestSyncAckCleanup(t *testing.T) {
 	b, _, _ := s.CreateBot(ctx, d.ID, "bot", "", "active")
 	var ids []int64
 	for i := 0; i < 5; i++ {
-		m, _ := s.AddMessage(ctx, Message{BotID: b.ID, DeviceID: d.ID, Body: "x"}, 2*time.Hour)
+		m, _ := s.AddMessage(ctx, b, Message{DeviceID: d.ID, Body: "x"}, 2*time.Hour)
 		ids = append(ids, m.ID)
 	}
 	page, _ := s.Sync(ctx, d.ID, 0, 2)
@@ -169,5 +171,76 @@ func TestReopenKeepsData(t *testing.T) {
 	defer s.Close()
 	if _, err := s.DeviceBySecret(context.Background(), secret); err != nil {
 		t.Fatalf("device lost after reopen: %v", err)
+	}
+}
+
+// A v1 database (integer bot ids in tokens) gets short ids on upgrade; the old
+// tokens and queued messages keep working.
+func TestMigrateV1BotIDs(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "honk.db")
+	db, err := sql.Open("sqlite", "file:"+path+"?_pragma=foreign_keys(1)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stmts := []string{
+		schemaV1,
+		"PRAGMA user_version = 1",
+		`INSERT INTO devices (id, secret_hash, platform, push_token, created_at, updated_at) VALUES ('dev', x'00', 'ios', 'tok', 1, 1)`,
+		`INSERT INTO bots (device_id, token_hash, name, created_at, updated_at) VALUES ('dev', x'01', 'a', 1, 1)`,
+		`INSERT INTO bots (device_id, token_hash, name, created_at, updated_at) VALUES ('dev', x'02', 'b', 1, 1)`,
+		`INSERT INTO messages (bot_id, device_id, kind, body, created_at, expires_at) VALUES (2, 'dev', 'message', 'hi', 1, 9999999999999)`,
+	}
+	for _, q := range stmts {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	if _, err := db.Exec(`UPDATE bots SET token_hash = ? WHERE id = 2`, hash("2:old-secret")); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	bots, err := s.ListBots(ctx, "dev")
+	if err != nil || len(bots) != 2 {
+		t.Fatalf("bots = %+v, %v", bots, err)
+	}
+	for _, b := range bots {
+		if !ValidBotID(b.ID) {
+			t.Errorf("bot %d got id %q", b.Key, b.ID)
+		}
+	}
+	if bots[0].ID == bots[1].ID {
+		t.Error("backfilled ids collide")
+	}
+	b, _, err := s.BotByToken(ctx, "2:old-secret")
+	if err != nil || b.ID != bots[1].ID || b.Name != "b" {
+		t.Fatalf("old token = %+v, %v", b, err)
+	}
+	items, _ := s.Sync(ctx, "dev", 0, 10)
+	if len(items) != 1 || items[0].BotID != b.ID {
+		t.Errorf("queued message = %+v", items)
+	}
+	token, err := s.ResetBotToken(ctx, "dev", b.ID)
+	if err != nil || !strings.HasPrefix(token, b.ID+":") {
+		t.Errorf("reset token = %q, %v", token, err)
+	}
+}
+
+func TestValidBotID(t *testing.T) {
+	for i := 0; i < 1000; i++ {
+		if id := randomBotID(); !ValidBotID(id) {
+			t.Fatalf("random id %q is not valid", id)
+		}
+	}
+	for _, id := range []string{"", "4", "12345678", "aB3dE6g", "aB3dE6gH9", "aB3d-6gH", "0aB3dE6g"} {
+		if ValidBotID(id) {
+			t.Errorf("ValidBotID(%q) = true", id)
+		}
 	}
 }

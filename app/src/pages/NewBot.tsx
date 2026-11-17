@@ -15,7 +15,7 @@ function ring(c: string, p: Palette): string {
 }
 
 /** Creates a bot, or with `botId` edits that one's name, look and default level. */
-export function NewBot(props: { botId?: number }) {
+export function NewBot(props: { botId?: string }) {
   const p = palette;
   const editing = props.botId !== undefined ? chatOf(props.botId)?.bot : undefined;
   const look = editing ? parseAvatar(editing.avatar) : undefined;

@@ -14,6 +14,7 @@ import dev.evumi.honk.core.BotTokenStore
 import dev.evumi.honk.core.CredentialStore
 import dev.evumi.honk.core.DeviceRegistrar
 import dev.evumi.honk.core.Gateway
+import dev.evumi.honk.core.LegacyBotIds
 import dev.evumi.honk.core.LocalStore
 import dev.evumi.honk.core.PushInfo
 import dev.evumi.honk.core.QueuedMessage
@@ -50,7 +51,7 @@ class HonkService private constructor(context: Context) {
         private set
 
     /** The bot whose chat is on screen while the activity is resumed; its messages show no notification. */
-    @Volatile var focusedBotId: Long? = null
+    @Volatile var focusedBotId: String? = null
     @Volatile var foreground = false
 
     private val listeners = CopyOnWriteArrayList<() -> Unit>()
@@ -198,7 +199,9 @@ class HonkService private constructor(context: Context) {
     fun refresh() {
         if (!isRegistered || !syncing.compareAndSet(false, true)) return
         try {
-            store.replaceBots(api.listBots())
+            val bots = api.listBots()
+            notifier.cancel(LegacyBotIds.rename(store, botTokens, api, bots.map { it.id }.toSet()))
+            store.replaceBots(bots)
             notifier.syncChannels(store.chats().map { it.bot })
             val out = SyncEngine(api, store).run()
             notifier.cancel(out.staleNotificationIds)
@@ -287,7 +290,7 @@ class HonkService private constructor(context: Context) {
      * unread: the chat page reloads on changes and marks read on load, so an
      * unconditional announcement would loop.
      */
-    fun markRead(botId: Long) {
+    fun markRead(botId: String) {
         if (store.unreadCount(botId) == 0) return
         notifier.cancel(store.markRead(botId))
         changed()

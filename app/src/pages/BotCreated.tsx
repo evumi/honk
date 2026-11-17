@@ -21,7 +21,7 @@ async function sendTest(gateway: string, token: string, botName: string): Promis
   if (!res.ok || !reply?.ok) throw new Error(`sendMessage ${res.status}`);
 }
 
-export function BotCreated(props: { botId: number; token: string; botName: string; avatar: string }) {
+export function BotCreated(props: { botId: string; token: string; botName: string; avatar: string }) {
   const p = palette;
   const copied = signal<"" | "token" | "curl">("");
   const sending = signal<Sending>("idle");

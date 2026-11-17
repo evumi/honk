@@ -13,9 +13,23 @@ struct Envelope<T: Decodable>: Decodable {
     }
 }
 
+/// A bot id: a short random string (`aZ3kQ9xT`). Gateways before v2 sent
+/// integers; those decode as their decimal text and are "legacy" ids.
+public enum BotID {
+    /// Whether `id` is an integer id from a gateway or store before short ids.
+    public static func isLegacy(_ id: String) -> Bool {
+        !id.isEmpty && id.allSatisfy { $0.isASCII && $0.isNumber }
+    }
+
+    static func decode<K: CodingKey>(_ c: KeyedDecodingContainer<K>, _ key: K) throws -> String {
+        if let s = try? c.decode(String.self, forKey: key) { return s }
+        return String(try c.decode(Int64.self, forKey: key))
+    }
+}
+
 /// A notification channel.
 public struct Bot: Codable, Equatable, Sendable {
-    public var id: Int64
+    public var id: String
     public var name: String
     public var avatar: String
     public var defaultLevel: String
@@ -29,13 +43,23 @@ public struct Bot: Codable, Equatable, Sendable {
         case updatedAt = "updated_at"
     }
 
-    public init(id: Int64, name: String, avatar: String = "", defaultLevel: String = "active", createdAt: Int64 = 0, updatedAt: Int64 = 0) {
+    public init(id: String, name: String, avatar: String = "", defaultLevel: String = "active", createdAt: Int64 = 0, updatedAt: Int64 = 0) {
         self.id = id
         self.name = name
         self.avatar = avatar
         self.defaultLevel = defaultLevel
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try BotID.decode(c, .id)
+        name = try c.decode(String.self, forKey: .name)
+        avatar = try c.decodeIfPresent(String.self, forKey: .avatar) ?? ""
+        defaultLevel = try c.decodeIfPresent(String.self, forKey: .defaultLevel) ?? "active"
+        createdAt = try c.decodeIfPresent(Int64.self, forKey: .createdAt) ?? 0
+        updatedAt = try c.decodeIfPresent(Int64.self, forKey: .updatedAt) ?? 0
     }
 }
 
@@ -44,7 +68,7 @@ public struct QueuedMessage: Codable, Equatable, Sendable {
     public enum Kind: String, Codable, Sendable { case message, edit, delete }
 
     public var id: Int64
-    public var botID: Int64
+    public var botID: String
     public var kind: Kind
     /// For an edit or delete: the message it applies to (0 when only `collapseID` names it).
     public var targetID: Int64
@@ -70,7 +94,7 @@ public struct QueuedMessage: Codable, Equatable, Sendable {
         case collapseID = "id"
     }
 
-    public init(id: Int64, botID: Int64, kind: Kind = .message, targetID: Int64 = 0, title: String = "", body: String = "",
+    public init(id: Int64, botID: String, kind: Kind = .message, targetID: Int64 = 0, title: String = "", body: String = "",
                 html: String = "", data: String = "", level: String = "", group: String = "", url: String = "",
                 copy: String = "", icon: String = "", collapseID: String = "", date: Int64 = 0) {
         self.id = id
@@ -94,7 +118,7 @@ public struct QueuedMessage: Codable, Equatable, Sendable {
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(Int64.self, forKey: .id)
-        botID = try c.decode(Int64.self, forKey: .botID)
+        botID = try BotID.decode(c, .botID)
         kind = try c.decode(Kind.self, forKey: .kind)
         targetID = try c.decodeIfPresent(Int64.self, forKey: .targetID) ?? 0
         title = try c.decodeIfPresent(String.self, forKey: .title) ?? ""
@@ -127,18 +151,26 @@ public struct DeviceInfo: Codable, Equatable, Sendable {
 public struct PushInfo: Equatable, Sendable {
     public var kind: QueuedMessage.Kind
     public var messageID: Int64
-    public var botID: Int64
+    public var botID: String
     public var targetID: Int64
     public var collapseID: String
 
     public init?(userInfo: [AnyHashable: Any]) {
         guard let k = userInfo["kind"] as? String, let kind = QueuedMessage.Kind(rawValue: k),
-              let id = Self.int(userInfo["msg_id"]), let bot = Self.int(userInfo["bot_id"]) else { return nil }
+              let id = Self.int(userInfo["msg_id"]), let bot = Self.string(userInfo["bot_id"]) else { return nil }
         self.kind = kind
         messageID = id
         botID = bot
         targetID = Self.int(userInfo["target_id"]) ?? 0
         collapseID = userInfo["id"] as? String ?? ""
+    }
+
+    private static func string(_ v: Any?) -> String? {
+        switch v {
+        case let s as String where !s.isEmpty: return s
+        case let n as NSNumber: return n.stringValue
+        default: return nil
+        }
     }
 
     private static func int(_ v: Any?) -> Int64? {

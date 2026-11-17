@@ -263,25 +263,36 @@ func TestAppAuthAndOwnership(t *testing.T) {
 		t.Fatalf("bots = %+v", bots)
 	}
 	id := bots[0].ID
+	if !store.ValidBotID(id) || !strings.HasPrefix(tokenA, id+":") {
+		t.Errorf("bot id %q, token %q: want a short id that prefixes the token", id, tokenA)
+	}
+	if r := e.do("GET", "/v1/bots/1", a, nil); r.ErrorCode != 404 {
+		t.Errorf("integer bot id: %d", r.ErrorCode)
+	}
 	sent := must[store.Message](t, e.do("POST", "/bot"+tokenA+"/sendMessage", "", map[string]string{"body": "x"}))
+	if sent.BotID != id || e.pusher.last(t).BotID != id {
+		t.Errorf("message bot_id %q, push bot id %q, want %q", sent.BotID, e.pusher.last(t).BotID, id)
+	}
 	if r := e.do("GET", fmt.Sprintf("/v1/messages/%d", sent.ID), b, nil); r.ErrorCode != 404 {
 		t.Errorf("other device read message: %d", r.ErrorCode)
 	}
-	if r := e.do("DELETE", fmt.Sprintf("/v1/bots/%d", id), b, nil); r.ErrorCode != 404 {
+	if r := e.do("DELETE", fmt.Sprintf("/v1/bots/%s", id), b, nil); r.ErrorCode != 404 {
 		t.Errorf("other device deleted bot: %d", r.ErrorCode)
 	}
 
-	renamed := must[store.Bot](t, e.do("PATCH", fmt.Sprintf("/v1/bots/%d", id), a, map[string]string{"name": "CI"}))
+	renamed := must[store.Bot](t, e.do("PATCH", fmt.Sprintf("/v1/bots/%s", id), a, map[string]string{"name": "CI"}))
 	if renamed.Name != "CI" || renamed.DefaultLevel != "active" {
 		t.Errorf("patched = %+v", renamed)
 	}
 	reset := must[struct {
 		Token string `json:"token"`
-	}](t, e.do("POST", fmt.Sprintf("/v1/bots/%d/token", id), a, nil))
+	}](t, e.do("POST", fmt.Sprintf("/v1/bots/%s/token", id), a, nil))
 	if r := e.do("GET", "/bot"+tokenA+"/getMe", "", nil); r.ErrorCode != 401 {
 		t.Errorf("old token after reset: %d", r.ErrorCode)
 	}
-	must[store.Bot](t, e.do("GET", "/bot"+reset.Token+"/getMe", "", nil))
+	if me := must[store.Bot](t, e.do("GET", "/bot"+reset.Token+"/getMe", "", nil)); me.ID != id || !strings.HasPrefix(reset.Token, id+":") {
+		t.Errorf("after reset: getMe id %q, token %q", me.ID, reset.Token)
+	}
 }
 
 func TestGoneTokenStopsPushes(t *testing.T) {
@@ -401,7 +412,7 @@ func TestPruneLimiters(t *testing.T) {
 	// Deleting a bot drops its limiter at once.
 	must[store.Message](t, e.do("POST", "/bot"+token+"/sendMessage", "", map[string]string{"body": "y"}))
 	bots := must[[]store.Bot](t, e.do("GET", "/v1/bots", secret, nil))
-	must[bool](t, e.do("DELETE", fmt.Sprintf("/v1/bots/%d", bots[0].ID), secret, nil))
+	must[bool](t, e.do("DELETE", fmt.Sprintf("/v1/bots/%s", bots[0].ID), secret, nil))
 	e.s.mu.Lock()
 	_, kept := e.s.limiters[bots[0].ID]
 	e.s.mu.Unlock()

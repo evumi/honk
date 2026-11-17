@@ -53,14 +53,14 @@ class NshBridge(
         }
         handle("honk.chats") { service.store.chats().map(::chat) }
         handle("honk.messages") { a ->
-            service.store.messages(a.require("botId"), a.long("before"), a.long("limit")?.toInt() ?: 50).map(::message)
+            service.store.messages(a.requireString("botId"), a.long("before"), a.long("limit")?.toInt() ?: 50).map(::message)
         }
         handle("honk.markRead") { a ->
-            service.markRead(a.require("botId"))
+            service.markRead(a.requireString("botId"))
             true
         }
         handle("honk.focus") { a ->
-            service.focusedBotId = a.long("botId")
+            service.focusedBotId = a.string("botId")
             true
         }
         handle("honk.refresh") {
@@ -102,19 +102,19 @@ class NshBridge(
             mapOf("bot" to bot(created.bot), "token" to created.token)
         }
         handle("honk.bot.update") { a ->
-            val b = service.api.updateBot(a.require("botId"), a.string("name"), a.string("avatar"), a.string("defaultLevel"))
+            val b = service.api.updateBot(a.requireString("botId"), a.string("name"), a.string("avatar"), a.string("defaultLevel"))
             service.store.saveBot(b)
             service.notifier.ensureChannel(b.id, b.name)
             service.changed()
             bot(b)
         }
-        handle("honk.bot.token") { a -> service.botTokens.token(a.require("botId")) }
+        handle("honk.bot.token") { a -> service.botTokens.token(a.requireString("botId")) }
         handle("honk.bot.resetToken") { a ->
-            val id = a.require("botId")
+            val id = a.requireString("botId")
             service.api.resetToken(id).also { service.botTokens.save(id, it) }
         }
         handle("honk.bot.delete") { a ->
-            val id = a.require("botId")
+            val id = a.requireString("botId")
             service.api.deleteBot(id)
             service.notifier.cancel(service.store.clearMessages(id))
             service.store.deleteBot(id)
@@ -124,12 +124,12 @@ class NshBridge(
             true
         }
         handle("honk.bot.setMuted") { a ->
-            service.store.setMuted(a.require("botId"), a.bool("muted") ?: false)
+            service.store.setMuted(a.requireString("botId"), a.bool("muted") ?: false)
             service.changed()
             true
         }
         handle("honk.bot.setPinned") { a ->
-            service.store.setPinned(a.require("botId"), a.bool("pinned") ?: false)
+            service.store.setPinned(a.requireString("botId"), a.bool("pinned") ?: false)
             service.changed()
             true
         }
@@ -142,7 +142,7 @@ class NshBridge(
             true
         }
         handle("honk.chat.clear") { a ->
-            service.notifier.cancel(service.store.clearMessages(a.require("botId")))
+            service.notifier.cancel(service.store.clearMessages(a.requireString("botId")))
             service.changed()
             true
         }
@@ -159,7 +159,7 @@ class NshBridge(
         removeListener = null
     }
 
-    fun openChat(botId: Long) {
+    fun openChat(botId: String) {
         nsh.send("honk.open", mapOf("botId" to botId))
     }
 
@@ -204,7 +204,7 @@ class NshBridge(
         }
     }
 
-    // JSON shapes (camelCase, numbers for ids), the same as NshBridge.swift.
+    // JSON shapes (camelCase; bot ids are strings, message ids numbers), the same as NshBridge.swift.
 
     private fun bot(b: Bot): Map<String, Any?> =
         mapOf("id" to b.id, "name" to b.name, "avatar" to b.avatar, "defaultLevel" to b.defaultLevel, "createdAt" to b.createdAt)
@@ -226,7 +226,11 @@ class NshBridge(
 class Args(data: Any?) {
     private val map: Map<*, *> = data as? Map<*, *> ?: emptyMap<String, Any>()
 
-    fun string(k: String): String? = map[k] as? String
+    fun string(k: String): String? = when (val v = map[k]) {
+        is String -> v
+        is Number -> v.toLong().toString()
+        else -> null
+    }
     fun bool(k: String): Boolean? = map[k] as? Boolean
     fun long(k: String): Long? = when (val v = map[k]) {
         is Number -> v.toLong()

@@ -9,7 +9,7 @@ import { tr } from "../i18n";
 import { Widget } from "../widget/Widget";
 import { createDissolve, Dissolve } from "../fx/Dissolve";
 
-export function ChatPage(props: { botId: number }) {
+export function ChatPage(props: { botId: string }) {
   const p = palette;
   const messages = signal<Message[]>([]); // oldest first
   const chat = () => chatOf(props.botId);

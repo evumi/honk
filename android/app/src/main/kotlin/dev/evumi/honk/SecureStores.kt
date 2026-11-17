@@ -42,13 +42,13 @@ class PrefsCredentialStore(private val prefs: SharedPreferences) : CredentialSto
 
 /** Each bot's token, keyed `bot-token.<id>`. */
 class PrefsBotTokenStore(private val prefs: SharedPreferences) : BotTokenStore {
-    override fun token(botId: Long): String? = prefs.getString(key(botId), null)
+    override fun token(botId: String): String? = prefs.getString(key(botId), null)
 
-    override fun save(botId: Long, token: String) {
+    override fun save(botId: String, token: String) {
         prefs.edit().putString(key(botId), token).apply()
     }
 
-    override fun remove(botId: Long) {
+    override fun remove(botId: String) {
         prefs.edit().remove(key(botId)).apply()
     }
 
@@ -58,7 +58,7 @@ class PrefsBotTokenStore(private val prefs: SharedPreferences) : BotTokenStore {
         edit.apply()
     }
 
-    private fun key(botId: Long) = "$PREFIX$botId"
+    private fun key(botId: String) = "$PREFIX$botId"
 
     private companion object {
         const val PREFIX = "bot-token."

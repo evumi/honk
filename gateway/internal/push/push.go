@@ -10,7 +10,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"log/slog"
-	"strconv"
 	"unicode/utf8"
 )
 
@@ -24,8 +23,8 @@ type Notification struct {
 	Token     string
 	Kind      string // message | edit | delete
 	MessageID int64
-	TargetID  int64 // edit/delete: the message it applies to
-	BotID     int64
+	TargetID  int64  // edit/delete: the message it applies to
+	BotID     string // the bot's public id
 	BotName   string
 	Title     string
 	Body      string
@@ -86,14 +85,14 @@ func truncate(s string, max int) string {
 
 // collapseKey scopes the sender's id to the bot, since APNs collapses per app,
 // and keeps it within APNs's 64-byte limit.
-func collapseKey(botID int64, id string) string {
+func collapseKey(botID, id string) string {
 	if id == "" {
 		return ""
 	}
-	k := "b" + strconv.FormatInt(botID, 10) + ":" + id
+	k := "b" + botID + ":" + id
 	if len(k) <= 64 {
 		return k
 	}
 	h := sha256.Sum256([]byte(id))
-	return "b" + strconv.FormatInt(botID, 10) + ":" + hex.EncodeToString(h[:16])
+	return "b" + botID + ":" + hex.EncodeToString(h[:16])
 }

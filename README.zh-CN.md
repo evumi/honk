@@ -18,7 +18,7 @@ Honk 是一个以 bot 为渠道的推送通知服务：每个 bot 都是一个�
 ## 工作方式
 
 1. App 启动时把 APNs/FCM 的 push token 注册到网关，拿到 `device_secret`。
-2. App 创建 bot，拿到 bot token，形如 `1:Gw2K7mx…`。
+2. App 创建 bot，拿到 bot token，格式是 `<bot id>:<secret>`，形如 `aZ3kQ9xT:Gw2K7mx…`。bot id 是 8 位随机 base62 字符（以字母开头），不是自增序号。
 3. 发送方调用 `/bot<token>/sendMessage`。网关把消息写进队列，然后推送一条只带横幅文字和 `msg_id` 的通知。
 4. 设备端（iOS 的 NSE 或 Android 的 FCM Service）按 `msg_id` 调 `GET /v1/messages/:id` 拉完整消息（包括卡片），存进本地库。
 5. App 打开时调 `GET /v1/sync` 补齐离线期间漏掉的消息，存好后调 `POST /v1/ack`。
@@ -98,6 +98,10 @@ curl https://honk.example.com/bot$TOKEN/sendMessage \
 
 返回这个 bot 的信息，可以用来测试 token 是否有效。
 
+### 旧 token
+
+短 bot id 之前的网关（数据库 schema v1）用自增整数做 bot id，token 形如 `4:Gw2K7mx…`。升级后每个 bot 都会分到一个短 id；旧 token 在重置之前照常可用，重置后的新 token 以短 id 开头。App 第一次同步时会用本机存的 token 调 `getMe` 查出对应的短 id，把这个 bot 的本地消息和设置迁移过去。先更新 App 再升级网关：旧版 App 读不了短 id，新版 App 连旧网关也能用。
+
 ### 卡片 HTML（profile v1）
 
 网关只保留白名单里的元素，其他元素连同子元素一起删掉：
@@ -125,7 +129,7 @@ curl https://honk.example.com/bot$TOKEN/sendMessage \
 | `POST /v1/devices` | `{"platform":"ios"\|"android","push_token":"…"}`，返回 `device` 和 `device_secret` |
 | `GET` / `PUT` / `DELETE /v1/devices/me` | 读取设备信息；更新 push token；删除设备及它的所有 bot 和消息 |
 | `GET` / `POST /v1/bots` | 列出 bot；创建 bot：`{"name","avatar","default_level"}`，返回 `bot` 和 `token` |
-| `GET` / `PATCH` / `DELETE /v1/bots/:id` | 读取、修改、删除一个 bot |
+| `GET` / `PATCH` / `DELETE /v1/bots/:id` | 读取、修改、删除一个 bot（`:id` 是 bot 的短 id） |
 | `POST /v1/bots/:id/token` | 重置 token，旧 token 立即失效 |
 | `GET /v1/messages/:id` | 拉一条消息；条目可能是 `message`、`edit` 或 `delete` |
 | `GET /v1/sync?cursor=&limit=` | 拉 cursor 之后的消息，返回 `messages`、`cursor`、`has_more` |

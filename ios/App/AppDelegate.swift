@@ -5,8 +5,8 @@ import UserNotifications
 @main
 final class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     /// Set by the scene once the nsh view is up; a tapped notification opens its chat.
-    var openChat: ((Int64) -> Void)?
-    private var pendingOpen: Int64?
+    var openChat: ((String) -> Void)?
+    private var pendingOpen: String?
 
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
@@ -103,7 +103,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationC
     }
 
     /// The scene calls this once it can open chats.
-    func takePendingOpen() -> Int64? {
+    func takePendingOpen() -> String? {
         defer { pendingOpen = nil }
         return pendingOpen
     }

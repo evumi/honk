@@ -90,10 +90,10 @@ class MainActivity : ComponentActivity() {
     /** A tapped notification: a message with a url opens it; otherwise its chat. */
     private fun handleOpen(intent: Intent?) {
         if (intent?.action != ACTION_OPEN) return
-        val botId = intent.getLongExtra(EXTRA_BOT_ID, 0)
+        val botId = intent.getStringExtra(EXTRA_BOT_ID).orEmpty()
         val messageId = intent.getLongExtra(EXTRA_MESSAGE_ID, 0)
         intent.action = null // not again after a configuration change
-        if (botId == 0L) return
+        if (botId.isEmpty()) return
         lifecycleScope.launch(Dispatchers.IO) {
             val url = if (messageId > 0) service.store.message(messageId)?.url.orEmpty() else ""
             launch(Dispatchers.Main) {

@@ -52,7 +52,7 @@ type Server struct {
 	opts   Options
 
 	mu         sync.Mutex
-	limiters   map[int64]*limiter  // per bot: sends
+	limiters   map[string]*limiter // per bot: sends
 	registrars map[string]*limiter // per client IP: device registrations
 
 	pushes sync.WaitGroup
@@ -69,7 +69,7 @@ func New(st *store.Store, p push.Pusher, log *slog.Logger, opts Options) *Server
 	if opts.MaxBotsPerDevice <= 0 {
 		opts.MaxBotsPerDevice = 100
 	}
-	return &Server{store: st, pusher: p, log: log, opts: opts, limiters: map[int64]*limiter{}, registrars: map[string]*limiter{}}
+	return &Server{store: st, pusher: p, log: log, opts: opts, limiters: map[string]*limiter{}, registrars: map[string]*limiter{}}
 }
 
 // Wait blocks until the pushes in flight finish; call it after the HTTP
@@ -197,7 +197,7 @@ func (s *Server) notify(d store.Device, n push.Notification) {
 }
 
 // allow takes a send from the bot's bucket.
-func (s *Server) allow(botID int64) bool {
+func (s *Server) allow(botID string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	l, found := s.limiters[botID]
@@ -227,7 +227,7 @@ func (s *Server) allowRegistration(r *http.Request) bool {
 }
 
 // forgetBot drops a deleted bot's limiter.
-func (s *Server) forgetBot(botID int64) {
+func (s *Server) forgetBot(botID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.limiters, botID)

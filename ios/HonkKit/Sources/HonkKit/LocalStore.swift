@@ -4,7 +4,7 @@ import SQLite3
 /// A message as kept on the device.
 public struct StoredMessage: Codable, Equatable, Sendable {
     public var id: Int64
-    public var botID: Int64
+    public var botID: String
     public var title: String
     public var body: String
     public var html: String
@@ -73,6 +73,11 @@ public final class LocalStore: @unchecked Sendable {
     deinit { sqlite3_close(db) }
 
     private func migrate() throws {
+        try migrateV1()
+        try migrateV2()
+    }
+
+    private func migrateV1() throws {
         guard try scalar("PRAGMA user_version") ?? 0 < 1 else { return }
         // The app and the extension may open a new file at the same moment:
         // read the version again under the write lock, so the second waits for
@@ -111,6 +116,56 @@ public final class LocalStore: @unchecked Sendable {
             CREATE INDEX messages_collapse ON messages(bot_id, collapse_id) WHERE collapse_id <> '';
             CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
             PRAGMA user_version = 1;
+            """)
+        }
+    }
+
+    /// v2: bot ids are short strings. Rebuilds both tables with TEXT bot ids
+    /// (an INTEGER column would turn "123" back into a number); the integer ids
+    /// already stored become their decimal text until the gateway's list
+    /// renames them (`renameBot`).
+    private func migrateV2() throws {
+        guard try scalar("PRAGMA user_version") ?? 0 < 2 else { return }
+        try transaction {
+            guard try scalar("PRAGMA user_version") ?? 0 < 2 else { return }
+            try exec("""
+            CREATE TABLE bots_v2 (
+              id            TEXT PRIMARY KEY,
+              name          TEXT NOT NULL,
+              avatar        TEXT NOT NULL DEFAULT '',
+              default_level TEXT NOT NULL DEFAULT 'active',
+              muted         INTEGER NOT NULL DEFAULT 0,
+              pinned        INTEGER NOT NULL DEFAULT 0,
+              created_at    INTEGER NOT NULL DEFAULT 0,
+              updated_at    INTEGER NOT NULL DEFAULT 0
+            );
+            INSERT INTO bots_v2 SELECT CAST(id AS TEXT), name, avatar, default_level, muted, pinned, created_at, updated_at FROM bots;
+            DROP TABLE bots;
+            ALTER TABLE bots_v2 RENAME TO bots;
+            CREATE TABLE messages_v2 (
+              id          INTEGER PRIMARY KEY,         -- the gateway's message id
+              bot_id      TEXT NOT NULL,
+              title       TEXT NOT NULL DEFAULT '',
+              body        TEXT NOT NULL DEFAULT '',
+              html        TEXT NOT NULL DEFAULT '',
+              data        TEXT NOT NULL DEFAULT '',
+              level       TEXT NOT NULL DEFAULT '',
+              group_key   TEXT NOT NULL DEFAULT '',
+              url         TEXT NOT NULL DEFAULT '',
+              copy_text   TEXT NOT NULL DEFAULT '',
+              icon        TEXT NOT NULL DEFAULT '',
+              collapse_id TEXT NOT NULL DEFAULT '',
+              date        INTEGER NOT NULL,
+              read        INTEGER NOT NULL DEFAULT 0,
+              notif_id    TEXT
+            );
+            INSERT INTO messages_v2 SELECT id, CAST(bot_id AS TEXT), title, body, html, data, level, group_key, url,
+              copy_text, icon, collapse_id, date, read, notif_id FROM messages;
+            DROP TABLE messages;
+            ALTER TABLE messages_v2 RENAME TO messages;
+            CREATE INDEX messages_bot ON messages(bot_id, id);
+            CREATE INDEX messages_collapse ON messages(bot_id, collapse_id) WHERE collapse_id <> '';
+            PRAGMA user_version = 2;
             """)
         }
     }
@@ -186,13 +241,32 @@ public final class LocalStore: @unchecked Sendable {
         try locked {
             try transaction {
                 for b in bots { try upsert(b) }
-                let ids = bots.map { String($0.id) }.joined(separator: ",")
-                let keep = ids.isEmpty ? "" : " WHERE id NOT IN (\(ids))"
-                let keepMsg = ids.isEmpty ? "" : " WHERE bot_id NOT IN (\(ids))"
-                try exec("DELETE FROM messages" + keepMsg)
-                try exec("DELETE FROM bots" + keep)
+                let ids: [Any?] = bots.map(\.id)
+                let marks = Array(repeating: "?", count: ids.count).joined(separator: ",")
+                let keep = ids.isEmpty ? "" : " WHERE id NOT IN (\(marks))"
+                let keepMsg = ids.isEmpty ? "" : " WHERE bot_id NOT IN (\(marks))"
+                try run("DELETE FROM messages" + keepMsg, ids)
+                try run("DELETE FROM bots" + keep, ids)
             }
         }
+    }
+
+    /// Moves a bot's local data (flags, messages) from `old` to `new`: the
+    /// gateway gave a bot known by a legacy integer id its short id.
+    public func renameBot(from old: String, to new: String) throws {
+        try locked {
+            try transaction {
+                guard old != new, try scalar("SELECT COUNT(*) FROM bots WHERE id = ?", [old]) == 1,
+                      try scalar("SELECT COUNT(*) FROM bots WHERE id = ?", [new]) == 0 else { return }
+                try run("UPDATE bots SET id = ? WHERE id = ?", [new, old])
+                try run("UPDATE messages SET bot_id = ? WHERE bot_id = ?", [new, old])
+            }
+        }
+    }
+
+    /// The ids of the stored bots.
+    public func botIDs() throws -> [String] {
+        try locked { try query("SELECT id FROM bots") { $0.text(0) ?? "" } }
     }
 
     public func saveBot(_ b: Bot) throws {
@@ -207,16 +281,16 @@ public final class LocalStore: @unchecked Sendable {
             """, [b.id, b.name, b.avatar, b.defaultLevel, b.createdAt, b.updatedAt])
     }
 
-    public func bot(id: Int64) throws -> Bot? {
+    public func bot(id: String) throws -> Bot? {
         try locked {
             try query("SELECT id, name, avatar, default_level, created_at, updated_at FROM bots WHERE id = ?", [id]) {
-                Bot(id: $0.int(0), name: $0.text(1) ?? "", avatar: $0.text(2) ?? "", defaultLevel: $0.text(3) ?? "active",
+                Bot(id: $0.text(0) ?? "", name: $0.text(1) ?? "", avatar: $0.text(2) ?? "", defaultLevel: $0.text(3) ?? "active",
                     createdAt: $0.int(4), updatedAt: $0.int(5))
             }.first
         }
     }
 
-    public func deleteBot(id: Int64) throws {
+    public func deleteBot(id: String) throws {
         try locked {
             try transaction {
                 try run("DELETE FROM messages WHERE bot_id = ?", [id])
@@ -225,15 +299,15 @@ public final class LocalStore: @unchecked Sendable {
         }
     }
 
-    public func setMuted(botID: Int64, _ muted: Bool) throws {
+    public func setMuted(botID: String, _ muted: Bool) throws {
         try locked { try run("UPDATE bots SET muted = ? WHERE id = ?", [muted, botID]) }
     }
 
-    public func setPinned(botID: Int64, _ pinned: Bool) throws {
+    public func setPinned(botID: String, _ pinned: Bool) throws {
         try locked { try run("UPDATE bots SET pinned = ? WHERE id = ?", [pinned, botID]) }
     }
 
-    public func isMuted(botID: Int64) throws -> Bool {
+    public func isMuted(botID: String) throws -> Bool {
         try locked { try scalar("SELECT muted FROM bots WHERE id = ?", [botID]) == 1 }
     }
 
@@ -242,7 +316,7 @@ public final class LocalStore: @unchecked Sendable {
     private static let messageCols = "id, bot_id, title, body, html, data, level, group_key, url, copy_text, icon, collapse_id, date, read"
 
     private static func readMessage(_ r: Row) -> StoredMessage {
-        StoredMessage(id: r.int(0), botID: r.int(1), title: r.text(2) ?? "", body: r.text(3) ?? "", html: r.text(4) ?? "",
+        StoredMessage(id: r.int(0), botID: r.text(1) ?? "", title: r.text(2) ?? "", body: r.text(3) ?? "", html: r.text(4) ?? "",
                       data: r.text(5) ?? "", level: r.text(6) ?? "", group: r.text(7) ?? "", url: r.text(8) ?? "",
                       copy: r.text(9) ?? "", icon: r.text(10) ?? "", collapseID: r.text(11) ?? "", date: r.int(12),
                       read: r.int(13) != 0)
@@ -253,7 +327,7 @@ public final class LocalStore: @unchecked Sendable {
     }
 
     /// A bot's messages, newest first, older than `before` when given.
-    public func messages(botID: Int64, before: Int64? = nil, limit: Int = 50) throws -> [StoredMessage] {
+    public func messages(botID: String, before: Int64? = nil, limit: Int = 50) throws -> [StoredMessage] {
         try locked {
             try query("SELECT \(Self.messageCols) FROM messages WHERE bot_id = ? AND id < ? ORDER BY id DESC LIMIT ?",
                       [botID, before ?? Int64.max, limit], Self.readMessage)
@@ -269,7 +343,7 @@ public final class LocalStore: @unchecked Sendable {
                        (SELECT MAX(id) FROM messages m WHERE m.bot_id = b.id)
                 FROM bots b
                 """) { r in
-                (ChatSummary(bot: Bot(id: r.int(0), name: r.text(1) ?? "", avatar: r.text(2) ?? "",
+                (ChatSummary(bot: Bot(id: r.text(0) ?? "", name: r.text(1) ?? "", avatar: r.text(2) ?? "",
                                       defaultLevel: r.text(3) ?? "active", createdAt: r.int(4), updatedAt: r.int(5)),
                              muted: r.int(6) != 0, pinned: r.int(7) != 0, last: nil, unread: Int(r.int(8))),
                  r.isNull(9) ? nil : r.int(9))
@@ -293,13 +367,13 @@ public final class LocalStore: @unchecked Sendable {
     }
 
     /// How many of a bot's messages are unread.
-    public func unreadCount(botID: Int64) throws -> Int {
+    public func unreadCount(botID: String) throws -> Int {
         try locked { Int(try scalar("SELECT COUNT(*) FROM messages WHERE bot_id = ? AND read = 0", [botID]) ?? 0) }
     }
 
     /// Marks a bot's messages read and returns their notification ids, to clear them.
     @discardableResult
-    public func markRead(botID: Int64) throws -> [String] {
+    public func markRead(botID: String) throws -> [String] {
         try locked {
             try transaction {
                 let ids = try query("SELECT notif_id FROM messages WHERE bot_id = ? AND read = 0 AND notif_id IS NOT NULL",
@@ -322,7 +396,7 @@ public final class LocalStore: @unchecked Sendable {
 
     /// Deletes a bot's messages on this device; returns their notification ids.
     @discardableResult
-    public func clearMessages(botID: Int64) throws -> [String] {
+    public func clearMessages(botID: String) throws -> [String] {
         try locked {
             try transaction {
                 let ids = try query("SELECT notif_id FROM messages WHERE bot_id = ? AND notif_id IS NOT NULL", [botID]) {

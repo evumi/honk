@@ -18,7 +18,8 @@ const (
 // CollapseID say which message it applies to, and Data is the new state.
 type Message struct {
 	ID         int64  `json:"message_id"`
-	BotID      int64  `json:"bot_id"`
+	BotID      string `json:"bot_id"` // the bot's public id
+	BotKey     int64  `json:"-"`      // the bot's row id
 	DeviceID   string `json:"-"`
 	Kind       string `json:"kind"`
 	TargetID   int64  `json:"target_id,omitempty"`
@@ -36,11 +37,14 @@ type Message struct {
 	ExpiresAt  int64  `json:"-"`
 }
 
-const msgCols = `id, bot_id, device_id, kind, target_id, title, body, html, data, level, group_key, url, copy_text, icon, collapse_id, created_at, expires_at`
+// msgSelect reads messages with their bot's public id.
+const msgSelect = `SELECT m.id, b.public_id, m.bot_id, m.device_id, m.kind, m.target_id, m.title, m.body, m.html, m.data, m.level,
+	m.group_key, m.url, m.copy_text, m.icon, m.collapse_id, m.created_at, m.expires_at
+	FROM messages m JOIN bots b ON b.id = m.bot_id`
 
 func scanMessage(row interface{ Scan(...any) error }) (Message, error) {
 	var m Message
-	err := row.Scan(&m.ID, &m.BotID, &m.DeviceID, &m.Kind, &m.TargetID, &m.Title, &m.Body, &m.HTML, &m.Data,
+	err := row.Scan(&m.ID, &m.BotID, &m.BotKey, &m.DeviceID, &m.Kind, &m.TargetID, &m.Title, &m.Body, &m.HTML, &m.Data,
 		&m.Level, &m.Group, &m.URL, &m.Copy, &m.Icon, &m.CollapseID, &m.CreatedAt, &m.ExpiresAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return m, ErrNotFound
@@ -52,7 +56,7 @@ func insert(ctx context.Context, tx *sql.Tx, m *Message) error {
 	res, err := tx.ExecContext(ctx, `
 		INSERT INTO messages (bot_id, device_id, kind, target_id, title, body, html, data, level, group_key, url, copy_text, icon, collapse_id, created_at, expires_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		m.BotID, m.DeviceID, m.Kind, m.TargetID, m.Title, m.Body, m.HTML, m.Data, m.Level, m.Group, m.URL, m.Copy, m.Icon,
+		m.BotKey, m.DeviceID, m.Kind, m.TargetID, m.Title, m.Body, m.HTML, m.Data, m.Level, m.Group, m.URL, m.Copy, m.Icon,
 		m.CollapseID, m.CreatedAt, m.ExpiresAt)
 	if err != nil {
 		return err
@@ -61,10 +65,11 @@ func insert(ctx context.Context, tx *sql.Tx, m *Message) error {
 	return err
 }
 
-// AddMessage queues a new message. A message with the same collapse id from
-// the same bot replaces the earlier ones still in the queue.
-func (s *Store) AddMessage(ctx context.Context, m Message, ttl time.Duration) (Message, error) {
+// AddMessage queues a new message from bot. A message with the same collapse
+// id from the same bot replaces the earlier ones still in the queue.
+func (s *Store) AddMessage(ctx context.Context, bot Bot, m Message, ttl time.Duration) (Message, error) {
 	now := s.now()
+	m.BotID, m.BotKey = bot.ID, bot.Key
 	m.Kind = KindMessage
 	m.TargetID = 0
 	m.CreatedAt = now.UnixMilli()
@@ -76,7 +81,7 @@ func (s *Store) AddMessage(ctx context.Context, m Message, ttl time.Duration) (M
 	defer tx.Rollback()
 	if m.CollapseID != "" {
 		if _, err := tx.ExecContext(ctx,
-			`DELETE FROM messages WHERE bot_id = ? AND collapse_id = ? AND kind = 'message'`, m.BotID, m.CollapseID); err != nil {
+			`DELETE FROM messages WHERE bot_id = ? AND collapse_id = ? AND kind = 'message'`, m.BotKey, m.CollapseID); err != nil {
 			return m, err
 		}
 	}
@@ -116,17 +121,18 @@ func resolve(ctx context.Context, tx *sql.Tx, botID int64, t Target) (Target, er
 
 // EditData queues a change to a message's data and updates the queued copy if
 // it is still there.
-func (s *Store) EditData(ctx context.Context, botID int64, deviceID string, t Target, data string, ttl time.Duration) (Message, error) {
-	return s.change(ctx, KindEdit, botID, deviceID, t, data, ttl)
+func (s *Store) EditData(ctx context.Context, bot Bot, deviceID string, t Target, data string, ttl time.Duration) (Message, error) {
+	return s.change(ctx, KindEdit, bot, deviceID, t, data, ttl)
 }
 
 // DeleteMessage queues a delete and drops the queued copy if it is still there.
-func (s *Store) DeleteMessage(ctx context.Context, botID int64, deviceID string, t Target, ttl time.Duration) (Message, error) {
-	return s.change(ctx, KindDelete, botID, deviceID, t, "", ttl)
+func (s *Store) DeleteMessage(ctx context.Context, bot Bot, deviceID string, t Target, ttl time.Duration) (Message, error) {
+	return s.change(ctx, KindDelete, bot, deviceID, t, "", ttl)
 }
 
-func (s *Store) change(ctx context.Context, kind string, botID int64, deviceID string, t Target, data string, ttl time.Duration) (Message, error) {
+func (s *Store) change(ctx context.Context, kind string, bot Bot, deviceID string, t Target, data string, ttl time.Duration) (Message, error) {
 	now := s.now()
+	botID := bot.Key
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return Message{}, err
@@ -150,7 +156,7 @@ func (s *Store) change(ctx context.Context, kind string, botID int64, deviceID s
 		}
 	}
 	m := Message{
-		BotID: botID, DeviceID: deviceID, Kind: kind, TargetID: t.MessageID, CollapseID: t.CollapseID, Data: data,
+		BotID: bot.ID, BotKey: botID, DeviceID: deviceID, Kind: kind, TargetID: t.MessageID, CollapseID: t.CollapseID, Data: data,
 		CreatedAt: now.UnixMilli(), ExpiresAt: now.Add(ttl).UnixMilli(),
 	}
 	if err := insert(ctx, tx, &m); err != nil {
@@ -162,13 +168,13 @@ func (s *Store) change(ctx context.Context, kind string, botID int64, deviceID s
 // GetMessage returns a queued item of the device.
 func (s *Store) GetMessage(ctx context.Context, deviceID string, id int64) (Message, error) {
 	return scanMessage(s.db.QueryRowContext(ctx,
-		`SELECT `+msgCols+` FROM messages WHERE id = ? AND device_id = ? AND expires_at > ?`, id, deviceID, s.ms()))
+		msgSelect+` WHERE m.id = ? AND m.device_id = ? AND m.expires_at > ?`, id, deviceID, s.ms()))
 }
 
 // Sync returns the device's queued items after cursor, oldest first.
 func (s *Store) Sync(ctx context.Context, deviceID string, cursor int64, limit int) ([]Message, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT `+msgCols+` FROM messages WHERE device_id = ? AND id > ? AND expires_at > ? ORDER BY id LIMIT ?`,
+		msgSelect+` WHERE m.device_id = ? AND m.id > ? AND m.expires_at > ? ORDER BY m.id LIMIT ?`,
 		deviceID, cursor, s.ms(), limit)
 	if err != nil {
 		return nil, err

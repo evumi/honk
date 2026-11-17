@@ -85,7 +85,7 @@ public struct APIClient: Sendable {
         try await request("POST", "v1/bots", body: ["name": name, "avatar": avatar, "default_level": defaultLevel])
     }
 
-    public func updateBot(id: Int64, name: String? = nil, avatar: String? = nil, defaultLevel: String? = nil) async throws -> Bot {
+    public func updateBot(id: String, name: String? = nil, avatar: String? = nil, defaultLevel: String? = nil) async throws -> Bot {
         var body: [String: String] = [:]
         body["name"] = name
         body["avatar"] = avatar
@@ -93,13 +93,21 @@ public struct APIClient: Sendable {
         return try await request("PATCH", "v1/bots/\(id)", body: body)
     }
 
-    public func resetToken(botID: Int64) async throws -> String {
+    public func resetToken(botID: String) async throws -> String {
         let t: Token = try await request("POST", "v1/bots/\(botID)/token")
         return t.token
     }
 
-    public func deleteBot(id: Int64) async throws {
+    public func deleteBot(id: String) async throws {
         let _: Bool = try await request("DELETE", "v1/bots/\(id)")
+    }
+
+    /// The bot a token belongs to, through the bot API (`/bot<token>/getMe`).
+    /// The app uses it to learn the short id of a bot it knew by a legacy id.
+    public func getMe(token: String) async throws -> Bot {
+        // "./" keeps the token's colon from reading as a URL scheme.
+        guard let escaped = token.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else { throw APIError.badResponse }
+        return try await request("GET", "./bot\(escaped)/getMe", auth: false)
     }
 
     // MARK: messages
