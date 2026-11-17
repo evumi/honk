@@ -113,6 +113,7 @@ const EN: Record<string, string> = {
   "发送示例": "Example",
   "复制示例": "Copy example",
   "进入会话": "Open chat",
+  "回到最新消息": "Jump to latest",
   "语言": "Language",
   "通用": "General",
   "跟随系统": "System",

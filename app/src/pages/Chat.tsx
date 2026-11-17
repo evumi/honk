@@ -1,6 +1,7 @@
+import type { ListRef } from "nsh";
 import { Clipboard, cleanup, List, openUrl, signal, Text, View, effect, safeArea } from "nsh";
 import { AlertDialog, NavPage } from "nsh/base";
-import { Avatar, EdgeBlur, glass, Icon, TopBar } from "../components";
+import { Avatar, Badge, EdgeBlur, glass, Icon, TopBar } from "../components";
 import { clock, dayLabel, sameDay } from "../format";
 import { api, type Message } from "../host";
 import { chatOf, nav, reload, version } from "../store";
@@ -15,10 +16,25 @@ export function ChatPage(props: { botId: number }) {
   const chat = () => chatOf(props.botId);
   let loadingOlder = false;
   let reachedStart = false;
+  let list: ListRef | undefined;
+  // Scrolled up away from the newest messages, and how many arrived since.
+  const away = signal(false);
+  const fresh = signal(0);
+  // Where the viewport starts when scrolled to the newest message.
+  let endPos: { index: number; offset: number } | null = null;
+  const measureEnd = () =>
+    requestAnimationFrame(() => void list?.measureScrollPosition().then((pos) => (endPos = pos)));
 
   const load = async () => {
     const latest = await api.messages(props.botId);
-    messages.set([...latest].reverse());
+    const lastBefore = messages().at(-1)?.id;
+    const next = [...latest].reverse();
+    if (away() && lastBefore !== undefined) {
+      const at = next.findIndex((m) => m.id === lastBefore);
+      if (at >= 0) fresh.set(fresh() + next.length - 1 - at);
+    }
+    messages.set(next);
+    if (!away()) measureEnd();
     reachedStart = latest.length < 50;
     // Only when something is unread: marking read announces a change, which
     // reloads this page, which would mark read again.
@@ -44,6 +60,18 @@ export function ChatPage(props: { botId: number }) {
     void reload();
   });
 
+  const checkPosition = async () => {
+    const pos = await list?.measureScrollPosition();
+    away.set(!!pos && !!endPos && (pos.index < endPos.index || (pos.index === endPos.index && pos.offset < endPos.offset - 60)));
+    if (!away()) fresh.set(0);
+  };
+  const jumpToLatest = () => {
+    list?.scrollToEnd({ animated: true });
+    away.set(false);
+    fresh.set(0);
+    measureEnd();
+  };
+
   const toggleMute = async () => {
     await api.setMuted(props.botId, !chat()?.muted);
     await reload();
@@ -56,6 +84,8 @@ export function ChatPage(props: { botId: number }) {
           each={messages()}
           keyExtractor={(m) => String(m.id)}
           initialScrollAtEnd
+          ref={(r: ListRef) => (list = r)}
+          onScrollEnd={() => void checkPosition()}
           onLoadMoreAtStart={() => void loadOlder()}
           style={{ flex: 1 }}
           contentStyle={{ paddingTop: safeArea().top + 60, paddingBottom: safeArea().bottom + 70, paddingLeft: 12, paddingRight: 12, gap: 10 } as never}
@@ -88,6 +118,24 @@ export function ChatPage(props: { botId: number }) {
         />
 
         <EdgeBlur edge="bottom" height={safeArea().bottom + 76} />
+        {/* Back to the newest message, with how many arrived while scrolled up. */}
+        <If when={away() || fresh() > 0}>
+          <View
+            testID="jump-latest"
+            role="button"
+            accessibilityLabel={tr("回到最新消息")}
+            onPress={jumpToLatest}
+            activeStyle={{ opacity: 0.7 }}
+            style={{ position: "absolute", right: 12, bottom: safeArea().bottom + 70, width: 46, height: 46, borderRadius: 23, alignItems: "center", justifyContent: "center", ...glass(p()) }}
+          >
+            <Icon name="down" color={p().text} size={24} weight={2} />
+            <If when={fresh() > 0}>
+              <View style={{ position: "absolute", top: -9, alignSelf: "center" }}>
+                <Badge count={fresh()} p={p()} />
+              </View>
+            </If>
+          </View>
+        </If>
         {/* One compact glass pill, as a channel's mute button; settings are behind the avatar. */}
         <View style={{ position: "absolute", left: 0, right: 0, bottom: safeArea().bottom + 10, alignItems: "center", pointerEvents: "box-none" }}>
           <View

@@ -21,6 +21,7 @@ export const ICONS: Record<string, string> = {
 export const UI_ICONS: Record<string, string> = {
   back: "M15 18l-6-6 6-6",
   chevron: "M9 18l6-6-6-6",
+  down: "M6 9l6 6 6-6",
   bell: "M10.27 21a2 2 0 0 0 3.46 0 M3.26 15.33A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.67C19.41 13.96 18 12.5 18 8A6 6 0 0 0 6 8c0 4.5-1.41 5.96-2.74 7.33",
   bellOff: "M10.27 21a2 2 0 0 0 3.46 0 M17 17H4a1 1 0 0 1-.74-1.67C4.59 13.96 6 12.5 6 8a6 6 0 0 1 .26-1.74 M8.67 3.01A6 6 0 0 1 18 8c0 2.69.77 4.65 1.71 6.05 M2 2l20 20",
   check: "M20 6L9 17l-5-5",
@@ -59,7 +60,7 @@ export const BAR_H = 46;
  */
 export function glass(p: Palette) {
   return {
-    backgroundColor: p.glass, backdropFilter: "blur(24px) saturate(1.6)", glassEffect: "regular" as const,
+    backgroundColor: p.glass, backdropFilter: "blur(14px) saturate(1.5)", glassEffect: "regular" as const,
     // A bright rim on top, as light catches the edge of glass.
     boxShadow: `inset 0 1px 0 ${p.glassRim}, ${FLOAT_SHADOW}`, borderWidth: 0.5, borderColor: p.hairline,
   };
@@ -75,8 +76,9 @@ export function EdgeBlur(props: { edge: "top" | "bottom"; height: number }) {
       style={{
         position: "absolute", left: 0, right: 0, height: props.height, pointerEvents: "none",
         ...(props.edge === "top" ? { top: 0 } : { bottom: 0 }),
-        backdropFilter: "blur(18px)",
-        maskImage: `linear-gradient(to ${props.edge === "top" ? "bottom" : "top"}, #000 55%, transparent)`,
+        // Light enough that what scrolls under stays faintly readable.
+        backdropFilter: "blur(3px)",
+        maskImage: `linear-gradient(to ${props.edge === "top" ? "bottom" : "top"}, #000 35%, transparent)`,
       }}
     />
   );
