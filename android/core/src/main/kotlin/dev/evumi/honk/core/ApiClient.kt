@@ -93,7 +93,7 @@ class ApiClient(
     fun createBot(name: String, avatar: String, defaultLevel: String): CreatedBot =
         request("POST", "v1/bots", CreatedBot.serializer(), body = mapOf("name" to name, "avatar" to avatar, "default_level" to defaultLevel))
 
-    fun updateBot(id: Long, name: String? = null, avatar: String? = null, defaultLevel: String? = null): Bot {
+    fun updateBot(id: String, name: String? = null, avatar: String? = null, defaultLevel: String? = null): Bot {
         val body = buildMap<String, Any> {
             name?.let { put("name", it) }
             avatar?.let { put("avatar", it) }
@@ -102,9 +102,9 @@ class ApiClient(
         return request("PATCH", "v1/bots/$id", Bot.serializer(), body = body)
     }
 
-    fun resetToken(botId: Long): String = request("POST", "v1/bots/$botId/token", Token.serializer()).token
+    fun resetToken(botId: String): String = request("POST", "v1/bots/$botId/token", Token.serializer()).token
 
-    fun deleteBot(id: Long) {
+    fun deleteBot(id: String) {
         request("DELETE", "v1/bots/$id", JsonElement.serializer())
     }
 
@@ -116,6 +116,13 @@ class ApiClient(
     fun message(id: Long): QueuedMessage = request("GET", "v1/messages/$id", QueuedMessage.serializer())
 
     fun sync(cursor: Long, limit: Int = 100): SyncPage = request("GET", "v1/sync?cursor=$cursor&limit=$limit", SyncPage.serializer())
+
+    /**
+     * The bot a token belongs to, through the bot API (`/bot<token>/getMe`).
+     * The app uses it to learn the short id of a bot it knew by a legacy id.
+     */
+    fun getMe(token: String): Bot =
+        request("GET", "bot" + java.net.URLEncoder.encode(token, "UTF-8").replace("%3A", ":") + "/getMe", Bot.serializer(), auth = false)
 
     fun ack(upTo: Long) {
         request("POST", "v1/ack", JsonElement.serializer(), body = mapOf("up_to" to upTo))

@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -66,21 +65,121 @@ func (s *Store) migrate(ctx context.Context) error {
 	if err := s.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&v); err != nil {
 		return err
 	}
-	if v >= 1 {
-		return nil
+	steps := []func(context.Context, *sql.Tx) error{
+		func(ctx context.Context, tx *sql.Tx) error { _, err := tx.ExecContext(ctx, schemaV1); return err },
+		migrateV2,
 	}
+	for ; v < len(steps); v++ {
+		if err := s.step(ctx, v+1, steps[v]); err != nil {
+			return fmt.Errorf("migrate to v%d: %w", v+1, err)
+		}
+	}
+	return nil
+}
+
+// step runs one migration and records its version in the same transaction.
+func (s *Store) step(ctx context.Context, version int, f func(context.Context, *sql.Tx) error) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, schemaV1); err != nil {
-		return fmt.Errorf("migrate to v1: %w", err)
+	if err := f(ctx, tx); err != nil {
+		return err
 	}
-	if _, err := tx.ExecContext(ctx, "PRAGMA user_version = 1"); err != nil {
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", version)); err != nil {
 		return err
 	}
 	return tx.Commit()
+}
+
+// migrateV2 gives every bot a short random public id. The integer row id stays
+// the private key that messages point at; clients and tokens only ever see the
+// public id. Existing tokens ("<row id>:<secret>") keep working, since a token
+// is looked up by the hash of the whole string.
+func migrateV2(ctx context.Context, tx *sql.Tx) error {
+	if _, err := tx.ExecContext(ctx, `ALTER TABLE bots ADD COLUMN public_id TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT id FROM bots`)
+	if err != nil {
+		return err
+	}
+	var keys []int64
+	for rows.Next() {
+		var k int64
+		if err := rows.Scan(&k); err != nil {
+			rows.Close()
+			return err
+		}
+		keys = append(keys, k)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, k := range keys {
+		id, err := newBotID(ctx, tx)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE bots SET public_id = ? WHERE id = ?`, id, k); err != nil {
+			return err
+		}
+	}
+	_, err = tx.ExecContext(ctx, `CREATE UNIQUE INDEX bots_public_id ON bots(public_id)`)
+	return err
+}
+
+// Bot ids are botIDLen characters of base62 starting with a letter, so one can
+// never be mistaken for the integer ids of v1.
+const (
+	botIDLen     = 8
+	letters      = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+	base62       = "0123456789" + letters
+	maxIDRetries = 10
+)
+
+func randomBotID() string {
+	b := make([]byte, botIDLen)
+	if _, err := rand.Read(b); err != nil {
+		panic(err) // crypto/rand never fails on supported platforms
+	}
+	out := make([]byte, botIDLen)
+	// The modulo bias (256 % 62) is irrelevant here: ids are not secrets.
+	out[0] = letters[int(b[0])%len(letters)]
+	for i := 1; i < botIDLen; i++ {
+		out[i] = base62[int(b[i])%len(base62)]
+	}
+	return string(out)
+}
+
+// newBotID returns a public id no bot has yet.
+func newBotID(ctx context.Context, tx *sql.Tx) (string, error) {
+	for i := 0; i < maxIDRetries; i++ {
+		id := randomBotID()
+		var n int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM bots WHERE public_id = ?`, id).Scan(&n); err != nil {
+			return "", err
+		}
+		if n == 0 {
+			return id, nil
+		}
+	}
+	return "", errors.New("no free bot id")
+}
+
+// ValidBotID reports whether s has the shape of a bot id.
+func ValidBotID(s string) bool {
+	if len(s) != botIDLen || !strings.ContainsRune(letters, rune(s[0])) {
+		return false
+	}
+	for i := 1; i < len(s); i++ {
+		if !strings.ContainsRune(base62, rune(s[i])) {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Store) ms() int64 { return s.now().UnixMilli() }
@@ -172,9 +271,11 @@ func (s *Store) DeleteDevice(ctx context.Context, deviceID string) error {
 
 // ---- bots ----
 
-// Bot is one notification channel.
+// Bot is one notification channel. ID is the short public id; Key is the
+// private row id that queued messages reference.
 type Bot struct {
-	ID           int64  `json:"id"`
+	ID           string `json:"id"`
+	Key          int64  `json:"-"`
 	DeviceID     string `json:"-"`
 	Name         string `json:"name"`
 	Avatar       string `json:"avatar"`
@@ -183,18 +284,18 @@ type Bot struct {
 	UpdatedAt    int64  `json:"updated_at"`
 }
 
-const botCols = `id, device_id, name, avatar, default_level, created_at, updated_at`
+const botCols = `public_id, id, device_id, name, avatar, default_level, created_at, updated_at`
 
 func scanBot(row interface{ Scan(...any) error }) (Bot, error) {
 	var b Bot
-	err := row.Scan(&b.ID, &b.DeviceID, &b.Name, &b.Avatar, &b.DefaultLevel, &b.CreatedAt, &b.UpdatedAt)
+	err := row.Scan(&b.ID, &b.Key, &b.DeviceID, &b.Name, &b.Avatar, &b.DefaultLevel, &b.CreatedAt, &b.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return b, ErrNotFound
 	}
 	return b, err
 }
 
-func botToken(id int64) string { return strconv.FormatInt(id, 10) + ":" + randomSecret(24) }
+func botToken(id string) string { return id + ":" + randomSecret(24) }
 
 // CreateBot adds a bot to a device and returns it with its token, shown once.
 func (s *Store) CreateBot(ctx context.Context, deviceID, name, avatar, level string) (Bot, string, error) {
@@ -204,25 +305,25 @@ func (s *Store) CreateBot(ctx context.Context, deviceID, name, avatar, level str
 	}
 	defer tx.Rollback()
 	now := s.ms()
-	// The token embeds the row id, so insert with a placeholder hash first.
-	res, err := tx.ExecContext(ctx,
-		`INSERT INTO bots (device_id, token_hash, name, avatar, default_level, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		deviceID, hash(randomSecret(16)), name, avatar, level, now, now)
-	if err != nil {
-		return Bot{}, "", err
-	}
-	id, err := res.LastInsertId()
+	id, err := newBotID(ctx, tx)
 	if err != nil {
 		return Bot{}, "", err
 	}
 	token := botToken(id)
-	if _, err := tx.ExecContext(ctx, `UPDATE bots SET token_hash = ? WHERE id = ?`, hash(token), id); err != nil {
+	res, err := tx.ExecContext(ctx,
+		`INSERT INTO bots (public_id, device_id, token_hash, name, avatar, default_level, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, deviceID, hash(token), name, avatar, level, now, now)
+	if err != nil {
+		return Bot{}, "", err
+	}
+	key, err := res.LastInsertId()
+	if err != nil {
 		return Bot{}, "", err
 	}
 	if err := tx.Commit(); err != nil {
 		return Bot{}, "", err
 	}
-	return Bot{ID: id, DeviceID: deviceID, Name: name, Avatar: avatar, DefaultLevel: level, CreatedAt: now, UpdatedAt: now}, token, nil
+	return Bot{ID: id, Key: key, DeviceID: deviceID, Name: name, Avatar: avatar, DefaultLevel: level, CreatedAt: now, UpdatedAt: now}, token, nil
 }
 
 // ListBots returns a device's bots, oldest first.
@@ -251,8 +352,8 @@ func (s *Store) CountBots(ctx context.Context, deviceID string) (int, error) {
 }
 
 // GetBot returns one of a device's bots.
-func (s *Store) GetBot(ctx context.Context, deviceID string, botID int64) (Bot, error) {
-	return scanBot(s.db.QueryRowContext(ctx, `SELECT `+botCols+` FROM bots WHERE id = ? AND device_id = ?`, botID, deviceID))
+func (s *Store) GetBot(ctx context.Context, deviceID string, botID string) (Bot, error) {
+	return scanBot(s.db.QueryRowContext(ctx, `SELECT `+botCols+` FROM bots WHERE public_id = ? AND device_id = ?`, botID, deviceID))
 }
 
 // BotPatch holds the fields to change; nil leaves a field as it is.
@@ -263,7 +364,7 @@ type BotPatch struct {
 }
 
 // UpdateBot changes a bot's name, avatar or default level.
-func (s *Store) UpdateBot(ctx context.Context, deviceID string, botID int64, p BotPatch) (Bot, error) {
+func (s *Store) UpdateBot(ctx context.Context, deviceID string, botID string, p BotPatch) (Bot, error) {
 	b, err := s.GetBot(ctx, deviceID, botID)
 	if err != nil {
 		return b, err
@@ -279,16 +380,16 @@ func (s *Store) UpdateBot(ctx context.Context, deviceID string, botID int64, p B
 	}
 	b.UpdatedAt = s.ms()
 	_, err = s.db.ExecContext(ctx,
-		`UPDATE bots SET name = ?, avatar = ?, default_level = ?, updated_at = ? WHERE id = ? AND device_id = ?`,
+		`UPDATE bots SET name = ?, avatar = ?, default_level = ?, updated_at = ? WHERE public_id = ? AND device_id = ?`,
 		b.Name, b.Avatar, b.DefaultLevel, b.UpdatedAt, botID, deviceID)
 	return b, err
 }
 
 // ResetBotToken replaces a bot's token; the old one stops working at once.
-func (s *Store) ResetBotToken(ctx context.Context, deviceID string, botID int64) (string, error) {
+func (s *Store) ResetBotToken(ctx context.Context, deviceID string, botID string) (string, error) {
 	token := botToken(botID)
 	res, err := s.db.ExecContext(ctx,
-		`UPDATE bots SET token_hash = ?, updated_at = ? WHERE id = ? AND device_id = ?`, hash(token), s.ms(), botID, deviceID)
+		`UPDATE bots SET token_hash = ?, updated_at = ? WHERE public_id = ? AND device_id = ?`, hash(token), s.ms(), botID, deviceID)
 	if err != nil {
 		return "", err
 	}
@@ -299,8 +400,8 @@ func (s *Store) ResetBotToken(ctx context.Context, deviceID string, botID int64)
 }
 
 // DeleteBot removes a bot and its queued messages.
-func (s *Store) DeleteBot(ctx context.Context, deviceID string, botID int64) error {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM bots WHERE id = ? AND device_id = ?`, botID, deviceID)
+func (s *Store) DeleteBot(ctx context.Context, deviceID string, botID string) error {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM bots WHERE public_id = ? AND device_id = ?`, botID, deviceID)
 	if err != nil {
 		return err
 	}
@@ -319,11 +420,11 @@ func (s *Store) BotByToken(ctx context.Context, token string) (Bot, Device, erro
 		return b, d, ErrNotFound
 	}
 	err := s.db.QueryRowContext(ctx, `
-		SELECT b.id, b.device_id, b.name, b.avatar, b.default_level, b.created_at, b.updated_at,
+		SELECT b.public_id, b.id, b.device_id, b.name, b.avatar, b.default_level, b.created_at, b.updated_at,
 		       d.id, d.platform, d.push_token, d.push_ok, d.created_at
 		FROM bots b JOIN devices d ON d.id = b.device_id
 		WHERE b.token_hash = ?`, hash(token)).
-		Scan(&b.ID, &b.DeviceID, &b.Name, &b.Avatar, &b.DefaultLevel, &b.CreatedAt, &b.UpdatedAt,
+		Scan(&b.ID, &b.Key, &b.DeviceID, &b.Name, &b.Avatar, &b.DefaultLevel, &b.CreatedAt, &b.UpdatedAt,
 			&d.ID, &d.Platform, &d.PushToken, &d.PushOK, &d.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return b, d, ErrNotFound

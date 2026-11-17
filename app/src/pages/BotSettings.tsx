@@ -7,7 +7,7 @@ import { chatOf, nav, reload } from "../store";
 import { palette, type Palette } from "../theme";
 import { tr } from "../i18n";
 
-export function BotSettings(props: { botId: number }) {
+export function BotSettings(props: { botId: string }) {
   const p = palette;
   const chat = () => chatOf(props.botId);
   const token = signal<string | null>(null);

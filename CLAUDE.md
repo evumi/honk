@@ -11,7 +11,7 @@ Monorepo. `gateway/` is the Go module `github.com/evumi/honk/gateway`; `app/` is
 - `cd gateway && go test -race ./...` and `go vet ./...` before committing.
 - `make run` starts it on :8080 with `./data/honk.db`; with no APNs/FCM credentials, pushes are logged and skipped.
 - `cmd/honk` wires config, store, push and API. `internal/store` is SQLite through modernc (pure Go, no cgo) with one connection; the schema is `internal/store/schema.sql`, versioned with `PRAGMA user_version`. Add a new migration step for schema changes instead of editing v1 once it has shipped.
-- Timestamps are Unix milliseconds; device ids are UUIDv7; bot and message ids are SQLite integers. A bot token is `<bot id>:<secret>`; only sha256 hashes of tokens and device secrets are stored.
+- Timestamps are Unix milliseconds; device ids are UUIDv7; message ids are SQLite integers. A bot's public id is 8 random base62 characters starting with a letter (`bots.public_id`, v2); the integer row id stays private. Never show users a sequence number as an id. A bot token is `<bot id>:<secret>`; only sha256 hashes of tokens and device secrets are stored, so pre-v2 `<integer>:<secret>` tokens still work.
 - Pushes carry the banner text and `msg_id` only; devices fetch the message (card included) from the queue. Keep APNs/FCM payloads under 4 KB.
 - `internal/widget` is the server-side card whitelist (profile v1, static HTML/CSS). It mirrors Telegram's HTML widget limits: 32 KB raw, 4 KB zlib level 9, 1 KB data.
 - The bot API keeps Telegram's naming and `{"ok":…}` envelope; keep new methods consistent with it.

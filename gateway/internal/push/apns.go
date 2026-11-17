@@ -72,9 +72,9 @@ func apnsPayload(n Notification) ([]byte, error) {
 
 func threadID(n Notification) string {
 	if n.Group != "" {
-		return fmt.Sprintf("b%d:%s", n.BotID, n.Group)
+		return "b" + n.BotID + ":" + n.Group
 	}
-	return fmt.Sprintf("b%d", n.BotID)
+	return "b" + n.BotID
 }
 
 // Push implements Pusher.

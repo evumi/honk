@@ -42,7 +42,7 @@ final class HonkService {
     /// Called after the store changed: a push arrived, a sync ran, the extension wrote.
     var onChange: (() -> Void)?
     /// The bot whose chat is on screen; its foreground banners are not shown.
-    var focusedBotID: Int64?
+    var focusedBotID: String?
 
     private var changeObserver: AnyObject?
     private var syncing = false
@@ -257,13 +257,34 @@ final class HonkService {
         syncing = true
         defer { syncing = false }
         do {
-            try store.replaceBots(try await api.listBots())
+            let bots = try await api.listBots()
+            await renameLegacyBots(known: Set(bots.map(\.id)))
+            try store.replaceBots(bots)
             let out = try await SyncEngine(api: api, store: store).run()
             removeNotifications(out.staleNotificationIDs)
         } catch {
             NSLog("honk: refresh failed: \(error)")
         }
         changed()
+    }
+
+    /// Bots stored under an integer id from before short ids would otherwise be
+    /// dropped, messages and all, once the gateway lists them by short id. Old
+    /// tokens keep working, so ask the gateway who each one is and move the
+    /// local data and the token over. A bot whose token is not stored is lost.
+    private func renameLegacyBots(known: Set<String>) async {
+        guard let local = try? store.botIDs() else { return }
+        for old in local where BotID.isLegacy(old) && !known.contains(old) {
+            guard let token = botTokens.token(botID: old),
+                  let bot = try? await api.getMe(token: token), known.contains(bot.id) else { continue }
+            do {
+                try store.renameBot(from: old, to: bot.id)
+                botTokens.save(token, botID: bot.id)
+                botTokens.remove(botID: old)
+            } catch {
+                NSLog("honk: renaming bot \(old) failed: \(error)")
+            }
+        }
     }
 
     /// Handles a background push (an edit or delete): fetch it, apply it.
@@ -301,7 +322,7 @@ final class HonkService {
     /// Marks a bot's messages read. Announces a change only when something was
     /// unread: the chat page reloads on changes and marks read on load, so an
     /// unconditional announcement would loop.
-    func markRead(botID: Int64) {
+    func markRead(botID: String) {
         guard ((try? store.unreadCount(botID: botID)) ?? 0) > 0 else { return }
         removeNotifications((try? store.markRead(botID: botID)) ?? [])
         changed()

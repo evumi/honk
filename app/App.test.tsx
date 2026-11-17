@@ -2,9 +2,9 @@ import { expect, open, test } from "nsh/test";
 
 // The native host as NshBridge answers it, with one bot and one card message.
 function host(overrides: Record<string, unknown> = {}) {
-  const bot = { id: 1, name: "Berth 部署", avatar: "preset:ship:#1c1c1e", defaultLevel: "active", createdAt: 1 };
+  const bot = { id: "aZ3kQ9xT", name: "Berth 部署", avatar: "preset:ship:#1c1c1e", defaultLevel: "active", createdAt: 1 };
   const card = {
-    id: 7, botId: 1, title: "部署成功", body: "sub2api / sluice 已上线。",
+    id: 7, botId: "aZ3kQ9xT", title: "部署成功", body: "sub2api / sluice 已上线。",
     html: `<div><span>{{status}}</span><h3>{{service}}</h3><p>部署 ID <code>{{id}}</code></p><a href="https://example.com">在 Berth 中查看</a></div>`,
     data: JSON.stringify({ status: "已上线", service: "sub2api / sluice", id: "dep_w3tn" }),
     level: "active", group: "", url: "", copy: "", icon: "", collapseId: "dep", date: Date.now(), read: false,
@@ -17,8 +17,8 @@ function host(overrides: Record<string, unknown> = {}) {
       "honk.markRead": true,
       "honk.focus": true,
       "honk.refresh": true,
-      "honk.bot.create": (d: unknown) => ({ bot: { ...bot, id: 2, name: (d as { name: string }).name }, token: "2:secret-token" }),
-      "honk.bot.token": "1:abcdefghijklmnop",
+      "honk.bot.create": (d: unknown) => ({ bot: { ...bot, id: "bQ7mN2pR", name: (d as { name: string }).name }, token: "bQ7mN2pR:secret-token" }),
+      "honk.bot.token": "aZ3kQ9xT:abcdefghijklmnop",
       "honk.bot.delete": true,
       "honk.message.delete": true,
       "honk.gateway.get": { url: "https://gw.test/", defaultURL: "https://gw.test/", custom: false },
@@ -41,7 +41,7 @@ test("lists bots with their last message and unread count", async () => {
 
 test("opens a chat and renders the card with its data", async () => {
   const app = await open("./App.tsx", { locale: "zh-Hans-CN",  host: host() });
-  await app.press("id:chat-1");
+  await app.press("id:chat-aZ3kQ9xT");
   await app.waitFor("text:已上线");
   const texts = app.texts();
   expect(texts).toContain("sub2api / sluice");
@@ -56,7 +56,7 @@ test("opens a chat and renders the card with its data", async () => {
 test("a host event opens the chat", async () => {
   const app = await open("./App.tsx", { locale: "zh-Hans-CN",  host: host() });
   await app.waitFor("text:Berth 部署");
-  await app.host.send("honk.open", { botId: 1 });
+  await app.host.send("honk.open", { botId: "aZ3kQ9xT" });
   await app.waitFor("text:在 Berth 中查看");
 });
 
@@ -67,7 +67,7 @@ test("creates a bot and shows its token", async () => {
   await app.press("id:color-#1c1c1e");
   await app.type("id:bot-name", "CI 构建");
   await app.press("id:create-bot");
-  await app.waitFor("text:2:secret-token");
+  await app.waitFor("text:bQ7mN2pR:secret-token");
   expect(app.texts()).toContain("CI 构建 已创建");
   // Confetti over the page, gone by itself after a few seconds.
   expect(app.count("id:confetti")).toBe(1);
@@ -79,14 +79,14 @@ test("creates a bot and shows its token", async () => {
 
 test("bot settings masks the stored token", async () => {
   const app = await open("./App.tsx", { locale: "zh-Hans-CN",  host: host() });
-  await app.press("id:chat-1");
+  await app.press("id:chat-aZ3kQ9xT");
   await app.press("id:open-settings");
-  await app.waitFor("text:1:abcd••••••••nop");
+  await app.waitFor("text:aZ3kQ9xT:abcd••••••••nop");
 });
 
 test("a message turns to dust before it is deleted", async () => {
   const app = await open("./App.tsx", { locale: "zh-Hans-CN", host: host() });
-  await app.press("id:chat-1");
+  await app.press("id:chat-aZ3kQ9xT");
   app.onDialog(() => "删除");
   await app.longPress("id:message-7");
   await app.waitUntil(() => app.host.calls().some((c) => c.name === "honk.message.delete"));
@@ -95,7 +95,7 @@ test("a message turns to dust before it is deleted", async () => {
 
 test("a message whose delete fails comes back", async () => {
   const app = await open("./App.tsx", { locale: "zh-Hans-CN", host: host({ "honk.message.delete": () => { throw new Error("offline"); } }) });
-  await app.press("id:chat-1");
+  await app.press("id:chat-aZ3kQ9xT");
   app.onDialog(() => "删除");
   await app.longPress("id:message-7");
   await app.waitUntil(() => app.host.calls().some((c) => c.name === "honk.message.delete"));
@@ -117,9 +117,9 @@ test("edit mode deletes a bot after confirming", async () => {
   const app = await open("./App.tsx", { locale: "zh-Hans-CN",  host: host() });
   await app.press("id:edit");
   app.onDialog(() => "删除");
-  await app.press("id:delete-1");
+  await app.press("id:delete-aZ3kQ9xT");
   await app.waitUntil(() => app.host.calls().some((c) => c.name === "honk.bot.delete"));
-  expect(app.host.calls().find((c) => c.name === "honk.bot.delete")?.data).toEqual({ botId: 1 });
+  expect(app.host.calls().find((c) => c.name === "honk.bot.delete")?.data).toEqual({ botId: "aZ3kQ9xT" });
 });
 
 test("the gateway page tests an address before switching", async () => {
@@ -177,7 +177,7 @@ test("an open chat does not mark read again on every change", async () => {
   let unread = true;
   let marks = 0;
   const message = () => ({
-    id: 7, botId: 1, title: "t", body: "b", html: "", data: "", level: "active", group: "", url: "", copy: "",
+    id: 7, botId: "aZ3kQ9xT", title: "t", body: "b", html: "", data: "", level: "active", group: "", url: "", copy: "",
     icon: "", collapseId: "", date: Date.now(), read: !unread,
   });
   const app = await open("./App.tsx", {
@@ -191,7 +191,7 @@ test("an open chat does not mark read again on every change", async () => {
       },
     }),
   });
-  await app.press("id:chat-1");
+  await app.press("id:chat-aZ3kQ9xT");
   await app.waitUntil(() => marks === 1);
   // The native side announces the read (and any other change); the page reloads.
   await app.host.send("honk.changed");
@@ -225,26 +225,26 @@ test("the created page sends a test notification with the new token", async () =
   await app.press("id:create-bot");
   await app.waitFor("id:send-test");
   await app.press("id:send-test");
-  await app.waitUntil(() => app.requests().some((r) => r.url.includes("/bot2:secret-token/sendMessage")));
+  await app.waitUntil(() => app.requests().some((r) => r.url.includes("/botbQ7mN2pR:secret-token/sendMessage")));
 });
 
 
 test("swiping a chat left deletes the bot after confirming", async () => {
   const app = await open("./App.tsx", { locale: "zh-Hans-CN", host: host() });
-  await app.waitFor("id:chat-1");
-  await app.drag("id:chat-1", { x: -160, y: 0 });
+  await app.waitFor("id:chat-aZ3kQ9xT");
+  await app.drag("id:chat-aZ3kQ9xT", { x: -160, y: 0 });
   app.onDialog(() => "删除");
-  await app.press("id:swipe-delete-1");
+  await app.press("id:swipe-delete-aZ3kQ9xT");
   await app.waitUntil(() => app.host.calls().some((c) => c.name === "honk.bot.delete"));
-  expect(app.host.calls().find((c) => c.name === "honk.bot.delete")?.data).toEqual({ botId: 1 });
+  expect(app.host.calls().find((c) => c.name === "honk.bot.delete")?.data).toEqual({ botId: "aZ3kQ9xT" });
 });
 
 test("cancelling the swipe delete keeps the bot", async () => {
   const app = await open("./App.tsx", { locale: "zh-Hans-CN", host: host() });
-  await app.waitFor("id:chat-1");
-  await app.drag("id:chat-1", { x: -160, y: 0 });
+  await app.waitFor("id:chat-aZ3kQ9xT");
+  await app.drag("id:chat-aZ3kQ9xT", { x: -160, y: 0 });
   app.onDialog(() => "取消");
-  await app.press("id:swipe-delete-1");
+  await app.press("id:swipe-delete-aZ3kQ9xT");
   await app.wait(500);
   expect(app.host.calls().some((c) => c.name === "honk.bot.delete")).toBe(false);
 });

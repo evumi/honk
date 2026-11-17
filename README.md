@@ -18,7 +18,7 @@ The development design (Chinese) is [docs/DESIGN.zh-CN.md](docs/DESIGN.zh-CN.md)
 ## How it works
 
 1. The app registers its APNs/FCM push token and gets a `device_secret`.
-2. The app creates a bot and gets its token, for example `1:Gw2K7mx…`.
+2. The app creates a bot and gets its token, `<bot id>:<secret>`, for example `aZ3kQ9xT:Gw2K7mx…`. A bot id is 8 random base62 characters starting with a letter, never a sequence number.
 3. A sender calls `/bot<token>/sendMessage`. The gateway queues the message and sends a push with the banner text and the `msg_id` only.
 4. On the device, the Notification Service Extension (iOS) or FCM service (Android) fetches `GET /v1/messages/:id`, card included, and stores it locally.
 5. When the app opens it calls `GET /v1/sync` for anything missed, then `POST /v1/ack`.
@@ -58,6 +58,8 @@ See `gateway/Dockerfile` for the container. Settings:
 - `deleteMessage`: `message_id` or `id`. Removes the message and its notification.
 - `getMe`: the bot.
 
+Gateways before short bot ids (database schema v1) gave bots integer ids, so their tokens look like `4:Gw2K7mx…`. Upgrading gives every bot a short id; the old tokens keep working until they are reset, and a reset token starts with the short id. The app moves each bot's local messages and settings to its new id the first time it syncs, using the stored token to ask `getMe` which bot it is. Update the apps before the gateway: older app builds cannot read short ids, while new builds also work with an old gateway.
+
 Card HTML (profile v1) keeps whitelisted elements: text and structure, tables, `details`, `button`, `a`, `style`, `img` with `data:` images, and inline SVG. It removes scripts, `on*` handlers, form controls, external resources (links other than `https://`, `#id` or `{{key}}`) and CSS that loads anything (`@import`, `expression()`, `url()` other than `data:` images). The client applies its own CSS whitelist when rendering.
 
 ## App API
@@ -69,7 +71,7 @@ Everything except device registration needs `Authorization: Bearer <device_secre
 | `POST /v1/devices` | `{"platform":"ios"\|"android","push_token":"…"}` → `device`, `device_secret` |
 | `GET` / `PUT` / `DELETE /v1/devices/me` | read; update the push token; delete with all bots and messages |
 | `GET` / `POST /v1/bots` | list; create with `{"name","avatar","default_level"}` → `bot`, `token` |
-| `GET` / `PATCH` / `DELETE /v1/bots/:id` | read, change, delete a bot |
+| `GET` / `PATCH` / `DELETE /v1/bots/:id` | read, change, delete a bot (`:id` is the short bot id) |
 | `POST /v1/bots/:id/token` | reset the token; the old one stops working |
 | `GET /v1/messages/:id` | one queued item: `message`, `edit` or `delete` |
 | `GET /v1/sync?cursor=&limit=` | items after the cursor → `messages`, `cursor`, `has_more` |

@@ -49,7 +49,7 @@ func fcmMessage(n Notification) map[string]any {
 	data := map[string]string{
 		"kind":     n.Kind,
 		"msg_id":   strconv.FormatInt(n.MessageID, 10),
-		"bot_id":   strconv.FormatInt(n.BotID, 10),
+		"bot_id":   n.BotID,
 		"bot_name": n.BotName,
 	}
 	if n.TargetID > 0 {

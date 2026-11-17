@@ -30,7 +30,7 @@ public enum CommunicationNotification {
 
     /// Returns `content` updated from an incoming-message intent. Falls back to
     /// `content` unchanged if the system refuses it.
-    public static func content(_ content: UNNotificationContent, botID: Int64, botName: String, title: String,
+    public static func content(_ content: UNNotificationContent, botID: String, botName: String, title: String,
                                body: String, avatarPNG: Data?) -> UNNotificationContent {
         let image = avatarPNG.map { INImage(imageData: $0) }
         let handle = INPersonHandle(value: "bot-\(botID)", type: .unknown)

@@ -9,9 +9,9 @@ interface CredentialStore {
 
 /** Keeps each bot's token: the gateway shows it only when it is created or reset. */
 interface BotTokenStore {
-    fun token(botId: Long): String?
-    fun save(botId: Long, token: String)
-    fun remove(botId: Long)
+    fun token(botId: String): String?
+    fun save(botId: String, token: String)
+    fun remove(botId: String)
 
     /** Removes every bot's token (the device moved to another gateway). */
     fun removeAll()

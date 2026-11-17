@@ -1,12 +1,33 @@
 package dev.evumi.honk.core
 
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
+import kotlinx.serialization.json.JsonDecoder
+import kotlinx.serialization.json.JsonPrimitive
+
+/** Bot ids: short random strings (`aZ3kQ9xT`). Gateways before v2 sent integers. */
+object BotIds {
+    /** Whether [id] is an integer id from a gateway or store before short ids. */
+    fun isLegacy(id: String): Boolean = id.isNotEmpty() && id.all { it in '0'..'9' }
+}
+
+/** Reads a bot id that may be a JSON string or, from an older gateway, a number. */
+object BotIdSerializer : KSerializer<String> {
+    override val descriptor = PrimitiveSerialDescriptor("BotId", PrimitiveKind.STRING)
+    override fun serialize(encoder: Encoder, value: String) = encoder.encodeString(value)
+    override fun deserialize(decoder: Decoder): String =
+        if (decoder is JsonDecoder) (decoder.decodeJsonElement() as JsonPrimitive).content else decoder.decodeString()
+}
 
 /** A notification channel. */
 @Serializable
 data class Bot(
-    val id: Long,
+    @Serializable(with = BotIdSerializer::class) val id: String,
     val name: String,
     val avatar: String = "",
     @SerialName("default_level") val defaultLevel: String = "active",
@@ -18,7 +39,7 @@ data class Bot(
 @Serializable
 data class QueuedMessage(
     @SerialName("message_id") val id: Long,
-    @SerialName("bot_id") val botId: Long,
+    @SerialName("bot_id") @Serializable(with = BotIdSerializer::class) val botId: String,
     val kind: Kind = Kind.MESSAGE,
     /** For an edit or delete: the message it applies to (0 when only [collapseId] names it). */
     @SerialName("target_id") val targetId: Long = 0,
@@ -56,7 +77,7 @@ data class QueuedMessage(
 /** A message as kept on the device. */
 data class StoredMessage(
     val id: Long,
-    val botId: Long,
+    val botId: String,
     val title: String,
     val body: String,
     val html: String,
@@ -111,7 +132,7 @@ data class Credentials(
 data class PushInfo(
     val kind: QueuedMessage.Kind,
     val messageId: Long,
-    val botId: Long,
+    val botId: String,
     val targetId: Long = 0,
     val collapseId: String = "",
     val botName: String = "",
@@ -124,7 +145,7 @@ data class PushInfo(
         fun parse(data: Map<String, String>): PushInfo? {
             val kind = QueuedMessage.Kind.of(data["kind"]) ?: return null
             val id = data["msg_id"]?.toLongOrNull() ?: return null
-            val bot = data["bot_id"]?.toLongOrNull() ?: return null
+            val bot = data["bot_id"]?.takeIf { it.isNotEmpty() } ?: return null
             return PushInfo(
                 kind = kind,
                 messageId = id,

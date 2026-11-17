@@ -1,13 +1,13 @@
 import { createNavStack } from "nsh/base";
 import { signal } from "nsh";
-import { api, on, type Chat, type Status } from "./host";
+import { api, on, type BotId, type Chat, type Status } from "./host";
 
 export type Route =
   | { name: "home" }
-  | { name: "chat"; botId: number }
-  | { name: "newBot"; botId?: number }
-  | { name: "botCreated"; botId: number; token: string; botName: string; avatar: string }
-  | { name: "botSettings"; botId: number }
+  | { name: "chat"; botId: BotId }
+  | { name: "newBot"; botId?: BotId }
+  | { name: "botCreated"; botId: BotId; token: string; botName: string; avatar: string }
+  | { name: "botSettings"; botId: BotId }
   | { name: "gateway" };
 
 export const nav = createNavStack<Route>([{ name: "home" }]);
@@ -34,7 +34,7 @@ export async function loadStatus() {
   }
 }
 
-export function chatOf(botId: number): Chat | undefined {
+export function chatOf(botId: BotId): Chat | undefined {
   return chats().find((c) => c.bot.id === botId);
 }
 
@@ -46,7 +46,8 @@ export function start() {
   started = true;
   on("honk.changed", () => void reload());
   on("honk.open", (payload) => {
-    const botId = Number((payload as { botId?: number } | null)?.botId);
+    const raw = (payload as { botId?: unknown } | null)?.botId;
+    const botId = raw == null ? "" : String(raw);
     if (!botId) return;
     const top = nav.routes()[nav.routes().length - 1];
     if (top?.name === "chat" && top.botId === botId) return;

@@ -124,10 +124,10 @@ func (s *Server) deleteDevice(w http.ResponseWriter, r *http.Request) {
 
 // ---- bots ----
 
-func botID(r *http.Request) (int64, error) {
-	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	if err != nil || id <= 0 {
-		return 0, errNotFound
+func botID(r *http.Request) (string, error) {
+	id := chi.URLParam(r, "id")
+	if !store.ValidBotID(id) {
+		return "", errNotFound
 	}
 	return id, nil
 }

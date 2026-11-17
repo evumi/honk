@@ -45,7 +45,7 @@ import java.security.MessageDigest
  */
 class Notifier(private val context: Context) {
     data class Content(
-        val botId: Long,
+        val botId: String,
         val botName: String,
         val avatar: String,
         val messageId: Long,
@@ -73,7 +73,7 @@ class Notifier(private val context: Context) {
     }
 
     /** Creates or renames the bot's channel. Importance is only set at creation; afterwards it is the user's. */
-    fun ensureChannel(botId: Long, name: String) {
+    fun ensureChannel(botId: String, name: String) {
         ensureGroup()
         val ch = NotificationChannel(channelId(botId), name.ifEmpty { context.getString(R.string.channel_other) }, NotificationManager.IMPORTANCE_HIGH)
         ch.group = GROUP
@@ -94,7 +94,7 @@ class Notifier(private val context: Context) {
         )
     }
 
-    fun deleteChannel(botId: Long) {
+    fun deleteChannel(botId: String) {
         manager.deleteNotificationChannel(channelId(botId))
         ShortcutManagerCompat.removeLongLivedShortcuts(context, listOf(channelId(botId)))
     }
@@ -152,7 +152,7 @@ class Notifier(private val context: Context) {
         tags.forEach { manager.cancel(it, NOTIFICATION_ID) }
     }
 
-    private fun openIntent(botId: Long, messageId: Long): PendingIntent {
+    private fun openIntent(botId: String, messageId: Long): PendingIntent {
         val intent = Intent(context, MainActivity::class.java)
             .setAction(MainActivity.ACTION_OPEN)
             .putExtra(MainActivity.EXTRA_BOT_ID, botId)
@@ -166,7 +166,7 @@ class Notifier(private val context: Context) {
         )
     }
 
-    private fun pushShortcut(botId: Long, name: String, person: Person, icon: IconCompat?) {
+    private fun pushShortcut(botId: String, name: String, person: Person, icon: IconCompat?) {
         val intent = Intent(context, MainActivity::class.java)
             .setAction(MainActivity.ACTION_OPEN)
             .putExtra(MainActivity.EXTRA_BOT_ID, botId)
@@ -247,10 +247,10 @@ class Notifier(private val context: Context) {
         const val NOTIFICATION_ID = 1
         private const val MAX_IMAGE = 2 shl 20
 
-        fun channelId(botId: Long) = "$CHANNEL_PREFIX$botId"
+        fun channelId(botId: String) = "$CHANNEL_PREFIX$botId"
 
         /** The notification tag: `c<bot>:<collapse id>` when the message has one, else `m<message id>`. */
-        fun tag(botId: Long, messageId: Long, collapseId: String) =
+        fun tag(botId: String, messageId: Long, collapseId: String) =
             if (collapseId.isNotEmpty()) "c$botId:$collapseId" else "m$messageId"
     }
 }

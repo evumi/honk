@@ -101,25 +101,25 @@ public struct BotTokenStore: Sendable {
         self.accessGroup = accessGroup
     }
 
-    private func query(_ botID: Int64?, group: String?) -> [String: Any] {
+    private func query(_ botID: String?, group: String?) -> [String: Any] {
         var q: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service]
-        if let botID { q[kSecAttrAccount as String] = String(botID) }
+        if let botID { q[kSecAttrAccount as String] = botID }
         if let group { q[kSecAttrAccessGroup as String] = group }
         return q
     }
 
-    public func token(botID: Int64) -> String? {
+    public func token(botID: String) -> String? {
         for group in Keychain.groups(accessGroup) {
             if let data = Keychain.read(query(botID, group: group)) { return String(data: data, encoding: .utf8) }
         }
         return nil
     }
 
-    public func save(_ token: String, botID: Int64) {
+    public func save(_ token: String, botID: String) {
         _ = Keychain.write(Data(token.utf8), accessGroup) { query(botID, group: $0) }
     }
 
-    public func remove(botID: Int64) {
+    public func remove(botID: String) {
         for group in Keychain.groups(accessGroup) { SecItemDelete(query(botID, group: group) as CFDictionary) }
     }
 

@@ -7,8 +7,11 @@ import { demo } from "./demo";
 
 export type Level = "passive" | "active" | "timeSensitive";
 
+/** A bot's public id: a short random string such as `aZ3kQ9xT`, never a sequence number. */
+export type BotId = string;
+
 export interface Bot {
-  id: number;
+  id: BotId;
   name: string;
   /** `preset:<icon>:<#rrggbb>` or an https URL. */
   avatar: string;
@@ -18,7 +21,7 @@ export interface Bot {
 
 export interface Message {
   id: number;
-  botId: number;
+  botId: BotId;
   title: string;
   body: string;
   html: string;
@@ -83,21 +86,21 @@ export function on(event: string, listener: (payload: unknown) => void): () => v
 export const api = {
   status: () => call<Status>("honk.status"),
   chats: () => call<Chat[]>("honk.chats"),
-  messages: (botId: number, before?: number) => call<Message[]>("honk.messages", { botId, before, limit: 50 }),
-  markRead: (botId: number) => call<boolean>("honk.markRead", { botId }),
-  focus: (botId: number | null) => call<boolean>("honk.focus", { botId }),
+  messages: (botId: BotId, before?: number) => call<Message[]>("honk.messages", { botId, before, limit: 50 }),
+  markRead: (botId: BotId) => call<boolean>("honk.markRead", { botId }),
+  focus: (botId: BotId | null) => call<boolean>("honk.focus", { botId }),
   refresh: () => call<boolean>("honk.refresh"),
   createBot: (name: string, avatar: string, defaultLevel: Level) =>
     call<{ bot: Bot; token: string }>("honk.bot.create", { name, avatar, defaultLevel }),
-  updateBot: (botId: number, fields: { name?: string; avatar?: string; defaultLevel?: Level }) =>
+  updateBot: (botId: BotId, fields: { name?: string; avatar?: string; defaultLevel?: Level }) =>
     call<Bot>("honk.bot.update", { botId, ...fields }),
-  token: (botId: number) => call<string | null>("honk.bot.token", { botId }),
-  resetToken: (botId: number) => call<string>("honk.bot.resetToken", { botId }),
-  deleteBot: (botId: number) => call<boolean>("honk.bot.delete", { botId }),
-  setMuted: (botId: number, muted: boolean) => call<boolean>("honk.bot.setMuted", { botId, muted }),
-  setPinned: (botId: number, pinned: boolean) => call<boolean>("honk.bot.setPinned", { botId, pinned }),
+  token: (botId: BotId) => call<string | null>("honk.bot.token", { botId }),
+  resetToken: (botId: BotId) => call<string>("honk.bot.resetToken", { botId }),
+  deleteBot: (botId: BotId) => call<boolean>("honk.bot.delete", { botId }),
+  setMuted: (botId: BotId, muted: boolean) => call<boolean>("honk.bot.setMuted", { botId, muted }),
+  setPinned: (botId: BotId, pinned: boolean) => call<boolean>("honk.bot.setPinned", { botId, pinned }),
   deleteMessage: (messageId: number) => call<boolean>("honk.message.delete", { messageId }),
-  clearChat: (botId: number) => call<boolean>("honk.chat.clear", { botId }),
+  clearChat: (botId: BotId) => call<boolean>("honk.chat.clear", { botId }),
   openNotificationSettings: () => call<boolean>("honk.notifications.open"),
   /** Asks for a push token again and registers; resolves with the new status. */
   retryRegistration: () => call<Status>("honk.register.retry"),

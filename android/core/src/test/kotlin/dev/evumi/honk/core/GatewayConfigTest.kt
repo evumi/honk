@@ -50,7 +50,7 @@ class GatewayConfigTest {
 
     @Test fun resetForgetsEverything() {
         val store = tempStore()
-        store.apply(QueuedMessage(1, 1, body = "x"), "n1")
+        store.apply(QueuedMessage(1, "b1", body = "x"), "n1")
         store.syncCursor = 9
         assertEquals(listOf("n1"), store.reset())
         assertTrue(store.chats().isEmpty())
