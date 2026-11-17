@@ -2,12 +2,33 @@
 // picked from the system locale; anything that is not Chinese gets English.
 // Strings are written in Chinese in the code and looked up here, so a missing
 // entry shows the Chinese text rather than nothing.
-import { locale } from "nsh";
+import { locale, signal, Storage } from "nsh";
 
 export type Lang = "zh" | "en";
+/** The language chosen in Settings: the system's, or one of the app's. */
+export type LangChoice = "system" | Lang;
 
-/** The current language (reactive: follows the system locale). */
+const KEY = "honk.language";
+const choice = signal<LangChoice>("system");
+void Storage.getItem(KEY).then((v) => {
+  if (v === "zh" || v === "en") choice.set(v);
+}).catch(() => {});
+
+/** The language chosen in Settings (reactive). */
+export function langChoice(): LangChoice {
+  return choice();
+}
+
+/** Switches the app's language and remembers it on the device. */
+export async function setLangChoice(c: LangChoice): Promise<void> {
+  choice.set(c);
+  await (c === "system" ? Storage.removeItem(KEY) : Storage.setItem(KEY, c)).catch(() => {});
+}
+
+/** The current language (reactive): the one chosen in Settings, else the system locale's. */
 export function lang(): Lang {
+  const c = choice();
+  if (c !== "system") return c;
   return locale().toLowerCase().startsWith("zh") ? "zh" : "en";
 }
 
@@ -92,6 +113,23 @@ const EN: Record<string, string> = {
   "发送示例": "Example",
   "复制示例": "Copy example",
   "进入会话": "Open chat",
+  "语言": "Language",
+  "通用": "General",
+  "跟随系统": "System",
+  "删除后 token 立即失效，网关队列里未拉取的消息一并删除。": "Deleting a bot revokes its token at once and drops its messages still queued on the gateway.",
+  "机器人 · 创建于 {date}": "bot · created {date}",
+  "消息": "Messages",
+  "接收通知": "Notifications",
+  "保存": "Save",
+  "保存中…": "Saving…",
+  "编辑 Bot": "Edit Bot",
+  "保存失败": "Couldn’t save",
+  "发送一条测试通知": "Send a test notification",
+  "发送中…": "Sending…",
+  "已发送，看看通知": "Sent — check your notifications",
+  "发送失败，点按重试": "Couldn’t send — tap to retry",
+  "测试通知": "Test notification",
+  "{name} 已就绪，以后的通知都会出现在这里。": "{name} is ready. Its notifications will show up here.",
   "部署成功": "Deployed",
   "evumi / sluice 已上线": "evumi / sluice is live",
   // bot settings

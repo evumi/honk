@@ -21,7 +21,7 @@ function App() {
             case "chat":
               return <ChatPage botId={route.botId} />;
             case "newBot":
-              return <NewBot />;
+              return <NewBot botId={route.botId} />;
             case "botCreated":
               return <BotCreated botId={route.botId} token={route.token} botName={route.botName} avatar={route.avatar} />;
             case "botSettings":

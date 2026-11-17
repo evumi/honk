@@ -1,13 +1,13 @@
 import type { JSX } from "nsh";
 import { Canvas, List, Path2D, safeArea, signal, Text, View } from "nsh";
 import { AlertDialog, Input, NavPage } from "nsh/base";
-import { Avatar, Badge, Glyph, Row, Section } from "../components";
+import { Avatar, Badge, EdgeBlur, Glyph, glass, Row, Section, UI_ICONS } from "../components";
 import { listTime } from "../format";
 import { createDissolve, Dissolve } from "../fx/Dissolve";
 import { api, type Chat } from "../host";
 import { chats, loadStatus, nav, reload, status } from "../store";
 import { palette, type Palette } from "../theme";
-import { lang, tr } from "../i18n";
+import { lang, langChoice, setLangChoice, tr, type LangChoice } from "../i18n";
 
 type Tab = "chats" | "settings";
 
@@ -53,6 +53,7 @@ export function Home() {
         <If when={tab() === "chats"} else={<SettingsTab p={p()} />}>
           <ChatsTab p={p()} />
         </If>
+        <EdgeBlur edge="bottom" height={safeArea().bottom + 88} />
         <TabBar tab={tab()} onSelect={(t) => tab.set(t)} p={p()} />
       </View>
     </NavPage>
@@ -207,8 +208,11 @@ function ChatRow(props: { chat: Chat; p: Palette; editing: boolean }) {
     if (action !== "delete") return;
     dissolving.set(true);
     try {
-      // The request runs while the dust plays; a failure brings the row back.
-      await Promise.all([dust.play(), api.deleteBot(c().bot.id)]);
+      // Dust first, then the request: deleting tells the host, which reloads the
+      // list at once and would drop the row before it could dissolve. A failed
+      // delete brings the row back.
+      await dust.play();
+      await api.deleteBot(c().bot.id);
       await reload();
     } finally {
       dissolving.set(false);
@@ -252,9 +256,11 @@ function ChatRow(props: { chat: Chat; p: Palette; editing: boolean }) {
               testID={`delete-${c().bot.id}`}
               role="button"
               onPress={() => void remove()}
-              style={{ height: 32, paddingLeft: 14, paddingRight: 14, borderRadius: 16, backgroundColor: props.p.destructive, justifyContent: "center" }}
+              accessibilityLabel={tr("删除")}
+              activeStyle={{ opacity: 0.6 }}
+              style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: props.p.destructiveSoft, alignItems: "center", justifyContent: "center" }}
             >
-              <Text style={{ fontSize: 14, fontWeight: "600", color: "#ffffff" }}>{tr("删除")}</Text>
+              <Icon path={UI_ICONS.trash} color={props.p.destructive} size={19} width={2} />
             </View>
           </If>
         </View>
@@ -309,15 +315,18 @@ function SettingsTab(props: { p: Palette }) {
               : tr("通知被关闭时，消息仍会在打开 App 时同步过来。")
         }
       >
-        <Row p={p()} first label={tr("系统通知")} value={permission()} onPress={() => void api.openNotificationSettings()} />
+        <Row p={p()} first label={tr("系统通知")} value={permission()} onPress={() => void api.openNotificationSettings()} chevron />
         <Row p={p()} label={tr("设备注册")} value={registration()} color={status()?.registration === "failed" ? p().destructive : undefined} testID="registration" />
         <If when={status()?.registration !== "registered"}>
           <Row p={p()} label={retrying() ? tr("正在重试…") : tr("重试注册")} color={p().accent} onPress={() => void retry()} testID="retry-registration" />
         </If>
       </Section>
       <Section title={tr("网关")} p={p()}>
-        <Row p={p()} first label={host()} value={tr("更改")} onPress={() => nav.push({ name: "gateway" })} testID="gateway-row" />
+        <Row p={p()} first label={host()} value={tr("更改")} onPress={() => nav.push({ name: "gateway" })} testID="gateway-row" chevron />
         <Row p={p()} label={tr("立即同步")} color={p().accent} onPress={() => void api.refresh().then(reload)} />
+      </Section>
+      <Section title={tr("通用")} p={p()}>
+        <Row p={p()} first label={tr("语言")} value={languageLabel(langChoice())} onPress={() => void pickLanguage()} testID="language-row" chevron />
       </Section>
       <View style={{ flex: 1 }} />
       <If when={status()?.appVersion}>
@@ -332,6 +341,25 @@ function SettingsTab(props: { p: Palette }) {
   );
 }
 
+const LANGUAGES: { id: LangChoice; label: () => string }[] = [
+  { id: "system", label: () => tr("跟随系统") },
+  { id: "zh", label: () => "简体中文" },
+  { id: "en", label: () => "English" },
+];
+
+function languageLabel(c: LangChoice): string {
+  return LANGUAGES.find((l) => l.id === c)?.label() ?? "";
+}
+
+async function pickLanguage() {
+  const { action } = await AlertDialog.show({
+    title: tr("语言"),
+    presentation: "actionSheet",
+    actions: [...LANGUAGES.map((l) => ({ id: l.id, label: l.label() })), { id: "cancel", label: tr("取消"), role: "cancel" as const }],
+  });
+  if (action === "system" || action === "zh" || action === "en") await setLangChoice(action);
+}
+
 function TabBar(props: { tab: Tab; onSelect: (t: Tab) => void; p: Palette }) {
   const unread = () => chats().reduce((n, c) => n + (c.muted ? 0 : c.unread), 0);
   const color = (t: Tab) => (props.tab === t ? props.p.accent : props.p.text);
@@ -339,8 +367,8 @@ function TabBar(props: { tab: Tab; onSelect: (t: Tab) => void; p: Palette }) {
     <View
       style={{
         position: "absolute", left: 24, right: 24, bottom: safeArea().bottom + 8, height: 64,
-        borderRadius: 32, backgroundColor: props.p.glass, flexDirection: "row",
-        boxShadow: "0 4px 24px rgba(0,0,0,0.12)",
+        borderRadius: 32, flexDirection: "row",
+        ...glass(props.p), boxShadow: "0 4px 24px rgba(0,0,0,0.12)",
       }}
     >
       <View testID="tab-chats" role="tab" onPress={() => props.onSelect("chats")} style={{ flex: 1, alignItems: "center", justifyContent: "center", gap: 2 }}>

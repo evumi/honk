@@ -1,6 +1,6 @@
 import { Clipboard, cleanup, List, openUrl, signal, Text, View, effect, safeArea } from "nsh";
 import { AlertDialog, NavPage } from "nsh/base";
-import { Avatar } from "../components";
+import { Avatar, EdgeBlur, glass, Icon, TopBar } from "../components";
 import { clock, dayLabel, sameDay } from "../format";
 import { api, type Message } from "../host";
 import { chatOf, nav, reload, version } from "../store";
@@ -58,7 +58,7 @@ export function ChatPage(props: { botId: number }) {
           initialScrollAtEnd
           onLoadMoreAtStart={() => void loadOlder()}
           style={{ flex: 1 }}
-          contentStyle={{ paddingTop: safeArea().top + 60, paddingBottom: safeArea().bottom + 76, paddingLeft: 12, paddingRight: 12, gap: 10 } as never}
+          contentStyle={{ paddingTop: safeArea().top + 60, paddingBottom: safeArea().bottom + 70, paddingLeft: 12, paddingRight: 12, gap: 10 } as never}
           empty={
             <View style={{ alignItems: "center", paddingTop: 200 }}>
               <Text style={{ fontSize: 15, color: p().hint }}>{tr("还没有消息。用 token 发一条试试。")}</Text>
@@ -75,68 +75,34 @@ export function ChatPage(props: { botId: number }) {
           )}
         </List>
 
-        <TopBar botId={props.botId} p={p()} />
+        <TopBar
+          p={p()}
+          title={chat()?.bot.name ?? ""}
+          subtitle={chat()?.muted ? tr("机器人 · 已静音") : tr("机器人")}
+          onBack={() => nav.pop()}
+          right={
+            <View testID="open-settings" role="button" accessibilityLabel={tr("Bot 设置")} onPress={() => nav.push({ name: "botSettings", botId: props.botId })}>
+              <Avatar avatar={chat()?.bot.avatar ?? ""} size={44} iconScale={0.6} />
+            </View>
+          }
+        />
 
-        <View
-          style={{
-            position: "absolute", left: 12, right: 12, bottom: safeArea().bottom + 8,
-            flexDirection: "row", gap: 10,
-          }}
-        >
+        <EdgeBlur edge="bottom" height={safeArea().bottom + 76} />
+        {/* One compact glass pill, as a channel's mute button; settings are behind the avatar. */}
+        <View style={{ position: "absolute", left: 0, right: 0, bottom: safeArea().bottom + 10, alignItems: "center", pointerEvents: "box-none" }}>
           <View
             testID="mute"
             role="button"
             onPress={() => void toggleMute()}
             activeStyle={{ opacity: 0.7 }}
-            style={{ flex: 1, height: 52, borderRadius: 26, backgroundColor: p().glass, alignItems: "center", justifyContent: "center" }}
+            style={{ height: 46, paddingLeft: 20, paddingRight: 22, borderRadius: 23, flexDirection: "row", gap: 8, alignItems: "center", ...glass(p()) }}
           >
-            <Text style={{ fontSize: 16, color: p().text }}>{chat()?.muted ? tr("取消静音") : tr("静音通知")}</Text>
-          </View>
-          <View
-            testID="open-settings"
-            role="button"
-            onPress={() => nav.push({ name: "botSettings", botId: props.botId })}
-            activeStyle={{ opacity: 0.7 }}
-            style={{ flex: 1, height: 52, borderRadius: 26, backgroundColor: p().glass, alignItems: "center", justifyContent: "center" }}
-          >
-            <Text style={{ fontSize: 16, color: p().text }}>{tr("Token 与设置")}</Text>
+            <Icon name={chat()?.muted ? "bell" : "bellOff"} color={p().text} size={20} weight={2} />
+            <Text style={{ fontSize: 16, fontWeight: "500", color: p().text }}>{chat()?.muted ? tr("取消静音") : tr("静音通知")}</Text>
           </View>
         </View>
       </View>
     </NavPage>
-  );
-}
-
-function TopBar(props: { botId: number; p: Palette }) {
-  const chat = () => chatOf(props.botId);
-  return (
-    <View
-      style={{
-        position: "absolute", left: 12, right: 12, top: safeArea().top + 4,
-        flexDirection: "row", alignItems: "center", gap: 10,
-      }}
-    >
-      <View
-        role="button"
-        accessibilityLabel={tr("返回")}
-        onPress={() => nav.pop()}
-        activeStyle={{ opacity: 0.7 }}
-        style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: props.p.glass, alignItems: "center", justifyContent: "center" }}
-      >
-        <Text style={{ fontSize: 22, color: props.p.text }}>‹</Text>
-      </View>
-      <View style={{ flex: 1, height: 44, borderRadius: 22, backgroundColor: props.p.glass, alignItems: "center", justifyContent: "center" }}>
-        <Text style={{ fontSize: 16, fontWeight: "600", color: props.p.text, numberOfLines: 1 }}>{chat()?.bot.name ?? ""}</Text>
-        <Text style={{ fontSize: 12, color: props.p.hint }}>{chat()?.muted ? tr("机器人 · 已静音") : tr("机器人")}</Text>
-      </View>
-      <View
-        role="button"
-        accessibilityLabel={tr("Bot 设置")}
-        onPress={() => nav.push({ name: "botSettings", botId: props.botId })}
-      >
-        <Avatar avatar={chat()?.bot.avatar ?? ""} size={44} />
-      </View>
-    </View>
   );
 }
 
@@ -167,8 +133,11 @@ function Bubble(props: { message: Message; p: Palette }) {
       // Turn to dust first, then delete; the row is recycled afterwards, so reset it.
       dissolving.set(true);
       try {
-        // The request runs while the dust plays; a failure brings the row back.
-        await Promise.all([dust.play(), api.deleteMessage(m().id)]);
+        // Dust first, then the request: deleting tells the host, which reloads the
+        // list at once and would drop the row before it could dissolve. A failed
+        // delete brings the row back.
+        await dust.play();
+        await api.deleteMessage(m().id);
         await reload();
       } finally {
         dissolving.set(false);
