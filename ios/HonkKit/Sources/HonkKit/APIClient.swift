@@ -33,6 +33,19 @@ public struct APIClient: Sendable {
         self.session = session
     }
 
+    // MARK: gateway
+
+    public struct GatewayInfo: Decodable, Equatable, Sendable {
+        public let name: String
+        public let version: String
+        public let api: Int
+    }
+
+    /// What the gateway says it is; a Honk gateway answers `name` "honk".
+    public func info() async throws -> GatewayInfo {
+        try await request("GET", "v1/info", auth: false)
+    }
+
     // MARK: devices
 
     public struct Registration: Decodable, Sendable {

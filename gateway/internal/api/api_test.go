@@ -288,3 +288,11 @@ func TestGoneTokenStopsPushes(t *testing.T) {
 		t.Errorf("push went to %q", n.Token)
 	}
 }
+
+func TestInfo(t *testing.T) {
+	e := setup(t)
+	info := must[map[string]any](t, e.do("GET", "/v1/info", "", nil))
+	if info["name"] != "honk" || info["api"] != float64(1) {
+		t.Errorf("info = %v", info)
+	}
+}

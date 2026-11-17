@@ -174,3 +174,32 @@ final class MockGateway: URLProtocol {
         #expect(error?.isUnauthorized == true)
     }
 }
+
+@Suite struct GatewayConfigTests {
+    @Test func normalize() {
+        #expect(HonkConfig.normalizeGateway("honk.example.com")?.absoluteString == "https://honk.example.com/")
+        #expect(HonkConfig.normalizeGateway(" HTTP://10.0.0.2:8080 ")?.absoluteString == "http://10.0.0.2:8080/")
+        #expect(HonkConfig.normalizeGateway("https://e.com/honk")?.absoluteString == "https://e.com/honk/")
+        #expect(HonkConfig.normalizeGateway("ftp://e.com") == nil)
+        #expect(HonkConfig.normalizeGateway("https://e.com/?a=1") == nil)
+        #expect(HonkConfig.normalizeGateway("") == nil)
+    }
+
+    @Test func overrideRoundTrip() {
+        let group = "test.honk.\(UUID().uuidString)"
+        HonkConfig.setGatewayOverride(URL(string: "https://mine.example/")!, appGroup: group)
+        let stored = UserDefaults(suiteName: group)?.string(forKey: HonkConfig.overrideKey)
+        #expect(stored == "https://mine.example/")
+        HonkConfig.setGatewayOverride(nil, appGroup: group)
+        #expect(UserDefaults(suiteName: group)?.string(forKey: HonkConfig.overrideKey) == nil)
+    }
+
+    @Test func resetForgetsEverything() throws {
+        let store = try tempStore()
+        try store.apply(QueuedMessage(id: 1, botID: 1, body: "x"), notificationID: "n1")
+        try store.setSyncCursor(9)
+        #expect(try store.reset() == ["n1"])
+        #expect(try store.chats().isEmpty)
+        #expect(store.syncCursor == 0)
+    }
+}

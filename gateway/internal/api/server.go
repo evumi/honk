@@ -24,6 +24,7 @@ import (
 
 // Options configures a Server.
 type Options struct {
+	Version    string // reported by /v1/info
 	MessageTTL time.Duration
 	SendRate   float64
 	SendBurst  int
@@ -59,6 +60,10 @@ func (s *Server) Handler() http.Handler {
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) { ok(w, "ok") })
 
 	r.Route("/v1", func(r chi.Router) {
+		// Lets the app check that an address is a Honk gateway before switching to it.
+		r.Get("/info", func(w http.ResponseWriter, r *http.Request) {
+			ok(w, map[string]any{"name": "honk", "version": s.opts.Version, "api": 1})
+		})
 		r.Post("/devices", s.registerDevice)
 		r.Group(func(r chi.Router) {
 			r.Use(s.deviceAuth)

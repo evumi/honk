@@ -7,7 +7,7 @@ import UserNotifications
 final class HonkService {
     static let shared = HonkService()
 
-    let config = HonkConfig.fromBundle()
+    private(set) var config = HonkConfig.fromBundle()
     let credentials: CredentialStore
     let botTokens: BotTokenStore
     let store: LocalStore
@@ -65,6 +65,50 @@ final class HonkService {
             await refresh()
         } catch {
             NSLog("honk: register failed: \(error)")
+        }
+    }
+
+    // MARK: gateway
+
+    enum GatewayError: Error, LocalizedError {
+        case invalidURL
+        case notHonk
+        var errorDescription: String? {
+            switch self {
+            case .invalidURL: return "地址无效：需要 http:// 或 https:// 开头的网址"
+            case .notHonk: return "这个地址不是 Honk 网关"
+            }
+        }
+    }
+
+    /// Checks that `address` answers as a Honk gateway.
+    func testGateway(_ address: String) async throws -> (url: URL, info: APIClient.GatewayInfo) {
+        guard let url = HonkConfig.normalizeGateway(address) else { throw GatewayError.invalidURL }
+        let info = try await APIClient(baseURL: url, secret: nil).info()
+        guard info.name == "honk" else { throw GatewayError.notHonk }
+        return (url, info)
+    }
+
+    /// Moves the device to another gateway (`nil`: the build's default). The
+    /// new gateway knows nothing of this device, so its local data goes and it
+    /// registers again; the bots on the old gateway stay there.
+    func switchGateway(to address: String?) async throws {
+        var target = config.defaultGatewayURL
+        if let address {
+            target = try await testGateway(address).url
+        }
+        guard target != config.gatewayURL else { return }
+        let pushToken = credentials.load()?.pushToken
+        HonkConfig.setGatewayOverride(target == config.defaultGatewayURL ? nil : target, appGroup: config.appGroup)
+        config = HonkConfig.fromBundle()
+        credentials.clear()
+        botTokens.removeAll()
+        removeNotifications((try? store.reset()) ?? [])
+        changed()
+        if let pushToken {
+            await register(pushToken: pushToken)
+        } else {
+            UIApplication.shared.registerForRemoteNotifications()
         }
     }
 

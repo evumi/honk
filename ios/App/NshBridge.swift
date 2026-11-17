@@ -9,7 +9,8 @@ import UIKit
 /// Calls: honk.status, honk.chats, honk.messages, honk.markRead, honk.focus,
 /// honk.refresh, honk.bot.create, honk.bot.update, honk.bot.token,
 /// honk.bot.resetToken, honk.bot.delete, honk.bot.setMuted, honk.bot.setPinned,
-/// honk.message.delete, honk.chat.clear, honk.notifications.open.
+/// honk.message.delete, honk.chat.clear, honk.notifications.open,
+/// honk.gateway.get, honk.gateway.test, honk.gateway.set.
 /// Events: honk.changed (the store changed), honk.open { botId } (open a chat).
 @MainActor
 final class NshBridge {
@@ -52,6 +53,27 @@ final class NshBridge {
         handle("honk.refresh") { [service] _ in
             await service.refresh()
             return true
+        }
+
+        // MARK: gateway
+
+        handle("honk.gateway.get") { [service] _ in
+            ["url": service.config.gatewayURL.absoluteString,
+             "defaultURL": service.config.defaultGatewayURL.absoluteString,
+             "custom": service.config.isCustomGateway]
+        }
+        handle("honk.gateway.test") { [service] args in
+            do {
+                let (url, info) = try await service.testGateway(try Args(args).require("url"))
+                return ["ok": true, "url": url.absoluteString, "version": info.version]
+            } catch {
+                return ["ok": false, "error": error.localizedDescription]
+            }
+        }
+        handle("honk.gateway.set") { [service] args in
+            // `url` null or missing: back to the default gateway.
+            try await service.switchGateway(to: Args(args).string("url"))
+            return ["url": service.config.gatewayURL.absoluteString, "registered": service.isRegistered]
         }
 
         // MARK: bots

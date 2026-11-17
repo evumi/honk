@@ -37,6 +37,17 @@ const messages: Message[] = [
   }),
   msg(1, 25, { title: "每日部署汇总", body: "今天共 6 次部署，5 次成功，1 次回滚。" }),
 ];
+const DEFAULT_GATEWAY = "http://127.0.0.1:8080/";
+let gateway = DEFAULT_GATEWAY;
+
+function normalize(u: string): string | null {
+  let t = u.trim();
+  if (!t) return null;
+  if (!t.includes("://")) t = "https://" + t;
+  if (!/^https?:\/\/[^/\s?#]+/i.test(t) || /[?#]/.test(t)) return null;
+  return t.endsWith("/") ? t : t + "/";
+}
+
 const flags = new Map<number, { muted: boolean; pinned: boolean }>();
 const tokens = new Map<number, string>([[1, "1:bQx9fK2mT4vLr8Wz1pYs6NcHa3Ue0JdG"]]);
 
@@ -55,7 +66,23 @@ export async function demo<T>(name: string, args: unknown): Promise<T> {
   const out = ((): unknown => {
     switch (name) {
       case "honk.status":
-        return { registered: true, gatewayURL: "http://127.0.0.1:8080/", notifications: "authorized" };
+        return { registered: true, registration: "registered", pushMode: "apns", gatewayURL: gateway, notifications: "authorized" };
+      case "honk.register.retry":
+        return { registered: true, registration: "registered", pushMode: "apns", gatewayURL: gateway, notifications: "authorized" };
+      case "honk.gateway.get":
+        return { url: gateway, defaultURL: DEFAULT_GATEWAY, custom: gateway !== DEFAULT_GATEWAY };
+      case "honk.gateway.test": {
+        const url = normalize(String(a.url ?? ""));
+        if (!url) return { ok: false, error: "地址无效：需要 http:// 或 https:// 开头的网址" };
+        if (url.includes("bad")) return { ok: false, error: "无法连接到这个地址" };
+        return { ok: true, url, version: "0.1.0" };
+      }
+      case "honk.gateway.set": {
+        gateway = a.url ? normalize(String(a.url)) ?? gateway : DEFAULT_GATEWAY;
+        bots.splice(0, bots.length);
+        messages.splice(0, messages.length);
+        return { url: gateway, registered: true };
+      }
       case "honk.chats":
         return chats();
       case "honk.messages":

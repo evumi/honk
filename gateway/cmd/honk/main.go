@@ -61,7 +61,7 @@ func run(log *slog.Logger) error {
 		log.Warn("FCM not configured: Android devices get no pushes (set HONK_FCM_CREDENTIALS_FILE)")
 	}
 
-	srv := api.New(st, router, log, api.Options{MessageTTL: cfg.MessageTTL, SendRate: cfg.SendRate, SendBurst: cfg.SendBurst})
+	srv := api.New(st, router, log, api.Options{Version: version, MessageTTL: cfg.MessageTTL, SendRate: cfg.SendRate, SendBurst: cfg.SendBurst})
 	httpSrv := &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           srv.Handler(),

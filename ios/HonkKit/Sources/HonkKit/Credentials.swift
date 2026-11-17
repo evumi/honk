@@ -107,4 +107,11 @@ public struct BotTokenStore: Sendable {
     public func remove(botID: Int64) {
         SecItemDelete(query(botID) as CFDictionary)
     }
+
+    /// Removes every bot's token.
+    public func removeAll() {
+        var q: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service]
+        if let accessGroup { q[kSecAttrAccessGroup as String] = accessGroup }
+        SecItemDelete(q as CFDictionary)
+    }
 }
