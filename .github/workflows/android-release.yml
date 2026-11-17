@@ -38,10 +38,20 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-35 build-tools;35.0.0'
+
       - uses: gradle/actions/setup-gradle@v4
 
+      # The CLI builds app/ into the APK's assets (preBuild runs
+      # scripts/build-nsh-bundle.sh); without it the APK has no UI. Keep its
+      # version equal to the embedded libraries'.
       - name: Install nsh
-        run: curl -fsSL https://nsh.dev/install.sh | sh && echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+        run: curl -fsSL https://nsh.dev/install.sh | NSH_VERSION=v0.5.1 sh && echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Fetch the nsh Android libraries
+        run: NSH_VERSION=v0.5.1 scripts/fetch-nsh-android.sh
 
       - name: Version
         id: version
@@ -65,7 +75,9 @@ jobs:
           echo "$GOOGLE_SERVICES_B64" | base64 --decode > android/app/google-services.json
 
       - name: Build the nsh bundle
-        run: scripts/build-nsh-bundle.sh
+        run: |
+          nsh --version
+          scripts/build-nsh-bundle.sh
 
       - name: Assemble the release APK
         working-directory: android
