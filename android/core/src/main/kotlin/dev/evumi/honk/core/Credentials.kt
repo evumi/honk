@@ -1,0 +1,45 @@
+package dev.evumi.honk.core
+
+/** Keeps the device's [Credentials]. EncryptedSharedPreferences in the app. */
+interface CredentialStore {
+    fun load(): Credentials?
+    fun save(c: Credentials)
+    fun clear()
+}
+
+/** Keeps each bot's token: the gateway shows it only when it is created or reset. */
+interface BotTokenStore {
+    fun token(botId: Long): String?
+    fun save(botId: Long, token: String)
+    fun remove(botId: Long)
+}
+
+/** Registers the device with the gateway or sends it a new push token. */
+class DeviceRegistrar(
+    private val gatewayUrl: String,
+    private val credentials: CredentialStore,
+    private val transport: Transport = HttpTransport(),
+) {
+    enum class Result { UNCHANGED, UPDATED, REGISTERED }
+
+    /**
+     * Sends [pushToken] if it changed. When the gateway answers 401 (it forgot
+     * this device), registers again; a new registration starts with no bots.
+     */
+    fun register(pushToken: String): Result {
+        credentials.load()?.let { c ->
+            if (c.pushToken == pushToken) return Result.UNCHANGED
+            try {
+                ApiClient(gatewayUrl, c.secret, transport).updatePushToken(pushToken)
+                credentials.save(c.copy(pushToken = pushToken))
+                return Result.UPDATED
+            } catch (e: ApiException) {
+                if (!e.isUnauthorized) throw e
+                credentials.clear()
+            }
+        }
+        val reg = ApiClient(gatewayUrl, null, transport).registerDevice(pushToken)
+        credentials.save(Credentials(reg.device.id, reg.deviceSecret, pushToken))
+        return Result.REGISTERED
+    }
+}

@@ -4,7 +4,7 @@ Guidance for Claude Code in this repository.
 
 ## Layout
 
-Monorepo. `gateway/` is the Go module `github.com/evumi/honk/gateway`; `app/` (nsh), `ios/` and `android/` are planned. The Go version is pinned in `mise.toml`; run Go through `mise exec -- go …` if `go` is not on PATH.
+Monorepo. `gateway/` is the Go module `github.com/evumi/honk/gateway`; `app/` is the nsh UI, which `ios/` and `android/` host. The Go version is pinned in `mise.toml`; run Go through `mise exec -- go …` if `go` is not on PATH.
 
 ## Gateway
 
@@ -22,10 +22,18 @@ Monorepo. `gateway/` is the Go module `github.com/evumi/honk/gateway`; `app/` (n
 - The Xcode project is generated: `cd ios && make setup` fetches the nsh frameworks (`scripts/fetch-nsh-ios.sh`, sha256-checked) and runs XcodeGen on `project.yml`. Neither `Honk.xcodeproj` nor `Frameworks/` is committed. Team and gateway go in `Config/Local.xcconfig` (ignored).
 - The app and the extension share the SQLite store (App Group) and credentials (keychain access group). `LocalStore.apply` must stay idempotent: the extension and a later sync both apply the same item.
 
+## Android (android/)
+
+- Gradle, minSdk 26, GMS devices only (FCM data messages; no vendor push). `:core` is plain Kotlin/JVM and mirrors `ios/HonkKit`: `ApiClient`, `LocalStore` (over the `Sql` interface; `AndroidSql` in the app, JDBC in tests), `SyncEngine`, `DeviceRegistrar`. Keep `LocalStore`'s tables and `apply()` semantics in step with `LocalStore.swift`.
+- `cd android && ./gradlew :core:test` needs only a JDK 17. The app needs the Android SDK (platform 35) and the nsh AARs: `scripts/fetch-nsh-android.sh` (sha256-checked) puts them in `app/libs` (ignored); `debug` links `nsh-dev.aar`, `release` `nsh.aar`. The build runs `scripts/build-nsh-bundle.sh` and ships `app/dist/nsh` as `assets/nsh`.
+- Firebase config is `android/app/google-services.json` (ignored); without it the app builds but gets no FCM token. The gateway URL is `-Phonk.gatewayUrl=…` or `honk.gatewayUrl` in `android/local.properties` (default `http://10.0.2.2:8080/`, the emulator's host).
+- nsh's `NshView` API: read the AAR's classes (`javap`) and https://nsh.dev/docs/android rather than guessing. Host replies go through org.json, which drops `null` map values: use `JSONObject.NULL`.
+- A notification's tag is `c<bot>:<collapse id>` or `m<message id>`; LocalStore keeps it as the message's `notif_id`. One NotificationChannel per bot (`bot-<id>`).
+
 ## nsh app (app/)
 
 - `cd app && nsh check App.tsx && nsh test`. With no host (`nsh run App.tsx` on a desktop) the app uses `src/demo.ts`.
-- The host contract is `app/src/host.ts` on one side and `ios/App/NshBridge.swift` on the other; change both together.
+- The host contract is `app/src/host.ts` on one side and `ios/App/NshBridge.swift` and `android/app/src/main/kotlin/dev/evumi/honk/NshBridge.kt` on the other; change all three together.
 - Read the generated declarations in `app/.nsh/types` (created by `nsh init`/`nsh check`) for the nsh API; `calc(env(...))` is not valid for `top`/`bottom`, use `safeArea()`.
 - `app/src/widget` renders cards (profile v1). Keep its limits in step with `gateway/internal/widget`.
 
