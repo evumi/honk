@@ -251,7 +251,7 @@ test("cancelling the swipe delete keeps the bot", async () => {
 
 test("scrolling up in a chat shows a button back to the newest message", async () => {
   const app = await open("./App.tsx", { locale: "zh-Hans-CN", height: 500 });
-  await app.press("id:chat-1");
+  await app.press("id:chat-Bx7kQ2mT");
   await app.waitFor("id:message-103");
   await app.scroll("id:message-103", -1200);
   await app.waitFor("id:jump-latest");
