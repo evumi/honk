@@ -57,6 +57,36 @@ class LegacyBotIdsTest {
         assertEquals(setOf("4"), again.pending)
     }
 
+    @Test fun pendingBotMergesIntoItsListedRowLater() {
+        // Refresh 1: getMe is offline, so "4" stays pending while the list's short id is stored too.
+        val store = legacyStore()
+        store.saveBot(Bot("6", "部署", createdAt = 100)) // a twin: no safe match by name
+        store.setMuted("4", true)
+        val tokens = MemoryTokens(mutableMapOf("4" to "4:sec"))
+        val first = LegacyBotIds.rename(store, tokens, serverBots) { throw IOException("offline") }
+        store.replaceBots(serverBots, keeping = first.pending)
+        store.apply(QueuedMessage(2, "aZ3kQ9xT", body = "new"))
+        assertTrue(store.bot("aZ3kQ9xT") != null && store.bot("4") != null)
+        // Refresh 2: getMe answers; the two rows merge instead of the old one being dropped.
+        val second = LegacyBotIds.rename(store, tokens, serverBots) { serverBots[0] }
+        assertEquals(listOf(LegacyBotIds.Rename("4", "aZ3kQ9xT")), second.renamed)
+        store.replaceBots(serverBots, keeping = second.pending)
+        assertEquals(listOf("new", "old"), store.messages("aZ3kQ9xT").map { it.body })
+        assertTrue(store.isMuted("aZ3kQ9xT"))
+        assertTrue(store.chats().first { it.bot.id == "aZ3kQ9xT" }.pinned)
+        assertNull(store.bot("4"))
+        assertEquals(mapOf("aZ3kQ9xT" to "4:sec"), tokens.map)
+    }
+
+    @Test fun getMeAnswerIsNotSecondGuessedByName() {
+        // The token names a bot the gateway no longer lists: no matching by name and time.
+        val store = legacyStore()
+        val out = LegacyBotIds.rename(store, MemoryTokens(mutableMapOf("4" to "4:sec")), serverBots) {
+            Bot("gone1234", "部署", createdAt = 100)
+        }
+        assertEquals(listOf(LegacyBotIds.Rename("5", "bQ7mN2pR")), out.renamed)
+    }
+
     @Test fun goneTokenFallsBackToCreationAndName() {
         val store = legacyStore()
         val out = LegacyBotIds.rename(store, MemoryTokens(mutableMapOf("4" to "4:old")), serverBots) {

@@ -143,14 +143,15 @@ class GatewayTest {
             }
         }
         val api = ApiClient(FakeGateway.BASE, "s", gw)
-        val out = LegacyBotIds.renameBeforePush("aZ3kQ9xT", store, MemoryTokens(mutableMapOf("4" to "4:sec")), api)
+        val out = LegacyBotIds.renameBeforePush(store, MemoryTokens(mutableMapOf("4" to "4:sec")), api)
         assertEquals(listOf(LegacyBotIds.Rename("4", "aZ3kQ9xT")), out.renamed)
         assertEquals("部署", store.bot("aZ3kQ9xT")?.name)
         assertTrue("the push sees the bot's mute flag", store.isMuted("aZ3kQ9xT"))
+        assertNull("a legacy bot the list lacks goes, as in a refresh", store.bot("5"))
         assertNull("no auth header on the bot API", gw.requests.single { it.path.startsWith("bot") }.headers["Authorization"])
         // Nothing to do once renamed: no more requests.
         val before = gw.requests.size
-        LegacyBotIds.renameBeforePush("aZ3kQ9xT", store, MemoryTokens(), api)
+        LegacyBotIds.renameBeforePush(store, MemoryTokens(), api)
         assertEquals(before, gw.requests.size)
     }
 

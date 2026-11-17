@@ -255,7 +255,9 @@ public final class LocalStore: @unchecked Sendable {
     }
 
     /// Moves a bot's local data (flags, messages) from `old` to `new`: the
-    /// gateway gave a bot known by a legacy integer id its short id. Delivered
+    /// gateway gave a bot known by a legacy integer id its short id. When `new`
+    /// is already stored (a refresh listed it while `old` was pending), the two
+    /// merge: messages move over and muted / pinned carry over. Delivered
     /// notifications keep their ids (still in `notif_id`), so they can be
     /// removed as before. Records old → new for `currentBotID`. Returns whether
     /// it renamed.
@@ -263,9 +265,16 @@ public final class LocalStore: @unchecked Sendable {
     public func renameBot(from old: String, to new: String) throws -> Bool {
         try locked {
             try transaction {
-                guard old != new, try scalar("SELECT COUNT(*) FROM bots WHERE id = ?", [old]) == 1,
-                      try scalar("SELECT COUNT(*) FROM bots WHERE id = ?", [new]) == 0 else { return false }
-                try run("UPDATE bots SET id = ? WHERE id = ?", [new, old])
+                guard old != new, try scalar("SELECT COUNT(*) FROM bots WHERE id = ?", [old]) == 1 else { return false }
+                if try scalar("SELECT COUNT(*) FROM bots WHERE id = ?", [new]) == 1 {
+                    try run("""
+                        UPDATE bots SET muted = MAX(muted, (SELECT muted FROM bots WHERE id = ?)),
+                                        pinned = MAX(pinned, (SELECT pinned FROM bots WHERE id = ?)) WHERE id = ?
+                        """, [old, old, new])
+                    try run("DELETE FROM bots WHERE id = ?", [old])
+                } else {
+                    try run("UPDATE bots SET id = ? WHERE id = ?", [new, old])
+                }
                 try run("UPDATE messages SET bot_id = ? WHERE bot_id = ?", [new, old])
                 try run("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                         ["renamed-bot:" + old, new])
@@ -286,12 +295,15 @@ public final class LocalStore: @unchecked Sendable {
 
     /// The stored bots, oldest first.
     public func bots() throws -> [Bot] {
-        try locked {
-            try query("SELECT id, name, avatar, default_level, created_at, updated_at FROM bots ORDER BY created_at, id") {
-                Bot(id: $0.text(0) ?? "", name: $0.text(1) ?? "", avatar: $0.text(2) ?? "", defaultLevel: $0.text(3) ?? "active",
-                    createdAt: $0.int(4), updatedAt: $0.int(5))
-            }
-        }
+        try locked { try query("SELECT \(Self.botCols) FROM bots ORDER BY created_at, id", [], Self.readBot) }
+    }
+
+    private static let botCols = "id, name, avatar, default_level, created_at, updated_at"
+
+    /// Reads `botCols` from the first six columns of a row.
+    private static func readBot(_ r: Row) -> Bot {
+        Bot(id: r.text(0) ?? "", name: r.text(1) ?? "", avatar: r.text(2) ?? "", defaultLevel: r.text(3) ?? "active",
+            createdAt: r.int(4), updatedAt: r.int(5))
     }
 
     /// The ids of the stored bots.
@@ -313,10 +325,7 @@ public final class LocalStore: @unchecked Sendable {
 
     public func bot(id: String) throws -> Bot? {
         try locked {
-            try query("SELECT id, name, avatar, default_level, created_at, updated_at FROM bots WHERE id = ?", [id]) {
-                Bot(id: $0.text(0) ?? "", name: $0.text(1) ?? "", avatar: $0.text(2) ?? "", defaultLevel: $0.text(3) ?? "active",
-                    createdAt: $0.int(4), updatedAt: $0.int(5))
-            }.first
+            try query("SELECT \(Self.botCols) FROM bots WHERE id = ?", [id], Self.readBot).first
         }
     }
 

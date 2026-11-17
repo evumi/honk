@@ -26,11 +26,14 @@ public struct APIClient: Sendable {
     public let baseURL: URL
     public let secret: String?
     let session: URLSession
+    /// Seconds per request.
+    let timeout: TimeInterval
 
-    public init(baseURL: URL, secret: String?, session: URLSession = .shared) {
+    public init(baseURL: URL, secret: String?, session: URLSession = .shared, timeout: TimeInterval = 15) {
         self.baseURL = baseURL
         self.secret = secret
         self.session = session
+        self.timeout = timeout
     }
 
     // MARK: gateway
@@ -139,7 +142,7 @@ public struct APIClient: Sendable {
 
     func request<T: Decodable>(_ method: String, _ path: String, body: [String: Any]? = nil, auth: Bool = true) async throws -> T {
         guard let url = URL(string: path, relativeTo: baseURL) else { throw APIError.badResponse }
-        var req = URLRequest(url: url, timeoutInterval: 15)
+        var req = URLRequest(url: url, timeoutInterval: timeout)
         req.httpMethod = method
         if auth {
             guard let secret else { throw APIError.notRegistered }

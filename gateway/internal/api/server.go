@@ -119,7 +119,7 @@ func (s *Server) Handler() http.Handler {
 }
 
 // APIVersion is what /v1/info reports. 2: bot ids are short strings; app
-// builds for 1 (integer ids) cannot read them and get 410 for /v1/bots/<int>.
+// builds for 1 (integer ids) cannot read the bot list any more.
 const APIVersion = 2
 
 // SimulatorTokenPrefix marks the push token of a Debug iOS simulator build

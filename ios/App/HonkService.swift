@@ -277,7 +277,8 @@ final class HonkService {
     /// Handles a background push (an edit or delete): fetch it, apply it.
     func handleSilentPush(_ info: PushInfo) async -> Bool {
         guard isRegistered else { return false }
-        await LegacyBotIDs.renameBeforePush(botID: info.botID, store: store, tokens: botTokens, api: api)
+        await LegacyBotIDs.renameBeforePush(store: store, tokens: botTokens,
+                                            api: APIClient(baseURL: config.gatewayURL, secret: credentials.load()?.secret, timeout: 5))
         do {
             let m = try await api.message(id: info.messageID)
             let r = try store.apply(m)

@@ -52,8 +52,8 @@ final class NotificationService: UNNotificationServiceExtension {
             let api = APIClient(baseURL: config.gatewayURL, secret: creds.secret)
             // The app may not have run since the gateway gave this bot a short
             // id: rename it first so its name, avatar and mute flag apply.
-            await LegacyBotIDs.renameBeforePush(botID: info.botID, store: store,
-                                                tokens: BotTokenStore(accessGroup: config.keychainGroup), api: api)
+            await LegacyBotIDs.renameBeforePush(store: store, tokens: BotTokenStore(accessGroup: config.keychainGroup),
+                                                api: APIClient(baseURL: config.gatewayURL, secret: creds.secret, timeout: 5))
             if let m = try? await api.message(id: info.messageID),
                let r = try? store.apply(m, notificationID: request.identifier) {
                 message = r.message

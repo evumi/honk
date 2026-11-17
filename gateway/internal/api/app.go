@@ -124,20 +124,23 @@ func (s *Server) deleteDevice(w http.ResponseWriter, r *http.Request) {
 
 // ---- bots ----
 
-// errOldClient answers an app build from before short bot ids, which asks
-// for /v1/bots/<integer>: it gets a reason it can show instead of a bare 404.
-var errOldClient = apiError{http.StatusGone, "Gone: bot ids are short strings now; update the Honk app"}
-
+// botID reads the {id} of /v1/bots/{id}. The integer id a client knew
+// before v2 still names the device's own bot: an app whose local rename to the
+// short id is still pending (offline at the first sync) can delete or edit it.
 func (s *Server) botID(r *http.Request) (string, error) {
 	id := chi.URLParam(r, "id")
-	if !store.ValidBotID(id) {
-		if _, err := strconv.ParseInt(id, 10, 64); err == nil {
-			s.log.Warn("integer bot id from an old app build", "path", r.URL.Path, "user_agent", r.UserAgent())
-			return "", errOldClient
-		}
+	if store.ValidBotID(id) {
+		return id, nil
+	}
+	key, err := strconv.ParseUint(id, 10, 63)
+	if err != nil || key == 0 {
 		return "", errNotFound
 	}
-	return id, nil
+	public, err := s.store.BotIDByKey(r.Context(), device(r).ID, int64(key))
+	if err == nil {
+		s.log.Info("integer bot id", "path", r.URL.Path, "bot", public)
+	}
+	return public, err
 }
 
 func checkBotFields(name, avatar, lvl *string) error {

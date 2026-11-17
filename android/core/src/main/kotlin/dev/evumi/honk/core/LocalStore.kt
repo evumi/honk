@@ -122,17 +122,28 @@ class LocalStore(private val sql: Sql) {
 
     /**
      * Moves a bot's local data (flags, messages) from [old] to [new]: the
-     * gateway gave a bot known by a legacy integer id its short id. Delivered
+     * gateway gave a bot known by a legacy integer id its short id. When [new]
+     * is already stored (a refresh listed it while [old] was pending), the two
+     * merge: messages move over and muted / pinned carry over. Delivered
      * notifications keep their tags (still in `notif_id`), so they can be
      * removed as before. Records old → new for [currentBotId]. Returns whether
      * it renamed. Same as LocalStore.swift.
      */
     fun renameBot(old: String, new: String): Boolean = locked {
         transaction {
-            if (old == new || scalar("SELECT COUNT(*) FROM bots WHERE id = ?", listOf(old)) != 1L ||
-                scalar("SELECT COUNT(*) FROM bots WHERE id = ?", listOf(new)) != 0L
-            ) return@transaction false
-            sql.run("UPDATE bots SET id = ? WHERE id = ?", listOf(new, old))
+            if (old == new || scalar("SELECT COUNT(*) FROM bots WHERE id = ?", listOf(old)) != 1L) return@transaction false
+            if (scalar("SELECT COUNT(*) FROM bots WHERE id = ?", listOf(new)) == 1L) {
+                sql.run(
+                    """
+                    UPDATE bots SET muted = MAX(muted, (SELECT muted FROM bots WHERE id = ?)),
+                                    pinned = MAX(pinned, (SELECT pinned FROM bots WHERE id = ?)) WHERE id = ?
+                    """.trimIndent(),
+                    listOf(old, old, new),
+                )
+                sql.run("DELETE FROM bots WHERE id = ?", listOf(old))
+            } else {
+                sql.run("UPDATE bots SET id = ? WHERE id = ?", listOf(new, old))
+            }
             sql.run("UPDATE messages SET bot_id = ? WHERE bot_id = ?", listOf(new, old))
             sql.run(
                 "INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -152,9 +163,7 @@ class LocalStore(private val sql: Sql) {
 
     /** The stored bots, oldest first. */
     fun bots(): List<Bot> = locked {
-        sql.query("SELECT id, name, avatar, default_level, created_at, updated_at FROM bots ORDER BY created_at, id") {
-            Bot(it.text(0).orEmpty(), it.text(1).orEmpty(), it.text(2).orEmpty(), it.text(3) ?: "active", it.long(4), it.long(5))
-        }
+        sql.query("SELECT $BOT_COLS FROM bots ORDER BY created_at, id", emptyList(), ::readBot)
     }
 
     /** The ids of the stored bots. */
@@ -174,9 +183,7 @@ class LocalStore(private val sql: Sql) {
     }
 
     fun bot(id: String): Bot? = locked {
-        sql.query("SELECT id, name, avatar, default_level, created_at, updated_at FROM bots WHERE id = ?", listOf(id)) {
-            Bot(it.text(0).orEmpty(), it.text(1).orEmpty(), it.text(2).orEmpty(), it.text(3) ?: "active", it.long(4), it.long(5))
-        }.firstOrNull()
+        sql.query("SELECT $BOT_COLS FROM bots WHERE id = ?", listOf(id), ::readBot).firstOrNull()
     }
 
     fun deleteBot(id: String) = locked {
@@ -219,7 +226,7 @@ class LocalStore(private val sql: Sql) {
             """.trimIndent(),
         ) { r ->
             ChatSummary(
-                bot = Bot(r.text(0).orEmpty(), r.text(1).orEmpty(), r.text(2).orEmpty(), r.text(3) ?: "active", r.long(4), r.long(5)),
+                bot = readBot(r),
                 muted = r.long(6) != 0L,
                 pinned = r.long(7) != 0L,
                 last = null,
@@ -321,6 +328,12 @@ class LocalStore(private val sql: Sql) {
         sql.query(q, args) { if (it.isNull(0)) null else it.long(0) }.firstOrNull()
 
     companion object {
+        private const val BOT_COLS = "id, name, avatar, default_level, created_at, updated_at"
+
+        /** Reads [BOT_COLS] from the first six columns of a row. */
+        private fun readBot(r: Sql.Row) =
+            Bot(r.text(0).orEmpty(), r.text(1).orEmpty(), r.text(2).orEmpty(), r.text(3) ?: "active", r.long(4), r.long(5))
+
         private const val MESSAGE_COLS =
             "id, bot_id, title, body, html, data, level, group_key, url, copy_text, icon, collapse_id, date, read"
 

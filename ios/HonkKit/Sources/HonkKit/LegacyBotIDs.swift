@@ -40,10 +40,12 @@ public enum LegacyBotIDs {
         for bot in legacy {
             var newID: String?
             var transient = false
+            var answered = false // getMe named the bot: no guessing by name then
             let token = tokens.token(botID: bot.id)
             if let token {
                 do {
                     let me = try await getMe(token)
+                    answered = true
                     if known.contains(me.id) { newID = me.id }
                 } catch let APIError.gateway(code, _) where code == 401 || code == 404 {
                     // The token no longer names a bot.
@@ -51,7 +53,7 @@ public enum LegacyBotIDs {
                     transient = true
                 }
             }
-            if newID == nil {
+            if newID == nil, !answered {
                 let twins = legacy.filter { $0.createdAt == bot.createdAt && $0.name == bot.name }
                 let matches = serverBots.filter {
                     !stored.contains($0.id) && !claimed.contains($0.id) && $0.createdAt == bot.createdAt && $0.name == bot.name
@@ -68,7 +70,8 @@ public enum LegacyBotIDs {
             }
             claimed.insert(newID)
             if let token {
-                tokens.save(token, botID: newID)
+                // A token saved under the short id meanwhile (a reset) is newer.
+                if tokens.token(botID: newID) == nil { tokens.save(token, botID: newID) }
                 tokens.remove(botID: bot.id)
             }
             out.renamed.append(Rename(old: bot.id, new: newID))
@@ -81,12 +84,16 @@ public enum LegacyBotIDs {
         ((try? store.botIDs()) ?? []).contains(where: BotID.isLegacy)
     }
 
-    /// For a push naming `botID`: when that bot is not stored but legacy ones
-    /// are, fetch the bot list and rename first, so the push finds its bot
-    /// (name, avatar, mute). Returns quietly on any failure.
-    public static func renameBeforePush(botID: String, store: LocalStore, tokens: BotTokenStoring, api: APIClient) async {
-        guard (try? store.bot(id: botID)) == nil, hasLegacy(store),
-              let bots = try? await api.listBots() else { return }
-        _ = await rename(store: store, tokens: tokens, serverBots: bots) { try await api.getMe(token: $0) }
+    /// For a push: while legacy-id bots are stored, fetch the bot list and
+    /// rename first, so the push finds its bot's name, avatar and mute flag
+    /// (a refresh may already have stored the short id while the legacy row
+    /// was pending). The list is then applied as a refresh would, so legacy
+    /// rows that match nothing go and later pushes skip all this. Pass a client
+    /// with a short timeout: the extension has about 30 seconds in all.
+    /// Returns quietly on any failure.
+    public static func renameBeforePush(store: LocalStore, tokens: BotTokenStoring, api: APIClient) async {
+        guard hasLegacy(store), let bots = try? await api.listBots() else { return }
+        let out = await rename(store: store, tokens: tokens, serverBots: bots) { try await api.getMe(token: $0) }
+        try? store.replaceBots(bots, keeping: out.pending)
     }
 }

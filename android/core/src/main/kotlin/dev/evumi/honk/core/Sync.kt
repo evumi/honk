@@ -59,10 +59,13 @@ object LegacyBotIds {
         for (bot in legacy) {
             var newId: String? = null
             var transient = false
+            var answered = false // getMe named the bot: no guessing by name then
             val token = tokens.token(bot.id)
             if (token != null) {
                 try {
-                    getMe(token).id.takeIf { it in known }?.let { newId = it }
+                    val me = getMe(token)
+                    answered = true
+                    if (me.id in known) newId = me.id
                 } catch (e: ApiException.Gateway) {
                     // 401/404: the token no longer names a bot. Anything else may pass.
                     if (e.code != 401 && e.code != 404) transient = true
@@ -70,7 +73,7 @@ object LegacyBotIds {
                     transient = true
                 }
             }
-            if (newId == null) {
+            if (newId == null && !answered) {
                 val twins = legacy.count { it.createdAt == bot.createdAt && it.name == bot.name }
                 val matches = serverBots.filter {
                     it.id !in stored && it.id !in claimed && it.createdAt == bot.createdAt && it.name == bot.name
@@ -84,7 +87,8 @@ object LegacyBotIds {
             }
             claimed += id
             if (token != null) {
-                tokens.save(id, token)
+                // A token saved under the short id meanwhile (a reset) is newer.
+                if (tokens.token(id) == null) tokens.save(id, token)
                 tokens.remove(bot.id)
             }
             renamed += Rename(bot.id, id)
@@ -96,17 +100,22 @@ object LegacyBotIds {
     fun hasLegacy(store: LocalStore): Boolean = store.botIds().any(BotIds::isLegacy)
 
     /**
-     * For a push naming [botId]: when that bot is not stored but legacy ones
-     * are, fetch the bot list and rename first, so the push finds its bot
-     * (name, avatar, mute). Returns what it renamed; nothing on any failure.
+     * For a push: while legacy-id bots are stored, fetch the bot list and
+     * rename first, so the push finds its bot's name, avatar and mute flag (a
+     * refresh may already have stored the short id while the legacy row was
+     * pending). The list is then applied as a refresh would, so legacy rows
+     * that match nothing go and later pushes skip all this. Pass a client with
+     * a short timeout. Returns what it renamed; nothing on any failure.
      */
-    fun renameBeforePush(botId: String, store: LocalStore, tokens: BotTokenStore, api: ApiClient): Outcome {
-        if (store.bot(botId) != null || !hasLegacy(store)) return Outcome()
+    fun renameBeforePush(store: LocalStore, tokens: BotTokenStore, api: ApiClient): Outcome {
+        if (!hasLegacy(store)) return Outcome()
         val bots = try {
             api.listBots()
         } catch (e: Exception) {
             return Outcome()
         }
-        return rename(store, tokens, bots) { api.getMe(it) }
+        val out = rename(store, tokens, bots) { api.getMe(it) }
+        store.replaceBots(bots, keeping = out.pending)
+        return out
     }
 }
