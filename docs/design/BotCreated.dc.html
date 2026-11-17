@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Bot 创建成功</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+a{color:#0a6ed1;text-decoration:none}
+.cap{margin:20px 32px 6px;font-size:13px;color:#6d6d72}
+.sec{margin:0 16px;background:#fff;border-radius:12px;overflow:hidden}
+.mono{font-family:ui-monospace,'SF Mono',Menlo,monospace}
+.copy{display:flex;align-items:center;gap:6px;height:44px;padding:0 16px;border:none;border-top:0.5px solid #e5e5ea;background:#fff;width:100%;color:#0a6ed1;font-size:16px;font-family:inherit}
+</style>
+</helmet>
+<div style="width:390px;height:844px;box-sizing:border-box;background:#f2f2f7;font-family:-apple-system,'PingFang SC','Helvetica Neue',sans-serif;position:relative;overflow:hidden">
+  <div style="display:flex;align-items:center;justify-content:flex-end;padding:56px 16px 0">
+    <a href="Chat.dc.html" style="font-size:17px;font-weight:600;height:44px;display:flex;align-items:center">完成</a>
+  </div>
+
+  <div style="display:flex;flex-direction:column;align-items:center;gap:8px;padding:4px 32px 0;text-align:center">
+    <div style="position:relative;width:88px;height:88px;border-radius:50%;background:#1c1c1e;display:flex;align-items:center;justify-content:center">
+      <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 15h16l-2.5 4h-11z"/><path d="M7 15V9h7l3 6"/></svg>
+      <span style="position:absolute;right:-2px;bottom:-2px;width:30px;height:30px;border-radius:50%;background:#1a9e6e;border:3px solid #f2f2f7;display:flex;align-items:center;justify-content:center">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>
+      </span>
+    </div>
+    <h1 style="margin:8px 0 0;font-size:24px;font-weight:700;color:#000">Berth 部署 已创建</h1>
+    <p style="margin:0;font-size:15px;line-height:21px;color:#6d6d72">用下面的 token 发送通知。token 相当于密码，泄露后可以在设置里重置。</p>
+  </div>
+
+  <p class="cap">TOKEN</p>
+  <div class="sec">
+    <div class="mono" style="padding:14px 16px;font-size:15px;line-height:21px;color:#000;word-break:break-all">7351902846:bQx9fK2mT4vLr8Wz1pYs6NcHa3Ue0JdG</div>
+    <button type="button" class="copy">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0a6ed1" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/></svg>
+      复制 token
+    </button>
+  </div>
+
+  <p class="cap">发送示例</p>
+  <div class="sec">
+    <pre class="mono" style="margin:0;padding:14px 16px;background:#1c1c1e;color:#e5e5ea;font-size:12.5px;line-height:19px;white-space:pre-wrap;word-break:break-all">curl https://[你的域名]/bot&lt;token&gt;/sendMessage \
+  -d title="部署成功" \
+  -d body="sub2api / sluice 已上线" \
+  -d level=active</pre>
+    <button type="button" class="copy">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0a6ed1" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/></svg>
+      复制示例
+    </button>
+  </div>
+
+  <div style="position:absolute;left:16px;right:16px;bottom:40px;display:flex;flex-direction:column;gap:10px">
+    <a href="#" style="height:52px;border-radius:14px;background:#fff;color:#0a6ed1;font-size:17px;font-weight:600;display:flex;align-items:center;justify-content:center">发送一条测试通知</a>
+    <a href="Chat.dc.html" style="height:52px;border-radius:14px;background:#0a6ed1;color:#fff;font-size:17px;font-weight:600;display:flex;align-items:center;justify-content:center">进入会话</a>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

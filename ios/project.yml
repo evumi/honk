@@ -1,0 +1,87 @@
+# XcodeGen spec: `cd ios && make project` writes Honk.xcodeproj (not committed).
+name: Honk
+options:
+  bundleIdPrefix: dev.evumi
+  deploymentTarget:
+    iOS: "15.0"
+  createIntermediateGroups: true
+configFiles:
+  Debug: Config/Debug.xcconfig
+  Release: Config/Release.xcconfig
+packages:
+  HonkKit:
+    path: HonkKit
+targets:
+  Honk:
+    type: application
+    platform: iOS
+    sources:
+      - path: App
+      - path: ../app/dist/nsh
+        type: folder
+        buildPhase: resources
+    dependencies:
+      - package: HonkKit
+      - target: NotificationService
+      - framework: Frameworks/NativeShell.xcframework
+        embed: false
+    entitlements:
+      path: App/Honk.entitlements
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: Honk
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+          UISceneConfigurations:
+            UIWindowSceneSessionRoleApplication:
+              - UISceneConfigurationName: Default
+                UISceneDelegateClassName: $(PRODUCT_MODULE_NAME).SceneDelegate
+        UIBackgroundModes: [remote-notification]
+        NSUserActivityTypes: [INSendMessageIntent]
+        CADisableMinimumFrameDurationOnPhone: true
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        HonkGatewayURL: $(HONK_GATEWAY_URL)
+        HonkAppGroup: $(HONK_APP_GROUP)
+        HonkKeychainGroup: $(AppIdentifierPrefix)$(HONK_KEYCHAIN_GROUP)
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(HONK_BUNDLE_ID)
+        TARGETED_DEVICE_FAMILY: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    preBuildScripts:
+      - name: Build nsh bundle
+        script: ../scripts/build-nsh-bundle.sh
+        basedOnDependencyAnalysis: false
+  NotificationService:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: NotificationService
+    dependencies:
+      - package: HonkKit
+    entitlements:
+      path: NotificationService/NotificationService.entitlements
+    info:
+      path: NotificationService/Info.plist
+      properties:
+        CFBundleDisplayName: Honk Notifications
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.usernotifications.service
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).NotificationService
+          NSExtensionAttributes:
+            IntentsSupported: [INSendMessageIntent]
+        HonkGatewayURL: $(HONK_GATEWAY_URL)
+        HonkAppGroup: $(HONK_APP_GROUP)
+        HonkKeychainGroup: $(AppIdentifierPrefix)$(HONK_KEYCHAIN_GROUP)
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(HONK_BUNDLE_ID).NotificationService
+        TARGETED_DEVICE_FAMILY: "1"

@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>会话列表</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+a{color:inherit;text-decoration:none}
+.row{display:flex;align-items:center;gap:12px;padding:0 16px;height:80px;color:#000}
+.av{width:56px;height:56px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center}
+.txt{flex:1;min-width:0;height:80px;display:flex;flex-direction:column;justify-content:center;gap:2px;border-bottom:0.5px solid #d1d1d6}
+.top{display:flex;align-items:baseline;gap:8px}
+.nm{flex:1;font-size:16px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tm{font-size:14px;color:#6d6d72}
+.bt{display:flex;align-items:center;gap:8px}
+.pv{flex:1;font-size:15px;line-height:20px;color:#6d6d72;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.bd{min-width:22px;height:22px;padding:0 7px;box-sizing:border-box;border-radius:11px;background:#0a6ed1;color:#fff;font-size:13px;font-weight:600;display:flex;align-items:center;justify-content:center}
+.bd.mute{background:#8e8e93}
+</style>
+</helmet>
+<div style="width:390px;height:844px;box-sizing:border-box;background:#ffffff;font-family:-apple-system,'PingFang SC','Helvetica Neue',sans-serif;position:relative;overflow:hidden">
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:56px 16px 8px">
+    <button type="button" style="height:44px;padding:0 18px;border:none;border-radius:22px;background:#f2f2f7;font-size:17px;color:#000;font-family:inherit">编辑</button>
+    <h1 style="margin:0;font-size:17px;font-weight:600">通知</h1>
+    <a href="NewBot.dc.html" aria-label="新建 Bot" style="width:44px;height:44px;border-radius:22px;background:#0a6ed1;display:flex;align-items:center;justify-content:center">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+    </a>
+  </div>
+  <div style="padding:4px 16px 8px">
+    <label style="display:flex;align-items:center;gap:6px;height:36px;padding:0 10px;border-radius:10px;background:#f2f2f7;color:#6d6d72;font-size:16px">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6d6d72" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>
+      <input type="search" placeholder="搜索" aria-label="搜索" style="flex:1;border:none;background:transparent;font-size:16px;font-family:inherit;outline:none">
+    </label>
+  </div>
+
+  <a class="row" href="Chat.dc.html">
+    <div class="av" style="background:#1c1c1e"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 15h16l-2.5 4h-11z"/><path d="M7 15V9h7l3 6"/><path d="M3 21c1.5 0 1.5-1 3-1s1.5 1 3 1 1.5-1 3-1 1.5 1 3 1 1.5-1 3-1 1.5 1 3 1"/></svg></div>
+    <div class="txt">
+      <div class="top"><span class="nm">Berth 部署</span><span class="tm">16:17</span></div>
+      <div class="bt"><span class="pv">部署成功：sub2api / sluice (production) 部署 dep_w3tn2cnlrvwtspmjmpol 已上线。</span><span class="bd">2</span></div>
+    </div>
+  </a>
+  <a class="row" href="Chat.dc.html">
+    <div class="av" style="background:#c2410c"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l9.5 17h-19z"/><path d="M12 10v4M12 17.5v.01"/></svg></div>
+    <div class="txt">
+      <div class="top"><span class="nm">服务器告警</span><span class="tm">15:42</span></div>
+      <div class="bt"><span class="pv">hk-edge-02 CPU 使用率 92%，持续 5 分钟</span><span class="bd">1</span></div>
+    </div>
+  </a>
+  <a class="row" href="Chat.dc.html">
+    <div class="av" style="background:#2f6f3e"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M8 12.5l2.7 2.7L16 9.8"/></svg></div>
+    <div class="txt">
+      <div class="top"><span class="nm">CI 构建</span><span class="tm">周四</span></div>
+      <div class="bt"><span class="pv">main #482 通过 · 3 分 12 秒 · 128 个测试全部通过</span></div>
+    </div>
+  </a>
+  <a class="row" href="Chat.dc.html">
+    <div class="av" style="background:#6741d9"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="6" width="18" height="13" rx="2.5"/><path d="M3 10h18M16 14.5h2"/></svg></div>
+    <div class="txt">
+      <div class="top"><span class="nm">每日账单</span><span class="tm">周三</span></div>
+      <div class="bt"><span class="pv">昨日云服务支出 ¥46.20，本月累计 ¥812.75</span></div>
+    </div>
+  </a>
+  <a class="row" href="Chat.dc.html">
+    <div class="av" style="background:#0a6ed1"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="4" width="17" height="7" rx="2"/><rect x="3.5" y="13" width="17" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/></svg></div>
+    <div class="txt">
+      <div class="top"><span class="nm">家庭 NAS</span><span class="tm">周二</span></div>
+      <div class="bt"><span class="pv">备份完成：照片库 312 GB，用时 48 分钟</span></div>
+    </div>
+  </a>
+  <a class="row" href="Chat.dc.html">
+    <div class="av" style="background:#5c6770"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 18l5-6 4 3 7-8"/><path d="M15 7h5v5"/></svg></div>
+    <div class="txt">
+      <div class="top"><span class="nm">价格监控</span><span class="tm">11/09</span></div>
+      <div class="bt"><span class="pv">目标商品降价到 ¥1,299，低于设定价 ¥1,400</span><span class="bd mute">5</span></div>
+    </div>
+  </a>
+
+  <nav aria-label="主导航" style="position:absolute;left:24px;right:24px;bottom:28px;height:64px;border-radius:32px;background:rgba(249,249,249,0.96);box-shadow:0 4px 24px rgba(0,0,0,0.12);display:flex;align-items:center;justify-content:space-around">
+    <a href="Main.dc.html" style="display:flex;flex-direction:column;align-items:center;gap:2px;color:#0a6ed1;font-size:11px;font-weight:600;position:relative;padding:0 24px">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="#0a6ed1" aria-hidden="true"><path d="M12 3.5c-5 0-9 3.4-9 7.6 0 2.3 1.2 4.4 3.1 5.8L5.5 20.5l4.1-2.1c.8.2 1.6.3 2.4.3 5 0 9-3.4 9-7.6S17 3.5 12 3.5z"/></svg>
+      通知
+      <span class="bd" style="position:absolute;top:-6px;right:12px;background:#e5484d">3</span>
+    </a>
+    <a href="BotSettings.dc.html" style="display:flex;flex-direction:column;align-items:center;gap:2px;color:#3a3a3c;font-size:11px;font-weight:500;padding:0 24px">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#3a3a3c" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+      设置
+    </a>
+  </nav>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

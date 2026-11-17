@@ -1,0 +1,94 @@
+import Foundation
+
+/// Settings shared by the app and the extension, read from Info.plist so both
+/// targets agree: `HonkGatewayURL`, `HonkAppGroup`, `HonkKeychainGroup`.
+public struct HonkConfig: Sendable {
+    public var gatewayURL: URL
+    public var appGroup: String
+    /// Full keychain access group, team prefix included (`ABCDE12345.dev.evumi.honk.shared`).
+    public var keychainGroup: String?
+
+    public init(gatewayURL: URL, appGroup: String, keychainGroup: String?) {
+        self.gatewayURL = gatewayURL
+        self.appGroup = appGroup
+        self.keychainGroup = keychainGroup
+    }
+
+    public static func fromBundle(_ bundle: Bundle = .main) -> HonkConfig {
+        let info = bundle.infoDictionary ?? [:]
+        let url = (info["HonkGatewayURL"] as? String).flatMap(URL.init(string:)) ?? URL(string: "http://127.0.0.1:8080/")!
+        let group = info["HonkAppGroup"] as? String ?? "group.dev.evumi.honk"
+        let keychain = (info["HonkKeychainGroup"] as? String).flatMap { $0.isEmpty || $0.hasPrefix("$(") ? nil : $0 }
+        return HonkConfig(gatewayURL: url, appGroup: group, keychainGroup: keychain)
+    }
+}
+
+/// Cross-process change signal: the extension posts it after writing to the
+/// store, and the running app refreshes its UI.
+public enum ChangeSignal {
+    public static let name = "dev.evumi.honk.store-changed"
+
+    public static func post() {
+        CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
+                                             CFNotificationName(name as CFString), nil, nil, true)
+    }
+
+    /// Calls `handler` on the main queue whenever another process posts the signal.
+    public static func observe(_ handler: @escaping () -> Void) -> AnyObject {
+        let box = Observer(handler)
+        CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(),
+                                        Unmanaged.passUnretained(box).toOpaque(),
+                                        { _, observer, _, _, _ in
+                                            guard let observer else { return }
+                                            let box = Unmanaged<Observer>.fromOpaque(observer).takeUnretainedValue()
+                                            DispatchQueue.main.async { box.handler() }
+                                        },
+                                        name as CFString, nil, .deliverImmediately)
+        return box
+    }
+
+    final class Observer {
+        let handler: () -> Void
+        init(_ handler: @escaping () -> Void) { self.handler = handler }
+        deinit {
+            CFNotificationCenterRemoveObserver(CFNotificationCenterGetDarwinNotifyCenter(),
+                                               Unmanaged.passUnretained(self).toOpaque(), nil, nil)
+        }
+    }
+}
+
+/// Pulls everything queued since the stored cursor, applies it and acks it.
+public struct SyncEngine: Sendable {
+    let api: APIClient
+    let store: LocalStore
+
+    public init(api: APIClient, store: LocalStore) {
+        self.api = api
+        self.store = store
+    }
+
+    public struct Outcome: Sendable {
+        public var applied = 0
+        public var staleNotificationIDs: [String] = []
+    }
+
+    public func run() async throws -> Outcome {
+        var out = Outcome()
+        var cursor = store.syncCursor
+        while true {
+            let page = try await api.sync(cursor: cursor)
+            for m in page.messages {
+                let r = try store.apply(m)
+                out.staleNotificationIDs += r.staleNotificationIDs
+                out.applied += 1
+            }
+            if page.cursor > cursor {
+                cursor = page.cursor
+                try store.setSyncCursor(cursor)
+                try await api.ack(upTo: cursor)
+            }
+            if !page.hasMore { break }
+        }
+        return out
+    }
+}

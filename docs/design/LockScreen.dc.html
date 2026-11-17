@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>锁屏通知</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+.nt{position:relative;display:flex;gap:10px;padding:12px 14px;border-radius:22px;background:rgba(242,242,247,0.9)}
+.av{position:relative;width:38px;height:38px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center}
+.app{position:absolute;right:-3px;bottom:-3px;width:16px;height:16px;border-radius:4px;background:#0a6ed1;border:1.5px solid #f2f2f7;display:flex;align-items:center;justify-content:center}
+.tx{flex:1;min-width:0;font-size:15px;line-height:20px;color:#000}
+.hd{display:flex;gap:8px}
+.hd b{flex:1;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hd span{font-size:13px;color:#4a4a4f}
+.ln{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+</style>
+</helmet>
+<div style="width:390px;height:844px;box-sizing:border-box;background:#27313d;font-family:-apple-system,'PingFang SC','Helvetica Neue',sans-serif;position:relative;overflow:hidden">
+  <div style="text-align:center;color:#fff;padding-top:84px">
+    <p style="margin:0;font-size:18px;font-weight:600">11月17日 星期二</p>
+    <p style="margin:0;font-size:84px;font-weight:700;line-height:96px;letter-spacing:-1px">16:55</p>
+  </div>
+
+  <div style="position:absolute;left:10px;right:10px;bottom:120px;display:flex;flex-direction:column;gap:8px">
+    <div class="nt">
+      <div class="av" style="background:#c2410c">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l9.5 17h-19z"/><path d="M12 10v4"/></svg>
+        <span class="app"><svg width="9" height="9" viewBox="0 0 24 24" fill="#fff" aria-hidden="true"><path d="M12 3.5c-5 0-9 3.4-9 7.6 0 2.3 1.2 4.4 3.1 5.8L5.5 20.5l4.1-2.1c.8.2 1.6.3 2.4.3 5 0 9-3.4 9-7.6S17 3.5 12 3.5z"/></svg></span>
+      </div>
+      <div class="tx">
+        <div style="font-size:12px;font-weight:600;color:#a33508;letter-spacing:0.3px">时效性通知</div>
+        <div class="hd"><b>服务器告警</b><span>现在</span></div>
+        <div style="font-weight:600">hk-edge-02 CPU 92%</div>
+        <div class="ln">持续 5 分钟超过阈值 85%，负载 7.8。</div>
+      </div>
+    </div>
+
+    <div class="nt">
+      <div class="av" style="background:#1c1c1e">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 15h16l-2.5 4h-11z"/><path d="M7 15V9h7l3 6"/></svg>
+        <span class="app"><svg width="9" height="9" viewBox="0 0 24 24" fill="#fff" aria-hidden="true"><path d="M12 3.5c-5 0-9 3.4-9 7.6 0 2.3 1.2 4.4 3.1 5.8L5.5 20.5l4.1-2.1c.8.2 1.6.3 2.4.3 5 0 9-3.4 9-7.6S17 3.5 12 3.5z"/></svg></span>
+      </div>
+      <div class="tx">
+        <div class="hd"><b>Berth 部署</b><span>16:17</span></div>
+        <div style="font-weight:600">部署成功：sub2api / sluice</div>
+        <div class="ln">服务 sub2api / sluice 在 production 环境的部署已上线。</div>
+      </div>
+    </div>
+    <div style="margin:-14px 14px 0;height:14px;border-radius:0 0 18px 18px;background:rgba(242,242,247,0.55)"></div>
+
+    <p style="margin:4px 0 0;text-align:center;font-size:13px;color:#d8dde3">横幅头像来自 bot 头像（iOS Communication Notification）。长按可以展开卡片预览。</p>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>
