@@ -1,9 +1,11 @@
 package dev.evumi.honk
 
 import android.content.Context
+import android.content.SharedPreferences
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import com.google.android.gms.tasks.Tasks
 import com.google.firebase.FirebaseApp
 import com.google.firebase.messaging.FirebaseMessaging
 import dev.evumi.honk.core.ApiClient
@@ -11,27 +13,41 @@ import dev.evumi.honk.core.ApiException
 import dev.evumi.honk.core.BotTokenStore
 import dev.evumi.honk.core.CredentialStore
 import dev.evumi.honk.core.DeviceRegistrar
+import dev.evumi.honk.core.Gateway
 import dev.evumi.honk.core.LocalStore
 import dev.evumi.honk.core.PushInfo
 import dev.evumi.honk.core.QueuedMessage
 import dev.evumi.honk.core.SyncEngine
 import java.io.File
+import java.io.IOException
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * The app's single owner of credentials, the local store and the gateway
  * client, shared by the activity (through the nsh bridge) and the FCM service.
  * The counterpart of ios/App/HonkService.swift. Methods that talk to the
- * gateway block: call them off the main thread.
+ * gateway or Firebase block: call them off the main thread.
  */
 class HonkService private constructor(context: Context) {
     val context: Context = context.applicationContext
-    val gatewayUrl: String = BuildConfig.GATEWAY_URL
     val credentials: CredentialStore
     val botTokens: BotTokenStore
     val store: LocalStore = LocalStore(AndroidSql(File(this.context.noBackupFilesDir, "honk.sqlite")))
     val notifier = Notifier(this.context)
+    private val prefs: SharedPreferences = this.context.getSharedPreferences("honk", Context.MODE_PRIVATE)
+
+    /** Where registration with the gateway stands; the settings page shows it. */
+    sealed class Registration(val name: String) {
+        object WaitingForPushToken : Registration("waitingForPushToken")
+        object Registering : Registration("registering")
+        object Registered : Registration("registered")
+        class Failed(val reason: String) : Registration("failed")
+    }
+
+    @Volatile var registration: Registration = Registration.WaitingForPushToken
+        private set
 
     /** The bot whose chat is on screen while the activity is resumed; its messages show no notification. */
     @Volatile var focusedBotId: Long? = null
@@ -42,15 +58,27 @@ class HonkService private constructor(context: Context) {
     private val syncing = AtomicBoolean(false)
 
     init {
-        val prefs = SecurePrefs.open(this.context)
-        credentials = PrefsCredentialStore(prefs)
-        botTokens = PrefsBotTokenStore(prefs)
+        val secure = SecurePrefs.open(this.context)
+        credentials = PrefsCredentialStore(secure)
+        botTokens = PrefsBotTokenStore(secure)
+        if (credentials.load() != null) registration = Registration.Registered
     }
+
+    // gateway address
+
+    /** The gateway the build was configured with (BuildConfig.GATEWAY_URL). */
+    val defaultGatewayUrl: String = Gateway.normalize(BuildConfig.GATEWAY_URL) ?: "http://10.0.2.2:8080/"
+
+    /** The gateway in use: the user's choice, else the build's default. */
+    val gatewayUrl: String
+        get() = prefs.getString(KEY_GATEWAY, null)?.let(Gateway::normalize) ?: defaultGatewayUrl
+
+    val isCustomGateway: Boolean get() = gatewayUrl != defaultGatewayUrl
 
     val api: ApiClient get() = ApiClient(gatewayUrl, credentials.load()?.secret)
     val isRegistered: Boolean get() = credentials.load() != null
 
-    /** Calls [listener] on the main thread whenever the store changed. Returns a function that removes it. */
+    /** Calls [listener] on the main thread whenever the store or the registration changed. Returns a function that removes it. */
     fun addChangeListener(listener: () -> Unit): () -> Unit {
         listeners += listener
         return { listeners -= listener }
@@ -61,27 +89,107 @@ class HonkService private constructor(context: Context) {
         main.post { listeners.forEach { it() } }
     }
 
+    private fun setRegistration(r: Registration) {
+        registration = r
+        changed()
+    }
+
     // registration
 
-    /** Registers the device or sends a new FCM token; the gateway's 401 means register again. */
+    /** Registers the device or sends a new FCM token; the gateway's 401 means register again. Blocking. */
     fun register(pushToken: String) {
+        prefs.edit().putString(KEY_LAST_PUSH_TOKEN, pushToken).apply()
+        if (registration != Registration.Registered) setRegistration(Registration.Registering)
         try {
             val r = DeviceRegistrar(gatewayUrl, credentials).register(pushToken)
+            setRegistration(Registration.Registered)
             if (r == DeviceRegistrar.Result.REGISTERED) refresh()
         } catch (e: Exception) {
             Log.w(TAG, "register failed", e)
+            setRegistration(Registration.Failed(Gateway.describe(e)))
         }
     }
 
-    /** Asks Firebase for the current token and registers with it. Any thread. */
-    fun registerWithCurrentToken() {
+    /** The current FCM token. Blocking, at most 20 seconds. */
+    private fun fetchPushToken(): String {
         if (!BuildConfig.HAS_FIREBASE || FirebaseApp.getApps(context).isEmpty()) {
-            Log.w(TAG, "no Firebase configuration (android/app/google-services.json): no push token")
+            throw IOException("这个构建没有 Firebase 配置（android/app/google-services.json），拿不到推送 token")
+        }
+        return Tasks.await(FirebaseMessaging.getInstance().token, 20, TimeUnit.SECONDS)
+    }
+
+    /** Asks Firebase for the current token and registers with it, on a background thread. */
+    fun registerWithCurrentToken() {
+        Thread { registerWithFreshToken() }.start()
+    }
+
+    private fun registerWithFreshToken() {
+        val token = try {
+            fetchPushToken()
+        } catch (e: Exception) {
+            Log.w(TAG, "no FCM token", e)
+            if (registration != Registration.Registered) {
+                setRegistration(Registration.Failed("无法取得推送 token：${Gateway.describe(e.cause ?: e)}。检查网络和 Google Play 服务后重试。"))
+            }
             return
         }
-        FirebaseMessaging.getInstance().token
-            .addOnSuccessListener { token -> Thread { register(token) }.start() }
-            .addOnFailureListener { Log.w(TAG, "no FCM token", it) }
+        register(token)
+    }
+
+    /**
+     * Tries registration again: checks the stored device, else registers with
+     * the last push token, else asks Firebase for one. Blocking; returns once
+     * it settles.
+     */
+    fun retryRegistration() {
+        if (credentials.load() != null) {
+            try {
+                api.listBots()
+                setRegistration(Registration.Registered)
+                return
+            } catch (e: ApiException) {
+                if (!e.isUnauthorized) {
+                    setRegistration(Registration.Failed(Gateway.describe(e)))
+                    return
+                }
+                credentials.clear()
+            } catch (e: Exception) {
+                setRegistration(Registration.Failed(Gateway.describe(e)))
+                return
+            }
+        }
+        prefs.getString(KEY_LAST_PUSH_TOKEN, null)?.let {
+            register(it)
+            return
+        }
+        setRegistration(Registration.WaitingForPushToken)
+        registerWithFreshToken()
+    }
+
+    // switching gateways
+
+    /** Checks that [address] answers as a Honk gateway. Blocking. */
+    fun testGateway(address: String): Gateway.Checked = Gateway.check(address)
+
+    /**
+     * Moves the device to another gateway (null: the build's default). The new
+     * gateway knows nothing of this device, so its local data goes and it
+     * registers again; the bots on the old gateway stay there. Blocking.
+     */
+    fun switchGateway(address: String?) {
+        val target = if (address == null) defaultGatewayUrl else testGateway(address).url
+        if (target == gatewayUrl) return
+        val pushToken = credentials.load()?.pushToken
+        prefs.edit().apply {
+            if (target == defaultGatewayUrl) remove(KEY_GATEWAY) else putString(KEY_GATEWAY, target)
+        }.commit()
+        credentials.clear()
+        botTokens.removeAll()
+        notifier.cancel(store.reset())
+        notifier.syncChannels(emptyList())
+        changed()
+        setRegistration(Registration.WaitingForPushToken)
+        if (pushToken != null) register(pushToken) else retryRegistration()
     }
 
     // sync
@@ -99,6 +207,7 @@ class HonkService private constructor(context: Context) {
             if (e.isUnauthorized) {
                 // The gateway forgot this device (it was deleted): register again.
                 credentials.clear()
+                setRegistration(Registration.WaitingForPushToken)
                 registerWithCurrentToken()
             }
         } catch (e: Exception) {
@@ -180,6 +289,8 @@ class HonkService private constructor(context: Context) {
 
     companion object {
         private const val TAG = "honk"
+        private const val KEY_GATEWAY = "gatewayURL"
+        private const val KEY_LAST_PUSH_TOKEN = "lastPushToken"
         @Volatile private var instance: HonkService? = null
 
         fun get(context: Context): HonkService =

@@ -12,6 +12,7 @@ import com.longbridge.nsh.NshHostReply
 import com.longbridge.nsh.NshView
 import dev.evumi.honk.core.Bot
 import dev.evumi.honk.core.ChatSummary
+import dev.evumi.honk.core.Gateway
 import dev.evumi.honk.core.StoredMessage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -27,7 +28,8 @@ import org.json.JSONObject
  * Calls: honk.status, honk.chats, honk.messages, honk.markRead, honk.focus,
  * honk.refresh, honk.bot.create, honk.bot.update, honk.bot.token,
  * honk.bot.resetToken, honk.bot.delete, honk.bot.setMuted, honk.bot.setPinned,
- * honk.message.delete, honk.chat.clear, honk.notifications.open.
+ * honk.message.delete, honk.chat.clear, honk.notifications.open,
+ * honk.gateway.get, honk.gateway.test, honk.gateway.set, honk.register.retry.
  * Events: honk.changed (the store changed), honk.open { botId } (open a chat).
  *
  * nsh calls the handlers on the UI thread with the JSON arguments as Map,
@@ -44,12 +46,10 @@ class NshBridge(
     fun install() {
         removeListener = service.addChangeListener { nsh.send("honk.changed", null) }
 
-        handle("honk.status") {
-            mapOf(
-                "registered" to service.isRegistered,
-                "gatewayURL" to service.gatewayUrl,
-                "notifications" to notificationStatus(),
-            )
+        handle("honk.status") { status() }
+        handle("honk.register.retry") {
+            service.retryRegistration()
+            status()
         }
         handle("honk.chats") { service.store.chats().map(::chat) }
         handle("honk.messages") { a ->
@@ -66,6 +66,29 @@ class NshBridge(
         handle("honk.refresh") {
             service.refresh()
             true
+        }
+
+        // gateway
+
+        handle("honk.gateway.get") {
+            mapOf("url" to service.gatewayUrl, "defaultURL" to service.defaultGatewayUrl, "custom" to service.isCustomGateway)
+        }
+        handle("honk.gateway.test") { a ->
+            try {
+                val checked = service.testGateway(a.requireString("url"))
+                mapOf("ok" to true, "url" to checked.url, "version" to checked.version)
+            } catch (e: Exception) {
+                mapOf("ok" to false, "error" to Gateway.describe(e))
+            }
+        }
+        handle("honk.gateway.set") { a ->
+            // `url` null or missing: back to the default gateway. Failures reject the call.
+            try {
+                service.switchGateway(a.string("url"))
+            } catch (e: Exception) {
+                throw IllegalStateException(Gateway.describe(e), e)
+            }
+            mapOf("url" to service.gatewayUrl, "registered" to service.isRegistered)
         }
 
         // bots
@@ -143,6 +166,16 @@ class NshBridge(
     /** The notification permission may have changed (back from settings, the dialog answered). */
     fun statusChanged() {
         nsh.send("honk.changed", null)
+    }
+
+    /** honk.status: Android always has a real push channel (FCM), so pushMode is "apns" as on a device. */
+    private fun status(): Map<String, Any?> = buildMap {
+        put("registered", service.isRegistered)
+        put("registration", service.registration.name)
+        (service.registration as? HonkService.Registration.Failed)?.let { put("registrationError", it.reason) }
+        put("pushMode", "apns")
+        put("gatewayURL", service.gatewayUrl)
+        put("notifications", notificationStatus())
     }
 
     private fun notificationStatus(): String {

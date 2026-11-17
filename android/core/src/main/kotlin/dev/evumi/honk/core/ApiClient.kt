@@ -17,8 +17,8 @@ import java.net.URL
 /** An error the gateway returned (`{"ok":false,…}`), or a response that could not be read. */
 sealed class ApiException(message: String, cause: Throwable? = null) : IOException(message, cause) {
     class Gateway(val code: Int, val description: String) : ApiException("$code $description")
-    class NotRegistered : ApiException("This device is not registered with the gateway")
-    class BadResponse(cause: Throwable? = null) : ApiException("The gateway sent a response that could not be read", cause)
+    class NotRegistered : ApiException("这台设备还没有注册到网关。到「设置 → 设备注册」查看原因并重试。")
+    class BadResponse(cause: Throwable? = null) : ApiException("网关的响应无法解析，请确认地址是 Honk 网关", cause)
 
     /** The device secret is unknown to the gateway (the device was deleted). */
     val isUnauthorized: Boolean get() = this is Gateway && code == 401
@@ -60,6 +60,14 @@ class ApiClient(
     private val transport: Transport = HttpTransport(),
 ) {
     private val base = baseUrl.trimEnd('/') + "/"
+
+    // gateway
+
+    /** What the gateway says it is; a Honk gateway answers `name` "honk". */
+    @Serializable
+    data class GatewayInfo(val name: String = "", val version: String = "", val api: Int = 0)
+
+    fun info(): GatewayInfo = request("GET", "v1/info", GatewayInfo.serializer(), auth = false)
 
     // devices
 

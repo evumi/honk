@@ -52,5 +52,15 @@ class PrefsBotTokenStore(private val prefs: SharedPreferences) : BotTokenStore {
         prefs.edit().remove(key(botId)).apply()
     }
 
-    private fun key(botId: Long) = "bot-token.$botId"
+    override fun removeAll() {
+        val edit = prefs.edit()
+        prefs.all.keys.filter { it.startsWith(PREFIX) }.forEach(edit::remove)
+        edit.apply()
+    }
+
+    private fun key(botId: Long) = "$PREFIX$botId"
+
+    private companion object {
+        const val PREFIX = "bot-token."
+    }
 }

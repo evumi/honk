@@ -219,6 +219,17 @@ class LocalStore(private val sql: Sql) {
         }
     }
 
+    /** Forgets every bot, message and the sync cursor: the device moved to another gateway. Returns the notification ids to remove. */
+    fun reset(): List<String> = locked {
+        transaction {
+            val ids = sql.query("SELECT notif_id FROM messages WHERE notif_id IS NOT NULL") { it.text(0) }.filterNotNull()
+            sql.exec("DELETE FROM messages")
+            sql.exec("DELETE FROM bots")
+            sql.exec("DELETE FROM meta")
+            ids
+        }
+    }
+
     // meta
 
     var syncCursor: Long

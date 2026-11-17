@@ -12,6 +12,9 @@ interface BotTokenStore {
     fun token(botId: Long): String?
     fun save(botId: Long, token: String)
     fun remove(botId: Long)
+
+    /** Removes every bot's token (the device moved to another gateway). */
+    fun removeAll()
 }
 
 /** Registers the device with the gateway or sends it a new push token. */
