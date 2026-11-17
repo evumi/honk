@@ -20,6 +20,7 @@ function host(overrides: Record<string, unknown> = {}) {
       "honk.bot.create": (d: unknown) => ({ bot: { ...bot, id: 2, name: (d as { name: string }).name }, token: "2:secret-token" }),
       "honk.bot.token": "1:abcdefghijklmnop",
       "honk.bot.delete": true,
+      "honk.message.delete": true,
       "honk.gateway.get": { url: "https://gw.test/", defaultURL: "https://gw.test/", custom: false },
       "honk.gateway.test": (d: unknown) => {
         const url = (d as { url: string }).url;
@@ -68,6 +69,10 @@ test("creates a bot and shows its token", async () => {
   await app.press("id:create-bot");
   await app.waitFor("text:2:secret-token");
   expect(app.texts()).toContain("CI 构建 已创建");
+  // Confetti over the page, gone by itself after a few seconds.
+  expect(app.count("id:confetti")).toBe(1);
+  await app.wait(4000);
+  expect(app.count("id:confetti")).toBe(0);
   const create = app.host.calls().find((c) => c.name === "honk.bot.create");
   expect(create?.data).toMatchObject({ name: "CI 构建", avatar: "preset:ship:#1c1c1e", defaultLevel: "active" });
 });
@@ -77,6 +82,15 @@ test("bot settings masks the stored token", async () => {
   await app.press("id:chat-1");
   await app.press("id:open-settings");
   await app.waitFor("text:1:abcd••••••••nop");
+});
+
+test("a message turns to dust before it is deleted", async () => {
+  const app = await open("./App.tsx", { locale: "zh-Hans-CN", host: host() });
+  await app.press("id:chat-1");
+  app.onDialog(() => "删除");
+  await app.longPress("id:message-7");
+  await app.waitUntil(() => app.host.calls().some((c) => c.name === "honk.message.delete"));
+  expect(app.host.calls().find((c) => c.name === "honk.message.delete")?.data).toEqual({ messageId: 7 });
 });
 
 test("search filters the chat list", async () => {
