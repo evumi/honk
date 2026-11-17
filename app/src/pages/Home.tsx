@@ -3,6 +3,7 @@ import { Canvas, List, Path2D, safeArea, signal, Text, View } from "nsh";
 import { AlertDialog, Input, NavPage } from "nsh/base";
 import { Avatar, Badge, Glyph, Row, Section } from "../components";
 import { listTime } from "../format";
+import { createDissolve, Dissolve } from "../fx/Dissolve";
 import { api, type Chat } from "../host";
 import { chats, loadStatus, nav, reload, status } from "../store";
 import { palette, type Palette } from "../theme";
@@ -174,6 +175,8 @@ function Empty(props: { p: Palette }) {
 
 function ChatRow(props: { chat: Chat; p: Palette; editing: boolean }) {
   const c = () => props.chat;
+  const dissolving = signal(false);
+  const dust = createDissolve();
   const preview = () => {
     const m = c().last;
     if (!m) return tr("还没有消息");
@@ -202,10 +205,18 @@ function ChatRow(props: { chat: Chat; p: Palette; editing: boolean }) {
       actions: [{ id: "cancel", label: tr("取消"), role: "cancel" }, { id: "delete", label: tr("删除"), role: "destructive" }],
     });
     if (action !== "delete") return;
-    await api.deleteBot(c().bot.id);
-    await reload();
+    dissolving.set(true);
+    try {
+      // The request runs while the dust plays; a failure brings the row back.
+      await Promise.all([dust.play(), api.deleteBot(c().bot.id)]);
+      await reload();
+    } finally {
+      dissolving.set(false);
+      dust.reset();
+    }
   };
   return (
+    <Dissolve active={dissolving()} progress={dust.progress}>
     <View
       testID={`chat-${c().bot.id}`}
       role="button"
@@ -249,6 +260,7 @@ function ChatRow(props: { chat: Chat; p: Palette; editing: boolean }) {
         </View>
       </View>
     </View>
+    </Dissolve>
   );
 }
 

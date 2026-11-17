@@ -7,6 +7,7 @@ import { chatOf, nav, reload, version } from "../store";
 import { palette, type Palette } from "../theme";
 import { tr } from "../i18n";
 import { Widget } from "../widget/Widget";
+import { createDissolve, Dissolve } from "../fx/Dissolve";
 
 export function ChatPage(props: { botId: number }) {
   const p = palette;
@@ -149,6 +150,8 @@ function DayChip(props: { ms: number }) {
 
 function Bubble(props: { message: Message; p: Palette }) {
   const m = () => props.message;
+  const dissolving = signal(false);
+  const dust = createDissolve();
   const actions = async () => {
     const list = [{ id: "copy", label: tr("复制正文") }];
     if (m().copy) list.push({ id: "copyExtra", label: tr("复制内容") });
@@ -161,19 +164,29 @@ function Bubble(props: { message: Message; p: Palette }) {
     if (action === "copyExtra") await Clipboard.writeText(m().copy);
     if (action === "open") await openUrl(m().url).catch(() => {});
     if (action === "delete") {
-      await api.deleteMessage(m().id);
-      await reload();
+      // Turn to dust first, then delete; the row is recycled afterwards, so reset it.
+      dissolving.set(true);
+      try {
+        // The request runs while the dust plays; a failure brings the row back.
+        await Promise.all([dust.play(), api.deleteMessage(m().id)]);
+        await reload();
+      } finally {
+        dissolving.set(false);
+        dust.reset();
+      }
     }
   };
   return (
+    <Dissolve
+      active={dissolving()}
+      progress={dust.progress}
+      style={{ alignSelf: m().html ? "stretch" : "flex-start", maxWidth: m().html ? undefined : "85%" }}
+    >
     <View
       testID={`message-${m().id}`}
       onLongPress={() => void actions()}
       onPress={m().url && !m().html ? () => void openUrl(m().url).catch(() => {}) : undefined}
-      style={{
-        alignSelf: m().html ? "stretch" : "flex-start", maxWidth: m().html ? undefined : "85%",
-        backgroundColor: props.p.bubble, borderRadius: 18, overflow: "hidden",
-      }}
+      style={{ backgroundColor: props.p.bubble, borderRadius: 18, overflow: "hidden" }}
     >
       <If when={m().html}>
         <View style={{ paddingTop: 12, paddingBottom: 12, paddingLeft: 16, paddingRight: 16, borderBottomWidth: 0.5, borderBottomColor: props.p.separator }}>
@@ -188,5 +201,6 @@ function Bubble(props: { message: Message; p: Palette }) {
         <Text style={{ alignSelf: "flex-end", fontSize: 12, color: props.p.hint }}>{clock(m().date)}</Text>
       </View>
     </View>
+    </Dissolve>
   );
 }

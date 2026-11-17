@@ -2,6 +2,7 @@ import { Clipboard, signal, Text, View, safeArea } from "nsh";
 import { NavPage } from "nsh/base";
 import { Avatar } from "../components";
 import { curlExample } from "../format";
+import { Confetti } from "../fx/Confetti";
 import { nav, status } from "../store";
 import { palette } from "../theme";
 import { tr } from "../i18n";
@@ -67,6 +68,7 @@ export function BotCreated(props: { botId: number; token: string; botName: strin
             <Text style={{ fontSize: 17, fontWeight: "600", color: "#ffffff" }}>{tr("进入会话")}</Text>
           </View>
         </View>
+        <Confetti />
       </View>
     </NavPage>
   );
