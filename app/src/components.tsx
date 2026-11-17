@@ -48,7 +48,10 @@ export function Icon(props: { name: string; color: string; size: number; weight?
 }
 
 /** The shadow under floating glass controls. */
-export const FLOAT_SHADOW = "0 2px 12px rgba(0,0,0,0.10)";
+export const FLOAT_SHADOW = "0 4px 16px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06)";
+
+/** The size of the floating bar's controls (back button, title pill, avatar). */
+export const BAR_H = 46;
 
 /**
  * A floating glass control's surface: Liquid Glass on iOS 26 and later, a
@@ -56,8 +59,9 @@ export const FLOAT_SHADOW = "0 2px 12px rgba(0,0,0,0.10)";
  */
 export function glass(p: Palette) {
   return {
-    backgroundColor: p.glass, backdropFilter: "blur(20px)", glassEffect: "regular" as const,
-    boxShadow: FLOAT_SHADOW, borderWidth: 0.5, borderColor: p.hairline,
+    backgroundColor: p.glass, backdropFilter: "blur(24px) saturate(1.6)", glassEffect: "regular" as const,
+    // A bright rim on top, as light catches the edge of glass.
+    boxShadow: `inset 0 1px 0 ${p.glassRim}, ${FLOAT_SHADOW}`, borderWidth: 0.5, borderColor: p.hairline,
   };
 }
 
@@ -71,8 +75,8 @@ export function EdgeBlur(props: { edge: "top" | "bottom"; height: number }) {
       style={{
         position: "absolute", left: 0, right: 0, height: props.height, pointerEvents: "none",
         ...(props.edge === "top" ? { top: 0 } : { bottom: 0 }),
-        backdropFilter: "blur(14px)",
-        maskImage: `linear-gradient(to ${props.edge === "top" ? "bottom" : "top"}, #000 45%, transparent)`,
+        backdropFilter: "blur(18px)",
+        maskImage: `linear-gradient(to ${props.edge === "top" ? "bottom" : "top"}, #000 55%, transparent)`,
       }}
     />
   );
@@ -89,37 +93,38 @@ export function TopBar(props: {
   p: Palette; title?: string; subtitle?: string; onBack?: () => void; right?: JSX.Element; action?: BarAction; testID?: string;
 }) {
   return (
-    <View style={{ position: "absolute", left: 0, right: 0, top: 0, height: safeArea().top + 64, pointerEvents: "box-none" }}>
-      <EdgeBlur edge="top" height={safeArea().top + 64} />
+    <View style={{ position: "absolute", left: 0, right: 0, top: 0, height: safeArea().top + BAR_H + 26, pointerEvents: "box-none" }}>
+      <EdgeBlur edge="top" height={safeArea().top + BAR_H + 26} />
       <View
         testID={props.testID}
-        style={{ position: "absolute", left: 12, right: 12, top: safeArea().top + 4, flexDirection: "row", alignItems: "center", gap: 10 }}
+        style={{ position: "absolute", left: 12, right: 12, top: safeArea().top + 2, flexDirection: "row", alignItems: "center", gap: 10 }}
       >
-        <If when={props.onBack} else={<View style={{ width: 44 }} />}>
+        <If when={props.onBack} else={<View style={{ width: BAR_H }} />}>
           <View
             testID="back"
             role="button"
             accessibilityLabel={tr("返回")}
             onPress={() => props.onBack?.()}
             activeStyle={{ opacity: 0.7 }}
-            style={{ width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center", ...glass(props.p) }}
+            style={{ width: BAR_H, height: BAR_H, borderRadius: BAR_H / 2, alignItems: "center", justifyContent: "center", ...glass(props.p) }}
           >
-            <Icon name="back" color={props.p.text} size={24} weight={2.2} />
+            <Icon name="back" color={props.p.text} size={28} weight={2} />
           </View>
         </If>
         <If when={props.title} else={<View style={{ flex: 1 }} />}>
-          <View style={{ flex: 1, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center", paddingLeft: 12, paddingRight: 12, ...glass(props.p) }}>
-            <Text style={{ fontSize: 16, lineHeight: 20, fontWeight: "600", color: props.p.text, numberOfLines: 1 }}>{props.title}</Text>
+          <View style={{ flex: 1, height: BAR_H, borderRadius: BAR_H / 2, alignItems: "center", justifyContent: "center", paddingLeft: 14, paddingRight: 14, ...glass(props.p) }}>
+            <Text style={{ fontSize: 17, lineHeight: 21, fontWeight: "600", color: props.p.text, numberOfLines: 1 }}>{props.title}</Text>
             <If when={props.subtitle}>
-              <Text style={{ fontSize: 12, lineHeight: 16, color: props.p.hint, numberOfLines: 1 }}>{props.subtitle}</Text>
+              <Text style={{ fontSize: 13, lineHeight: 16, color: props.p.hint, numberOfLines: 1 }}>{props.subtitle}</Text>
             </If>
           </View>
         </If>
         <If
           when={props.action}
           else={
-            <If when={props.right} else={<View style={{ width: 44 }} />}>
-              <View style={{ width: 44, height: 44, borderRadius: 22, boxShadow: FLOAT_SHADOW }}>{props.right}</View>
+            <If when={props.right} else={<View style={{ width: BAR_H }} />}>
+              {/* A glass ring around the avatar, as the other controls. */}
+              <View style={{ width: BAR_H, height: BAR_H, borderRadius: BAR_H / 2, padding: 3, ...glass(props.p) }}>{props.right}</View>
             </If>
           }
         >
@@ -129,7 +134,7 @@ export function TopBar(props: {
               role="button"
               onPress={() => a().onPress()}
               activeStyle={{ opacity: 0.7 }}
-              style={{ height: 44, minWidth: 44, paddingLeft: 18, paddingRight: 18, borderRadius: 22, alignItems: "center", justifyContent: "center", ...glass(props.p) }}
+              style={{ height: BAR_H, minWidth: BAR_H, paddingLeft: 18, paddingRight: 18, borderRadius: BAR_H / 2, alignItems: "center", justifyContent: "center", ...glass(props.p) }}
             >
               <Text style={{ fontSize: 17, color: props.p.text }}>{a().label}</Text>
             </View>

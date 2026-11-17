@@ -82,7 +82,7 @@ export function ChatPage(props: { botId: number }) {
           onBack={() => nav.pop()}
           right={
             <View testID="open-settings" role="button" accessibilityLabel={tr("Bot 设置")} onPress={() => nav.push({ name: "botSettings", botId: props.botId })}>
-              <Avatar avatar={chat()?.bot.avatar ?? ""} size={44} iconScale={0.6} />
+              <Avatar avatar={chat()?.bot.avatar ?? ""} size={40} iconScale={0.62} />
             </View>
           }
         />
