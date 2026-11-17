@@ -93,7 +93,7 @@ const EN: Record<string, string> = {
   "复制示例": "Copy example",
   "进入会话": "Open chat",
   "部署成功": "Deployed",
-  "sub2api / sluice 已上线": "sub2api / sluice is live",
+  "evumi / sluice 已上线": "evumi / sluice is live",
   // bot settings
   "重置 token？": "Reset the token?",
   "旧 token 立即失效，用到它的发送方需要换成新的。": "The old token stops working at once; senders using it need the new one.",

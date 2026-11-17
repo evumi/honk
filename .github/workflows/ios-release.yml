@@ -25,7 +25,6 @@ concurrency:
 
 env:
   ASC_BYPASS_KEYCHAIN: "1"
-  ASC_NO_UPDATE: "1"
   ASC_TELEMETRY_DISABLED: "1"
   ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
   ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
@@ -56,13 +55,13 @@ jobs:
 
       - uses: actions/checkout@v4
 
+      # Pinned: the flags below are checked against this version's help.
       - uses: rudrankriyam/setup-asc@v1
+        with:
+          version: 6.6.1
 
       - name: Install tools
         run: brew install xcodegen longbridge/tap/nsh
-
-      - name: Check App Store Connect access
-        run: asc auth status --validate
 
       - name: Version and build number
         id: version
@@ -76,6 +75,8 @@ jobs:
           else
             version="$(sed -n 's/^MARKETING_VERSION *= *//p' ios/Config/Base.xcconfig)"
           fi
+          # The first call to App Store Connect: it also checks the API key (asc
+          # auth status only looks at stored credentials, not the ASC_* variables).
           build="$(asc builds next-build-number --app "$ASC_APP_ID" --version "$version" --platform IOS --initial-build-number 1 --output json | jq -r '.nextBuildNumber')"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "build=$build" >> "$GITHUB_OUTPUT"
@@ -138,7 +139,8 @@ jobs:
       - name: Archive
         run: |
           asc xcode archive --project ios/Honk.xcodeproj --scheme Honk --configuration Release \
-            --archive-path .asc/artifacts/Honk.xcarchive --destination generic/platform=iOS --clean --overwrite \
+            --archive-path .asc/artifacts/Honk.xcarchive --clean --overwrite \
+            --xcodebuild-flag=-destination --xcodebuild-flag=generic/platform=iOS \
             --xcodebuild-flag=MARKETING_VERSION=${{ steps.version.outputs.version }} \
             --xcodebuild-flag=CURRENT_PROJECT_VERSION=${{ steps.version.outputs.build }} \
             --output json

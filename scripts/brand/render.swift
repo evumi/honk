@@ -75,9 +75,13 @@ struct Mark {
 
 // MARK: drawing helpers (top-left origin)
 
-func canvas(_ w: Int, _ h: Int, _ draw: (CGContext) -> Void) -> Data {
+/// Draws a PNG. `opaque` ones have no alpha channel (RGB): App Store Connect
+/// rejects an app icon or screenshot with one, even when every pixel is opaque.
+/// Draw a full background into those; what is left undrawn comes out black.
+func canvas(_ w: Int, _ h: Int, opaque: Bool = false, _ draw: (CGContext) -> Void) -> Data {
+    let alpha: CGImageAlphaInfo = opaque ? .noneSkipLast : .premultipliedLast
     let cx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
-                       space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+                       space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: alpha.rawValue)!
     cx.translateBy(x: 0, y: CGFloat(h))
     cx.scaleBy(x: 1, y: -1)
     let ns = NSGraphicsContext(cgContext: cx, flipped: true)
@@ -159,7 +163,7 @@ for size in [1024, 512, 256, 128] {
 }
 
 // iOS: one full-bleed 1024 icon; the system rounds it.
-let appIcon = canvas(1024, 1024) { cx in Mark.draw(cx, in: CGRect(x: 0, y: 0, width: 1024, height: 1024), background: ink, cornerRadius: nil) }
+let appIcon = canvas(1024, 1024, opaque: true) { cx in Mark.draw(cx, in: CGRect(x: 0, y: 0, width: 1024, height: 1024), background: ink, cornerRadius: nil) }
 write(appIcon, "ios/App/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png")
 write("""
 {
@@ -293,8 +297,8 @@ let shots: [Shot] = [
          subtitle: ["en": "Create a bot, copy its token, and call it from CI, cron or anywhere else.", "zh-Hans": "建一个 Bot，复制 token，\n接进 CI、定时任务和任何脚本。"],
          screen: "created.png", navBar: (106, 0xf2f2f7, [:]),
          terminal: [
-            "en": [("$ curl honk.example.com/bot$TOKEN/sendMessage \\", 0xe5e5ea), ("    -d title=\"Deployed\" \\", 0xe5e5ea), ("    -d body=\"sub2api / sluice is live\"", 0xe5e5ea), ("{\"ok\":true,\"result\":{\"message_id\":42}}", 0x5ad18b)],
-            "zh-Hans": [("$ curl honk.example.com/bot$TOKEN/sendMessage \\", 0xe5e5ea), ("    -d title=\"部署成功\" \\", 0xe5e5ea), ("    -d body=\"sub2api / sluice 已上线\"", 0xe5e5ea), ("{\"ok\":true,\"result\":{\"message_id\":42}}", 0x5ad18b)],
+            "en": [("$ curl honk.example.com/bot$TOKEN/sendMessage \\", 0xe5e5ea), ("    -d title=\"Deployed\" \\", 0xe5e5ea), ("    -d body=\"evumi / sluice is live\"", 0xe5e5ea), ("{\"ok\":true,\"result\":{\"message_id\":42}}", 0x5ad18b)],
+            "zh-Hans": [("$ curl honk.example.com/bot$TOKEN/sendMessage \\", 0xe5e5ea), ("    -d title=\"部署成功\" \\", 0xe5e5ea), ("    -d body=\"evumi / sluice 已上线\"", 0xe5e5ea), ("{\"ok\":true,\"result\":{\"message_id\":42}}", 0x5ad18b)],
          ]),
     Shot(file: "05-dark",
          kicker: ["en": "DARK MODE", "zh-Hans": "深色模式"],
@@ -358,7 +362,7 @@ func drawLockScreen(_ cx: CGContext, _ r: CGRect, lang: String) {
     let notes = [
         Note(app: en ? "Server Alerts" : "服务器告警", symbol: "exclamationmark.triangle", color: 0xc2410c, title: "hk-edge-02 CPU 92%",
              body: en ? "Above the 85% threshold for 5 minutes." : "持续 5 分钟超过阈值 85%，负载 7.8。", time: en ? "now" : "现在", flag: en ? "TIME SENSITIVE" : "时效性通知"),
-        Note(app: en ? "Berth Deploys" : "Berth 部署", symbol: "ferry", color: 0x1c1c1e, title: en ? "Deployed: sub2api / sluice" : "部署成功：sub2api / sluice",
+        Note(app: en ? "Berth Deploys" : "Berth 部署", symbol: "ferry", color: 0x1c1c1e, title: en ? "Deployed: evumi / sluice" : "部署成功：evumi / sluice",
              body: en ? "Live in production." : "production 环境的部署已上线。", time: en ? "2m ago" : "2 分钟前", flag: nil),
         Note(app: en ? "CI Builds" : "CI 构建", symbol: "checkmark.circle", color: 0x2f6f3e, title: en ? "main #482 passed" : "main #482 通过",
              body: en ? "3m 12s · all 128 tests passed" : "3 分 12 秒 · 128 个测试全部通过", time: en ? "8m ago" : "8 分钟前", flag: nil),
@@ -410,7 +414,7 @@ func drawTerminal(_ cx: CGContext, lines: [(String, UInt32)], frame: CGRect) {
 
 for lang in ["en", "zh-Hans"] {
     for shot in shots {
-        let png = canvas(Int(W), Int(H)) { cx in
+        let png = canvas(Int(W), Int(H), opaque: true) { cx in
             cx.setFillColor(base)
             cx.fill(CGRect(x: 0, y: 0, width: W, height: H))
             glow(cx, center: CGPoint(x: W * 0.92, y: 260), radius: 1100, color: shot.glowColor, alpha: 0.30)
