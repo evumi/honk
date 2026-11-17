@@ -128,7 +128,7 @@ curl https://honk.example.com/bot$TOKEN/sendMessage \
 | --- | --- |
 | `POST /v1/devices` | `{"platform":"ios"\|"android","push_token":"…"}`，返回 `device` 和 `device_secret` |
 | `GET` / `PUT` / `DELETE /v1/devices/me` | 读取设备信息；更新 push token；删除设备及它的所有 bot 和消息 |
-| `GET` / `POST /v1/bots` | 列出 bot；创建 bot：`{"name","avatar","default_level"}`，返回 `bot` 和 `token` |
+| `GET` / `POST /v1/bots` | 列出 bot；创建 bot：`{"name","avatar","default_level"}`，返回 `bot` 和 `token`。`avatar` 是 `preset:<icon>:<#rrggbb>`、https URL，或 `local:<文件名>`：用户在 App 里从相册选的图片，只存在手机上（网关只存这个名字） |
 | `GET` / `PATCH` / `DELETE /v1/bots/:id` | 读取、修改、删除一个 bot（`:id` 是 bot 的短 id） |
 | `POST /v1/bots/:id/token` | 重置 token，旧 token 立即失效 |
 | `GET /v1/messages/:id` | 拉一条消息；条目可能是 `message`、`edit` 或 `delete` |

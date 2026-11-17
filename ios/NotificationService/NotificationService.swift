@@ -71,8 +71,13 @@ final class NotificationService: UNNotificationServiceExtension {
         // The avatar: the message's own icon, else the bot's.
         let avatar = Avatar(message?.icon.isEmpty == false ? message!.icon : bot?.avatar ?? "")
         var imageData: Data?
-        if case let .image(url) = avatar {
+        switch avatar {
+        case let .image(url):
             imageData = await ImageCache(appGroup: config.appGroup).data(for: url, timeout: 5)
+        case .local:
+            imageData = LocalAvatars(appGroup: config.appGroup).data(for: avatar.stringValue)
+        case .preset:
+            break
         }
         let png = CommunicationNotification.render(avatar, imageData: imageData)
         let botName = bot?.name ?? (content.title.isEmpty ? "Honk" : content.title)

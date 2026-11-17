@@ -205,6 +205,7 @@ class HonkService private constructor(context: Context) {
             notifier.syncChannels(store.chats().map { it.bot })
             val out = SyncEngine(api, store).run()
             notifier.cancel(out.staleNotificationIds)
+            Notifier.localAvatars(context).prune(store.chats().map { it.bot.avatar }.toSet())
         } catch (e: ApiException) {
             Log.w(TAG, "refresh failed", e)
             if (e.isUnauthorized) {

@@ -19,7 +19,7 @@ const card = `<div style="padding:4px 0">
 </div>`;
 
 const bots: Bot[] = [
-  { id: "Bx7kQ2mT", name: L("Berth 部署", "Berth Deploys"), avatar: "preset:ship:#1c1c1e", defaultLevel: "active", createdAt: now - 864e5 * 5 },
+  { id: "Bx7kQ2mT", name: L("Berth 部署", "Berth Deploys"), avatar: "preset:box:#1c1c1e", defaultLevel: "active", createdAt: now - 864e5 * 5 },
   { id: "aR4nW9pZ", name: L("服务器告警", "Server Alerts"), avatar: "preset:alert:#c2410c", defaultLevel: "timeSensitive", createdAt: now - 864e5 * 4 },
   { id: "Kc3vH8sL", name: L("CI 构建", "CI Builds"), avatar: "preset:check:#2f6f3e", defaultLevel: "active", createdAt: now - 864e5 * 3 },
 ];
@@ -54,6 +54,7 @@ function normalize(u: string): string | null {
   return t.endsWith("/") ? t : t + "/";
 }
 
+const localAvatars = new Map<string, string>();
 const flags = new Map<string, { muted: boolean; pinned: boolean }>();
 const tokens = new Map<string, string>([["Bx7kQ2mT", "Bx7kQ2mT:bQx9fK2mT4vLr8Wz1pYs6NcHa3Ue0JdG"]]);
 
@@ -117,6 +118,13 @@ export async function demo<T>(name: string, args: unknown): Promise<T> {
       case "honk.markRead":
         messages.forEach((m) => m.botId === a.botId && (m.read = true));
         return true;
+      case "honk.avatar.save": {
+        const avatar = `local:demo${localAvatars.size + 1}.${a.type === "image/png" ? "png" : "jpg"}`;
+        localAvatars.set(avatar, `data:${a.type};base64,${a.data}`);
+        return avatar;
+      }
+      case "honk.avatar.image":
+        return localAvatars.get(a.avatar) ?? null;
       case "honk.bot.create": {
         const bot: Bot = { id: demoBotId(), name: a.name, avatar: a.avatar, defaultLevel: a.defaultLevel, createdAt: Date.now() };
         bots.push(bot);

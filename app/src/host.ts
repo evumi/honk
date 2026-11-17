@@ -108,4 +108,12 @@ export const api = {
   testGateway: (url: string) => call<GatewayTest>("honk.gateway.test", { url }),
   /** `null`: back to the build's default gateway. Clears this device's bots and messages. */
   setGateway: (url: string | null) => call<{ url: string; registered: boolean }>("honk.gateway.set", { url }),
+  /**
+   * Keeps a picked image (base64 JPEG or PNG) on this phone and resolves with
+   * the avatar that names it, `local:<file>`. The gateway stores only that
+   * name; the image itself never leaves the phone.
+   */
+  saveAvatar: (data: string, type: string) => call<string>("honk.avatar.save", { data, type }),
+  /** A `local:` avatar's image as a `data:` URL; `null` when the file is not on this phone. */
+  avatarImage: (avatar: string) => call<string | null>("honk.avatar.image", { avatar }),
 };
