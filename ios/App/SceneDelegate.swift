@@ -17,5 +17,10 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
     func sceneDidBecomeActive(_ scene: UIScene) {
         HonkService.shared.updateBadge()
+        HonkService.shared.startPolling()
+    }
+
+    func sceneWillResignActive(_ scene: UIScene) {
+        HonkService.shared.stopPolling()
     }
 }

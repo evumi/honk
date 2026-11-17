@@ -9,7 +9,8 @@ import UIKit
 /// Calls: honk.status, honk.chats, honk.messages, honk.markRead, honk.focus,
 /// honk.refresh, honk.bot.create, honk.bot.update, honk.bot.token,
 /// honk.bot.resetToken, honk.bot.delete, honk.bot.setMuted, honk.bot.setPinned,
-/// honk.message.delete, honk.chat.clear, honk.notifications.open.
+/// honk.message.delete, honk.chat.clear, honk.notifications.open,
+/// honk.gateway.get, honk.gateway.test, honk.gateway.set, honk.register.retry.
 /// Events: honk.changed (the store changed), honk.open { botId } (open a chat).
 @MainActor
 final class NshBridge {
@@ -24,13 +25,10 @@ final class NshBridge {
     func install() {
         service.onChange = { [weak self] in self?.app.send("honk.changed") }
 
-        handle("honk.status") { [service] _ in
-            let settings = await UNUserNotificationCenter.current().notificationSettings()
-            return [
-                "registered": service.isRegistered,
-                "gatewayURL": service.config.gatewayURL.absoluteString,
-                "notifications": Self.authorization(settings.authorizationStatus),
-            ]
+        handle("honk.status") { [service] _ in await Self.status(service) }
+        handle("honk.register.retry") { [service] _ in
+            await service.retryRegistration()
+            return await Self.status(service)
         }
         handle("honk.chats") { [service] _ in
             try service.store.chats().map(Self.chat)
@@ -52,6 +50,27 @@ final class NshBridge {
         handle("honk.refresh") { [service] _ in
             await service.refresh()
             return true
+        }
+
+        // MARK: gateway
+
+        handle("honk.gateway.get") { [service] _ in
+            ["url": service.config.gatewayURL.absoluteString,
+             "defaultURL": service.config.defaultGatewayURL.absoluteString,
+             "custom": service.config.isCustomGateway]
+        }
+        handle("honk.gateway.test") { [service] args in
+            do {
+                let (url, info) = try await service.testGateway(try Args(args).require("url"))
+                return ["ok": true, "url": url.absoluteString, "version": info.version]
+            } catch {
+                return ["ok": false, "error": error.localizedDescription]
+            }
+        }
+        handle("honk.gateway.set") { [service] args in
+            // `url` null or missing: back to the default gateway.
+            try await service.switchGateway(to: Args(args).string("url"))
+            return ["url": service.config.gatewayURL.absoluteString, "registered": service.isRegistered]
         }
 
         // MARK: bots
@@ -150,6 +169,19 @@ final class NshBridge {
     static func chat(_ c: ChatSummary) -> [String: Any] {
         ["bot": bot(c.bot), "muted": c.muted, "pinned": c.pinned, "unread": c.unread,
          "last": c.last.map(message) ?? NSNull()]
+    }
+
+    static func status(_ service: HonkService) async -> [String: Any] {
+        let settings = await UNUserNotificationCenter.current().notificationSettings()
+        var out: [String: Any] = [
+            "registered": service.isRegistered,
+            "registration": service.registration.name,
+            "pushMode": service.pushMode.rawValue,
+            "gatewayURL": service.config.gatewayURL.absoluteString,
+            "notifications": Self.authorization(settings.authorizationStatus),
+        ]
+        if case let .failed(reason) = service.registration { out["registrationError"] = reason }
+        return out
     }
 
     static func authorization(_ s: UNAuthorizationStatus) -> String {

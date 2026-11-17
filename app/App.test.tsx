@@ -19,6 +19,13 @@ function host(overrides: Record<string, unknown> = {}) {
       "honk.refresh": true,
       "honk.bot.create": (d: unknown) => ({ bot: { ...bot, id: 2, name: (d as { name: string }).name }, token: "2:secret-token" }),
       "honk.bot.token": "1:abcdefghijklmnop",
+      "honk.bot.delete": true,
+      "honk.gateway.get": { url: "https://gw.test/", defaultURL: "https://gw.test/", custom: false },
+      "honk.gateway.test": (d: unknown) => {
+        const url = (d as { url: string }).url;
+        return url.includes("bad") ? { ok: false, error: "无法连接到这个地址" } : { ok: true, url, version: "0.2.0" };
+      },
+      "honk.gateway.set": (d: unknown) => ({ url: (d as { url: string | null }).url ?? "https://gw.test/", registered: true }),
       ...overrides,
     },
   };
@@ -55,6 +62,8 @@ test("a host event opens the chat", async () => {
 test("creates a bot and shows its token", async () => {
   const app = await open("./App.tsx", { host: host() });
   await app.press("id:new-bot");
+  await app.press("id:icon-ship");
+  await app.press("id:color-#1c1c1e");
   await app.type("id:bot-name", "CI 构建");
   await app.press("id:create-bot");
   await app.waitFor("text:2:secret-token");
@@ -68,4 +77,64 @@ test("bot settings masks the stored token", async () => {
   await app.press("id:chat-1");
   await app.press("id:open-settings");
   await app.waitFor("text:1:abcd••••••••nop");
+});
+
+test("search filters the chat list", async () => {
+  const app = await open("./App.tsx", { host: host() });
+  await app.waitFor("text:Berth 部署");
+  await app.type("id:search", "告警");
+  await app.waitFor("text:没有匹配的会话");
+  await app.clear("id:search");
+  await app.type("id:search", "berth");
+  await app.waitFor("text:Berth 部署");
+});
+
+test("edit mode deletes a bot after confirming", async () => {
+  const app = await open("./App.tsx", { host: host() });
+  await app.press("id:edit");
+  app.onDialog(() => "删除");
+  await app.press("id:delete-1");
+  await app.waitUntil(() => app.host.calls().some((c) => c.name === "honk.bot.delete"));
+  expect(app.host.calls().find((c) => c.name === "honk.bot.delete")?.data).toEqual({ botId: 1 });
+});
+
+test("the gateway page tests an address before switching", async () => {
+  const app = await open("./App.tsx", { host: host() });
+  await app.press("id:tab-settings");
+  await app.press("id:gateway-row");
+  await app.clear("id:gateway-url");
+  await app.type("id:gateway-url", "https://bad.example/");
+  await app.press("id:test-gateway");
+  await app.waitFor("text:无法连接到这个地址");
+  // A failed check never switches.
+  await app.press("id:save-gateway");
+  expect(app.host.calls().some((c) => c.name === "honk.gateway.set")).toBe(false);
+
+  await app.clear("id:gateway-url");
+  await app.type("id:gateway-url", "https://mine.example/");
+  app.onDialog(() => "切换");
+  await app.press("id:save-gateway");
+  await app.waitUntil(() => app.host.calls().some((c) => c.name === "honk.gateway.set"));
+  expect(app.host.calls().find((c) => c.name === "honk.gateway.set")?.data).toEqual({ url: "https://mine.example/" });
+});
+
+test("settings shows a failed registration and retries it", async () => {
+  let registered = false;
+  const status = () => registered
+    ? { registered: true, registration: "registered", pushMode: "apns", gatewayURL: "https://gw.test/", notifications: "authorized" }
+    : { registered: false, registration: "failed", registrationError: "连不上网关", pushMode: "apns", gatewayURL: "https://gw.test/", notifications: "authorized" };
+  const app = await open("./App.tsx", {
+    host: host({
+      "honk.status": () => status(),
+      "honk.register.retry": () => {
+        registered = true;
+        return status();
+      },
+    }),
+  });
+  await app.press("id:tab-settings");
+  await app.waitFor("text:注册失败");
+  expect(app.texts().some((t) => t.includes("连不上网关"))).toBe(true);
+  await app.press("id:retry-registration");
+  await app.waitFor("text:已注册");
 });

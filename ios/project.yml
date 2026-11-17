@@ -27,8 +27,18 @@ targets:
       - target: NotificationService
       - framework: Frameworks/NativeShell.xcframework
         embed: false
+    # XcodeGen writes this file from `properties` on every run (with a path
+    # alone it writes an empty dict); scripts/check-entitlements.sh guards it.
     entitlements:
       path: App/Honk.entitlements
+      properties:
+        aps-environment: $(APS_ENVIRONMENT)
+        com.apple.security.application-groups:
+          - $(HONK_APP_GROUP)
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)$(HONK_KEYCHAIN_GROUP)
+        com.apple.developer.usernotifications.communication: true
+        com.apple.developer.usernotifications.time-sensitive: true
     info:
       path: App/Info.plist
       properties:
@@ -69,6 +79,11 @@ targets:
       - package: HonkKit
     entitlements:
       path: NotificationService/NotificationService.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - $(HONK_APP_GROUP)
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)$(HONK_KEYCHAIN_GROUP)
     info:
       path: NotificationService/Info.plist
       properties:

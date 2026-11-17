@@ -7,7 +7,8 @@ export type Route =
   | { name: "chat"; botId: number }
   | { name: "newBot" }
   | { name: "botCreated"; botId: number; token: string; botName: string; avatar: string }
-  | { name: "botSettings"; botId: number };
+  | { name: "botSettings"; botId: number }
+  | { name: "gateway" };
 
 export const nav = createNavStack<Route>([{ name: "home" }]);
 

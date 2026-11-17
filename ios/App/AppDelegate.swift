@@ -14,6 +14,16 @@ final class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationC
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { _, _ in
             DispatchQueue.main.async { application.registerForRemoteNotifications() }
         }
+        #if DEBUG && targetEnvironment(simulator)
+        // A simulator build that is unsigned (or whose APNs registration never
+        // answers) gets no token: fall back to the simulator identity.
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 8_000_000_000)
+            if HonkService.shared.registration == .waitingForPushToken {
+                await HonkService.shared.useSimulatorIdentity()
+            }
+        }
+        #endif
         return true
     }
 
@@ -31,6 +41,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationC
 
     func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
         NSLog("honk: no push token: \(error)")
+        Task { await HonkService.shared.pushTokenUnavailable(error) }
     }
 
     // MARK: background pushes (edits and deletes)

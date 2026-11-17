@@ -1,6 +1,6 @@
 import type { JSX } from "nsh";
 import { Canvas, Image, Path2D, Text, View } from "nsh";
-import type { Palette } from "./theme";
+import { palette, type Palette } from "./theme";
 
 /** Preset icons, drawn on a 24-unit grid. The names match HonkKit's Avatar.symbols. */
 export const ICONS: Record<string, string> = {
@@ -16,7 +16,8 @@ export const ICONS: Record<string, string> = {
   code: "M9 7l-5 5 5 5 M15 7l5 5-5 5",
 };
 
-export const COLORS = ["#1c1c1e", "#0a6ed1", "#2f6f3e", "#c2410c", "#6741d9", "#5c6770"];
+/** Avatar colours; the first is the default for a new bot. */
+export const COLORS = ["#0a6ed1", "#2f6f3e", "#c2410c", "#6741d9", "#c2255c", "#5c6770", "#1c1c1e"];
 
 export interface ParsedAvatar {
   kind: "preset" | "image";
@@ -40,13 +41,14 @@ export function presetAvatar(icon: string, color: string): string {
 export function Avatar(props: { avatar: string; size: number }) {
   const a = () => parseAvatar(props.avatar);
   return (
-    <If when={a().kind === "image"} else={<Glyph icon={a().icon} color={a().color} size={props.size} />}>
+    <If when={a().kind === "image"} else={<Glyph icon={a().icon} color={a().color} size={props.size} hairline={palette().hairline} />}>
       <Image src={a().url} style={{ width: props.size, height: props.size, borderRadius: props.size / 2 }} />
     </If>
   );
 }
 
-export function Glyph(props: { icon: string; color: string; size: number }) {
+/** A preset avatar: `icon` stroked in `stroke` (white) on a `color` disc, with an optional hairline edge. */
+export function Glyph(props: { icon: string; color: string; size: number; stroke?: string; hairline?: string }) {
   return (
     <Canvas
       style={{ width: props.size, height: props.size }}
@@ -56,11 +58,18 @@ export function Glyph(props: { icon: string; color: string; size: number }) {
         cx.beginPath();
         cx.arc(r, r, r, 0, Math.PI * 2);
         cx.fill();
+        if (props.hairline) {
+          cx.strokeStyle = props.hairline;
+          cx.lineWidth = 1;
+          cx.beginPath();
+          cx.arc(r, r, r - 0.5, 0, Math.PI * 2);
+          cx.stroke();
+        }
         const scale = (size.width * 0.5) / 24;
         cx.save();
         cx.translate(r - 12 * scale, r - 12 * scale);
         cx.scale(scale, scale);
-        cx.strokeStyle = "#ffffff";
+        cx.strokeStyle = props.stroke ?? "#ffffff";
         cx.lineWidth = 1.8;
         cx.lineCap = "round";
         cx.lineJoin = "round";

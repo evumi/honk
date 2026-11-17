@@ -11,4 +11,9 @@ HONK_APP_GROUP = group.dev.evumi.honk
 HONK_KEYCHAIN_GROUP = dev.evumi.honk.shared
 HONK_GATEWAY_URL = http:/$()/127.0.0.1:8080/
 
+// nsh's xcframework has arm64 simulator slices only, so simulator builds are
+// arm64-only (Apple silicon Macs). Without this, a generic simulator build
+// also tries x86_64 and fails with "Unable to resolve module dependency: NativeShell".
+EXCLUDED_ARCHS[sdk=iphonesimulator*] = x86_64
+
 #include? "Local.xcconfig"

@@ -1,25 +1,55 @@
 import Foundation
 
 /// Settings shared by the app and the extension, read from Info.plist so both
-/// targets agree: `HonkGatewayURL`, `HonkAppGroup`, `HonkKeychainGroup`.
+/// targets agree: `HonkGatewayURL`, `HonkAppGroup`, `HonkKeychainGroup`. The
+/// user can point the app at another gateway; that choice lives in the App
+/// Group's defaults so the extension follows it too.
 public struct HonkConfig: Sendable {
+    /// The gateway in use: the user's choice, else the build's default.
     public var gatewayURL: URL
+    /// The gateway the build was configured with.
+    public var defaultGatewayURL: URL
     public var appGroup: String
     /// Full keychain access group, team prefix included (`ABCDE12345.dev.evumi.honk.shared`).
     public var keychainGroup: String?
 
-    public init(gatewayURL: URL, appGroup: String, keychainGroup: String?) {
+    public var isCustomGateway: Bool { gatewayURL != defaultGatewayURL }
+
+    static let overrideKey = "gatewayURL"
+
+    public init(gatewayURL: URL, defaultGatewayURL: URL? = nil, appGroup: String, keychainGroup: String?) {
         self.gatewayURL = gatewayURL
+        self.defaultGatewayURL = defaultGatewayURL ?? gatewayURL
         self.appGroup = appGroup
         self.keychainGroup = keychainGroup
     }
 
     public static func fromBundle(_ bundle: Bundle = .main) -> HonkConfig {
         let info = bundle.infoDictionary ?? [:]
-        let url = (info["HonkGatewayURL"] as? String).flatMap(URL.init(string:)) ?? URL(string: "http://127.0.0.1:8080/")!
+        let def = (info["HonkGatewayURL"] as? String).flatMap(normalizeGateway) ?? URL(string: "http://127.0.0.1:8080/")!
         let group = info["HonkAppGroup"] as? String ?? "group.dev.evumi.honk"
         let keychain = (info["HonkKeychainGroup"] as? String).flatMap { $0.isEmpty || $0.hasPrefix("$(") ? nil : $0 }
-        return HonkConfig(gatewayURL: url, appGroup: group, keychainGroup: keychain)
+        let custom = UserDefaults(suiteName: group)?.string(forKey: overrideKey).flatMap(normalizeGateway)
+        return HonkConfig(gatewayURL: custom ?? def, defaultGatewayURL: def, appGroup: group, keychainGroup: keychain)
+    }
+
+    /// Saves the user's gateway (`nil`: back to the build's default).
+    public static func setGatewayOverride(_ url: URL?, appGroup: String) {
+        let d = UserDefaults(suiteName: appGroup)
+        if let url { d?.set(url.absoluteString, forKey: overrideKey) } else { d?.removeObject(forKey: overrideKey) }
+    }
+
+    /// An http(s) URL with a host, ending in `/` so API paths resolve under it;
+    /// a bare host gets `https://`. `nil` for anything else.
+    public static func normalizeGateway(_ s: String) -> URL? {
+        var t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        if t.isEmpty { return nil }
+        if !t.contains("://") { t = "https://" + t }
+        guard var c = URLComponents(string: t), let scheme = c.scheme?.lowercased(), scheme == "https" || scheme == "http",
+              let host = c.host, !host.isEmpty, c.query == nil, c.fragment == nil else { return nil }
+        c.scheme = scheme
+        if !c.path.hasSuffix("/") { c.path += "/" }
+        return c.url
     }
 }
 

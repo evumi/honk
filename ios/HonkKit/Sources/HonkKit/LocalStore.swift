@@ -326,6 +326,19 @@ public final class LocalStore: @unchecked Sendable {
         }
     }
 
+    /// Forgets every bot, message and the sync cursor: the device moved to
+    /// another gateway. Returns the notification ids to remove.
+    @discardableResult
+    public func reset() throws -> [String] {
+        try locked {
+            try transaction {
+                let ids = try query("SELECT notif_id FROM messages WHERE notif_id IS NOT NULL") { $0.text(0) }.compactMap { $0 }
+                try exec("DELETE FROM messages; DELETE FROM bots; DELETE FROM meta;")
+                return ids
+            }
+        }
+    }
+
     // MARK: meta
 
     public var syncCursor: Int64 {

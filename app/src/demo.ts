@@ -9,7 +9,7 @@ const card = `<div style="padding:4px 0">
 <p style="margin:0;color:var(--tg-theme-hint-color)">部署 · {{env}}</p>
 <hr>
 <p><span style="color:var(--tg-theme-hint-color)">部署 ID</span>  <code>{{deploy_id}}</code></p>
-<a href="{{url}}" style="display:block;padding:12px;border-radius:12px;background:#111;color:#fff;text-align:center">在 Berth 中查看</a>
+<a href="{{url}}" style="display:block;padding:12px;border-radius:12px;background:var(--tg-theme-text-color);color:var(--tg-theme-bg-color);text-align:center">在 Berth 中查看</a>
 </div>`;
 
 const bots: Bot[] = [
@@ -37,8 +37,27 @@ const messages: Message[] = [
   }),
   msg(1, 25, { title: "每日部署汇总", body: "今天共 6 次部署，5 次成功，1 次回滚。" }),
 ];
+const DEFAULT_GATEWAY = "https://honk.example.com/";
+let gateway = DEFAULT_GATEWAY;
+
+function normalize(u: string): string | null {
+  let t = u.trim();
+  if (!t) return null;
+  if (!t.includes("://")) t = "https://" + t;
+  if (!/^https?:\/\/[^/\s?#]+/i.test(t) || /[?#]/.test(t)) return null;
+  return t.endsWith("/") ? t : t + "/";
+}
+
 const flags = new Map<number, { muted: boolean; pinned: boolean }>();
 const tokens = new Map<number, string>([[1, "1:bQx9fK2mT4vLr8Wz1pYs6NcHa3Ue0JdG"]]);
+
+/** A token shaped like the gateway's: `<bot id>:` and 32 URL-safe characters. */
+function demoToken(botId: number): string {
+  const abc = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+  let t = "";
+  for (let i = 0; i < 32; i++) t += abc[Math.floor(Math.random() * abc.length)];
+  return `${botId}:${t}`;
+}
 
 function chats(): Chat[] {
   return bots
@@ -55,7 +74,23 @@ export async function demo<T>(name: string, args: unknown): Promise<T> {
   const out = ((): unknown => {
     switch (name) {
       case "honk.status":
-        return { registered: true, gatewayURL: "http://127.0.0.1:8080/", notifications: "authorized" };
+        return { registered: true, registration: "registered", pushMode: "apns", gatewayURL: gateway, notifications: "authorized" };
+      case "honk.register.retry":
+        return { registered: true, registration: "registered", pushMode: "apns", gatewayURL: gateway, notifications: "authorized" };
+      case "honk.gateway.get":
+        return { url: gateway, defaultURL: DEFAULT_GATEWAY, custom: gateway !== DEFAULT_GATEWAY };
+      case "honk.gateway.test": {
+        const url = normalize(String(a.url ?? ""));
+        if (!url) return { ok: false, error: "地址无效：需要 http:// 或 https:// 开头的网址" };
+        if (url.includes("bad")) return { ok: false, error: "无法连接到这个地址" };
+        return { ok: true, url, version: "0.1.0" };
+      }
+      case "honk.gateway.set": {
+        gateway = a.url ? normalize(String(a.url)) ?? gateway : DEFAULT_GATEWAY;
+        bots.splice(0, bots.length);
+        messages.splice(0, messages.length);
+        return { url: gateway, registered: true };
+      }
       case "honk.chats":
         return chats();
       case "honk.messages":
@@ -69,7 +104,7 @@ export async function demo<T>(name: string, args: unknown): Promise<T> {
       case "honk.bot.create": {
         const bot: Bot = { id: bots.length + 1, name: a.name, avatar: a.avatar, defaultLevel: a.defaultLevel, createdAt: Date.now() };
         bots.push(bot);
-        const token = `${bot.id}:demo${Math.random().toString(36).slice(2, 14)}`;
+        const token = demoToken(bot.id);
         tokens.set(bot.id, token);
         return { bot, token };
       }
@@ -81,7 +116,7 @@ export async function demo<T>(name: string, args: unknown): Promise<T> {
       case "honk.bot.token":
         return tokens.get(a.botId) ?? null;
       case "honk.bot.resetToken": {
-        const t = `${a.botId}:demo${Math.random().toString(36).slice(2, 14)}`;
+        const t = demoToken(a.botId);
         tokens.set(a.botId, t);
         return t;
       }

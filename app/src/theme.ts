@@ -15,6 +15,12 @@ export interface Palette {
   bubble: string;
   pill: string;
   glass: string;
+  /** The selected segment of a segmented control. */
+  segment: string;
+  /** The track behind a segmented control. */
+  segmentTrack: string;
+  /** Hairline around swatches and avatars that could vanish into the background. */
+  hairline: string;
 }
 
 const light: Palette = {
@@ -32,6 +38,9 @@ const light: Palette = {
   bubble: "#ffffff",
   pill: "#f2f2f7",
   glass: "rgba(255,255,255,0.88)",
+  segment: "#ffffff",
+  segmentTrack: "#e3e3e8",
+  hairline: "rgba(0,0,0,0.08)",
 };
 
 const dark: Palette = {
@@ -49,6 +58,9 @@ const dark: Palette = {
   bubble: "#1c1c1e",
   pill: "#2c2c2e",
   glass: "rgba(28,28,30,0.88)",
+  segment: "#636366",
+  segmentTrack: "#2c2c2e",
+  hairline: "rgba(255,255,255,0.16)",
 };
 
 /** The palette for the current appearance (reactive). */

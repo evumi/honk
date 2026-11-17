@@ -43,8 +43,26 @@ export interface Chat {
 
 export interface Status {
   registered: boolean;
+  /** Where registration with the gateway stands. */
+  registration?: "registered" | "registering" | "waitingForPushToken" | "failed";
+  registrationError?: string;
+  /** `apns`: real pushes; `simulator`: a Debug simulator build without APNs, which polls instead. */
+  pushMode?: "apns" | "simulator";
   gatewayURL: string;
   notifications: "authorized" | "denied" | "notDetermined";
+}
+
+export interface Gateway {
+  url: string;
+  defaultURL: string;
+  custom: boolean;
+}
+
+export interface GatewayTest {
+  ok: boolean;
+  url?: string;
+  version?: string;
+  error?: string;
 }
 
 export function call<T>(name: string, args?: unknown): Promise<T> {
@@ -77,4 +95,10 @@ export const api = {
   deleteMessage: (messageId: number) => call<boolean>("honk.message.delete", { messageId }),
   clearChat: (botId: number) => call<boolean>("honk.chat.clear", { botId }),
   openNotificationSettings: () => call<boolean>("honk.notifications.open"),
+  /** Asks for a push token again and registers; resolves with the new status. */
+  retryRegistration: () => call<Status>("honk.register.retry"),
+  gateway: () => call<Gateway>("honk.gateway.get"),
+  testGateway: (url: string) => call<GatewayTest>("honk.gateway.test", { url }),
+  /** `null`: back to the build's default gateway. Clears this device's bots and messages. */
+  setGateway: (url: string | null) => call<{ url: string; registered: boolean }>("honk.gateway.set", { url }),
 };
