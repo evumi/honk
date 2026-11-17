@@ -51,6 +51,9 @@ export interface Status {
   pushMode?: "apns" | "simulator";
   gatewayURL: string;
   notifications: "authorized" | "denied" | "notDetermined";
+  /** The installed build: marketing version and build number (from the release tag and CI run). */
+  appVersion?: string;
+  appBuild?: string;
 }
 
 export interface Gateway {

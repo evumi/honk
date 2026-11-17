@@ -14,6 +14,18 @@
 git tag v0.1.0 && git push origin v0.1.0
 ```
 
+版本号以标签为准，仓库里的版本号不用手改：
+
+| 产物 | 版本 | 构建号 |
+| --- | --- | --- |
+| 网关镜像 | `:0.1.0`、`:0.1`、`:latest`；`/v1/info` 返回 `0.1.0` | 无 |
+| iOS | `MARKETING_VERSION = 0.1.0` | App Store Connect 里这个版本的下一个可用构建号 |
+| Android | `versionName = 0.1.0` | 这次 Actions 运行的序号 |
+
+App 设置页底部会显示 `Honk 0.1.0 (构建号)`。
+
+iOS 和 Android 流水线第一步会检查 secrets，缺了就直接失败，并列出缺少哪几项。补齐后在 Actions 页面对这次运行点 Re-run failed jobs，会用同一个标签重新构建，不用打新标签。
+
 ## 1. 要填的 Secrets 和 Variables
 
 在仓库 **Settings → Secrets and variables → Actions** 里填写。Secrets 是加密的，Variables 是明文。

@@ -175,3 +175,12 @@ test("an open chat does not mark read again on every change", async () => {
   await app.wait(300);
   expect(marks).toBe(1);
 });
+
+test("settings shows the installed version at the bottom", async () => {
+  const app = await open("./App.tsx", {
+    locale: "zh-Hans-CN",
+    host: host({ "honk.status": { registered: true, registration: "registered", pushMode: "apns", gatewayURL: "https://gw.test/", notifications: "authorized", appVersion: "0.2.0", appBuild: "17" } }),
+  });
+  await app.press("id:tab-settings");
+  await app.waitFor("text:Honk 0.2.0 (17)");
+});
