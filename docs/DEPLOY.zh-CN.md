@@ -143,4 +143,4 @@ base64 -i honk-release.keystore | pbcopy
 
 这三条发布流水线都还没在 GitHub 上真正跑过：需要先填好上面的 secrets，iOS 那条还要先完成第 3 节的后台准备。第一次运行可能要根据 asc 的实际输出调整参数（例如 `asc signing fetch` 的 JSON 字段名）。
 
-Android 流水线依赖 `android/` 工程（PR evumi/honk#3），合并之前运行会直接报"缺少 gradlew"。流水线会下载 v0.5.1 的 nsh Android 库，并装上同版本的 nsh CLI 把 `app/` 打进 APK；升级 nsh 时两处版本要一起改。
+Android 流水线用的 `android/` 工程已经在仓库里，并且 `ci.yml` 的 `android` job 每次都会构建它（`./gradlew :core:test :app:assembleDebug`），所以流水线本身不依赖别的 PR；没验证过的只是 release 签名、上传和发布这几步。流水线会下载 v0.5.1 的 nsh Android 库，并装上同版本的 nsh CLI 把 `app/` 打进 APK；升级 nsh 时两处版本要一起改。同样，`ci.yml` 的 `iosapp` job 已经构建 iOS 模拟器版，但两个 App 都还没在真机上验证过。

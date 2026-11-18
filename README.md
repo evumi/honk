@@ -12,8 +12,8 @@ Honk is a push notification service built around bots: each bot is its own chann
 | --- | --- | --- |
 | `gateway/` | Go + SQLite gateway: bot API, app API, short-term queue, APNs/FCM push | first version |
 | `app/` | nsh app (TSX): chat list, message stream, card rendering | first version |
-| `ios/` | Swift host, Notification Service Extension, shared HonkKit package | first version (not yet built in Xcode) |
-| `android/` | Kotlin host embedding the nsh app, FirebaseMessagingService, shared `:core` module (gateway client, local store, sync) | first version (`:core` tested on the JVM; the app is not yet built with the Android SDK) |
+| `ios/` | Swift host, Notification Service Extension, shared HonkKit package | first version; built for the simulator in CI (`iosapp` job), not yet verified on a real device |
+| `android/` | Kotlin host embedding the nsh app, FirebaseMessagingService, shared `:core` module (gateway client, local store, sync) | first version; `:core` tested on the JVM, the app built in CI (`android` job), not yet verified on a real device |
 
 The development design (Chinese) is [docs/DESIGN.zh-CN.md](docs/DESIGN.zh-CN.md); mockups and screenshots are in [docs/design](docs/design/).
 
@@ -26,6 +26,8 @@ The development design (Chinese) is [docs/DESIGN.zh-CN.md](docs/DESIGN.zh-CN.md)
 5. When the app opens it calls `GET /v1/sync` for anything missed, then `POST /v1/ack`.
 
 Queued messages expire after 7 days; acked ones are deleted a day after the ack.
+
+A push that fails for a reason that may pass (a network error, a timeout, a 5xx, a 429 with its `retry_after`) is retried from a bounded in-memory queue after 2 s, 10 s and 60 s, four attempts in all; it is dropped when the device has acked the message or its push token changed meanwhile. Retries are not kept across a restart: the device still gets the message from `/v1/sync`. The apps also sync in the background about every six hours (iOS `BGAppRefreshTask`, Android WorkManager), which applies edits and deletes and updates the badge but never posts notifications.
 
 ## Running the gateway
 
@@ -50,6 +52,13 @@ See `gateway/Dockerfile` for the container. Settings:
 | `HONK_APNS_KEY_ID` / `HONK_APNS_TEAM_ID` / `HONK_APNS_TOPIC` | | required with the key; the topic is the bundle ID |
 | `HONK_APNS_SANDBOX` | `false` | use the APNs development gateway (debug builds) |
 | `HONK_FCM_CREDENTIALS_FILE` | | Firebase service account JSON; Android push is off without it |
+| `HONK_PUSH_QUEUE` / `HONK_PUSH_WORKERS` | `1024` / `16` | pushes that may wait in the queue (a full queue drops and counts) / pushes in flight at once |
+| `HONK_REGISTER_KEY` | | when set, `POST /v1/devices` must carry the same `register_key`; `/v1/info` then reports `register_key_required`. The app's Gateway page has an optional register key field |
+| `HONK_METRICS_ADDR` | | e.g. `127.0.0.1:9100`: serves Prometheus text at `/metrics` on its own listener; off when empty |
+| `HONK_LOG_FORMAT` | `text` | `json` for structured logs |
+| `HONK_LOG_LEVEL` | `info` | `debug` also logs every request (the bot token in the path is hidden) |
+
+`/metrics` has `honk_messages_total{kind}`, `honk_pushes_total{platform,route,result}` (`ok`, `retry`, `token_gone`, `failed`), `honk_push_retries_total`, `honk_push_dropped_total{reason}`, `honk_http_requests_total{class}`, and the gauges `honk_devices`, `honk_bots` and `honk_push_queue_length`.
 
 ## Bot API
 
@@ -86,8 +95,9 @@ Everything except device registration needs `Authorization: Bearer <device_secre
 
 | Endpoint | Purpose |
 | --- | --- |
-| `POST /v1/devices` | `{"platform":"ios"\|"android","push_token":"…"}` → `device`, `device_secret` |
-| `GET` / `PUT` / `DELETE /v1/devices/me` | read; update the push token; delete with all bots and messages |
+| `GET /v1/info` | `{"name":"honk","version","api":2}`, plus `register_key_required` when `HONK_REGISTER_KEY` is set |
+| `POST /v1/devices` | `{"platform":"ios"\|"android","push_token":"…","register_key":"…"}` (the key only when the gateway asks for one) → `device`, `device_secret` |
+| `GET` / `PUT` / `DELETE /v1/devices/me` | read; update the push token; delete with all bots and messages (the app's Settings, "Delete this device's data", calls it and then clears the phone) |
 | `GET` / `POST /v1/bots` | list; create with `{"name","avatar","default_level"}` → `bot`, `token`. `avatar` is `preset:<icon>:<#rrggbb>`, an https URL, or `local:<file>` for an image the user picked in the app, which stays on the phone (the gateway stores only the name) |
 | `GET` / `PATCH` / `DELETE /v1/bots/:id` | read, change, delete a bot (`:id` is the short bot id) |
 | `POST /v1/bots/:id/token` | reset the token; the old one stops working |

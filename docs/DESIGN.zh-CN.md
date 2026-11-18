@@ -26,10 +26,10 @@ Honk 是一个以 bot 为渠道的推送通知服务：每个 bot 是一个独�
 | --- | --- | --- |
 | `gateway/` | Go + SQLite 网关 | 已实现，有测试 |
 | `ios/HonkKit/` | App 和 NSE 共用的 Swift 包：网关客户端、Keychain、本地 SQLite、同步、通讯通知 | 已实现，有测试（macOS 上 `swift test`） |
-| `ios/App/`、`ios/NotificationService/` | iOS 宿主和 Notification Service Extension；XcodeGen 生成工程 | 已实现，**尚未在 Xcode 中编译验证** |
+| `ios/App/`、`ios/NotificationService/` | iOS 宿主和 Notification Service Extension；XcodeGen 生成工程 | 已实现；CI 的 `iosapp` job 构建模拟器版（`.github/workflows/ci.yml`），**尚未在真机上验证** |
 | `app/` | nsh App（TSX）：会话列表、消息流、卡片渲染、创建和设置 bot | 已实现，有 `nsh test` 测试 |
 | `android/core/` | 纯 Kotlin/JVM 模块，对应 HonkKit：网关客户端、本地 SQLite、同步、设备注册 | 已实现，有测试（只需 JDK：`./gradlew :core:test`） |
-| `android/app/` | Android 宿主：嵌入 nsh App、FirebaseMessagingService、通知、EncryptedSharedPreferences | 已实现，**尚未用 Android SDK 编译验证**（Kotlin 代码已对 API 34 的 android-all 和真实 AAR 做过类型检查） |
+| `android/app/` | Android 宿主：嵌入 nsh App、FirebaseMessagingService、通知、EncryptedSharedPreferences | 已实现；CI 的 `android` job 用 Android SDK 构建 debug 版，**尚未在真机上验证** |
 
 ## 3. 消息流
 
@@ -52,6 +52,8 @@ Honk 是一个以 bot 为渠道的推送通知服务：每个 bot 是一个独�
 为什么推送里不带卡片：卡片压缩后最多 4KB，和 APNs、FCM 的 payload 上限一样大，但 base64 会多出约 33%，再加上标题正文就超了。所以推送只负责唤醒和横幅，内容由设备来拉。
 
 修改（`editMessageData`）和删除（`deleteMessage`）走静默推送：iOS 是 `content-available` 后台推送，Android 是 NORMAL 优先级的 data message。系统不保证静默推送一定送达，所以 App 打开时的 `/sync` 是兜底。
+
+**后台刷新**：App 不在前台时也会同步，作为推送丢失的第二道兜底。iOS：`BGAppRefreshTask`（`ios/App/BackgroundRefresh.swift`；`project.yml` 里 `UIBackgroundModes` 加了 `fetch`，`BGTaskSchedulerPermittedIdentifiers` 是 `<bundle id>.refresh`），进入后台时和每次任务运行时请求下一次（最早 6 小时后，实际时间由系统定）；Android：WorkManager 唯一周期任务 `honk-sync`（`SyncWorker`，6 小时，要求有网络，`HonkApp.onCreate` 里 KEEP 方式登记）。两端都只跑一遍和「立即同步」一样的 `refresh()`：存下队列里的消息、应用修改和删除、撤掉因此过时的通知、更新角标；都**不发本地通知**（iOS 本来就不允许；Android 的补发按 tag 去重那一步没做）。
 
 ## 4. 网关（gateway/）
 
@@ -79,8 +81,8 @@ bot token 形如 `<bot id>:<32 位随机串>`；token 和 device secret 都只�
 | `/bot<token>/editMessageData` | 发送方 | `message_id` 或 `id` + `data`，卡片原地更新，不弹通知 |
 | `/bot<token>/deleteMessage` | 发送方 | `message_id` 或 `id` |
 | `/bot<token>/getMe` | 发送方 | 测试 token |
-| `GET /v1/info` | App | `{name:"honk", version, api}`，切换网关前用来确认地址是 Honk 网关；`api` 2 表示 bot id 是字符串 |
-| `POST /v1/devices` | App | 注册，返回 `device_secret`（只返回这一次） |
+| `GET /v1/info` | App | `{name:"honk", version, api}`，切换网关前用来确认地址是 Honk 网关；`api` 2 表示 bot id 是字符串；设了 `HONK_REGISTER_KEY` 时多一个 `register_key_required: true` |
+| `POST /v1/devices` | App | 注册，返回 `device_secret`（只返回这一次）；设了 `HONK_REGISTER_KEY` 时必须带相同的 `register_key`，否则 401 |
 | `GET` / `PUT` / `DELETE /v1/devices/me` | App | 读取；更新 push token；删除设备及全部数据 |
 | `GET` / `POST /v1/bots`，`GET` / `PATCH` / `DELETE /v1/bots/:id`，`POST /v1/bots/:id/token` | App | bot 管理；token 只在创建和重置时返回 |
 | `GET /v1/messages/:id` | NSE / FCM Service | 拉一条 |
@@ -93,6 +95,21 @@ bot token 形如 `<bot id>:<32 位随机串>`；token 和 device secret 都只�
 - **限流**：每个 bot 每秒 5 条，突发 20 条（可配）。
 - **模拟器身份**：push token 以 `simulator-` 开头的设备照常注册和排队，但不发推送（见第 5 节「模拟器开发」）。
 - **清理**：每小时删除过期和 ack 超过 1 天的消息。
+- **注册口令**：`HONK_REGISTER_KEY` 不为空时，`POST /v1/devices` 必须带相同的 `register_key`（常量时间比较，先过 IP 限流）。App 的网关页有可选的「注册口令」输入框；iOS 存在 Keychain（`RegisterKeyStore`），Android 存在加密的 SharedPreferences，注册时作为 `register_key` 发出。只改口令（网关地址不变）不清本机数据，设备还没注册就立刻重试注册。
+
+### 推送队列与重试
+
+`Server.notify`（`internal/api/pushq.go`）不再每条推送开一个 goroutine，而是把推送放进有界队列，由固定数量的 worker 发送：`HONK_PUSH_QUEUE`（默认 1024，满了就丢弃并计数，日志里有记录）和 `HONK_PUSH_WORKERS`（默认 16）。
+
+- 时机：立即、2 秒后、10 秒后、60 秒后，共 4 次（`Options.PushBackoff`）。
+- 重试的失败：网络错误、超时、5xx、429；服务给了 `retry_after`（FCM 的 `Retry-After` 头）就取较大的等待，上限 2 分钟。APNs 和 FCM 把这些失败包成 `push.RetryableError{After}`，`push.Retryable(err)` 判断。token 失效（`ErrTokenGone`，照旧 `MarkPushGone`）和其他 4xx 不重试。
+- 重试前检查（`store.PushStillWanted`）：设备已不存在、push token 换了或已失效、这条消息已被设备 ack（或已过期被清理），就放弃。
+- 状态只在内存里。`Server.Wait()` 等排队和正在发的这一轮发完（测试用）；`Server.Close()` 是关闭路径：停止接收、丢弃还在等退避的重试、等当前这一轮发完。
+
+### 运维
+
+- `HONK_METRICS_ADDR`（默认空，不开）：在单独的监听地址提供 `/metrics`，Prometheus 文本格式，手写（`internal/metrics`），没有新依赖。计数：`honk_messages_total{kind}`、`honk_pushes_total{platform,route,result}`、`honk_push_retries_total`、`honk_push_dropped_total{reason}`（`queue_full`、`not_wanted`、`shutdown`）、`honk_http_requests_total{class}`；量表：`honk_devices`、`honk_bots`、`honk_push_queue_length`。`route` 现在只有 `direct`。
+- `HONK_LOG_FORMAT=json` 输出 JSON 日志；`HONK_LOG_LEVEL=debug` 时每个请求记一条访问日志（`/bot<token>/…` 里的 token 替换成 `<token>`）。
 
 ## 5. 原生宿主
 
@@ -121,7 +138,7 @@ bot token 形如 `<bot id>:<32 位随机串>`；token 和 device secret 都只�
 1. 从 `userInfo` 读 `msg_id`、`bot_id`
 2. 读 Keychain 凭据，调 `GET /v1/messages/:id`
 3. `LocalStore.apply(..., notificationID: request.identifier)` 记下这条消息对应哪个系统通知，之后删除或被替换时用来撤回
-4. 设置角标（本地未读数，静音的 bot 不算）；静音的 bot 改成 passive、无声
+4. 设置角标（本地未读数，静音的 bot 不算）；静音的 bot 改成 passive、无声；`threadIdentifier` 设成 `bot-<id>`，消息有 `group` 时是 `bot-<id>:<group>`（`group` 取自拉到的消息，没拉到就从推送自带的 `thread-id`（`b<bot>:<group>`）里解析，见 `NotificationThread`）
 5. 渲染头像（预设图标用 SF Symbol 画在色块上；https 头像先下载，5 秒超时；`local:` 头像读本机文件），转成通讯通知
 6. `ChangeSignal.post()` 通知 App
 
@@ -219,7 +236,9 @@ App 用 TSX 写，跑在 QuickJS 上。页面：
 
 没有宿主时（例如在桌面上 `nsh run`）自动使用 `src/demo.ts` 的内存数据，方便单独调界面。
 
-宿主协议定义在 `app/src/host.ts`、`ios/App/NshBridge.swift` 和 `android/app/src/main/kotlin/dev/evumi/honk/NshBridge.kt`，三处要同步修改。`botId` 和 `Bot.id` 都是字符串（短 id），消息 id 是数字。
+宿主协议定义在 `app/src/host.ts`、`ios/App/NshBridge.swift` 和 `android/app/src/main/kotlin/dev/evumi/honk/NshBridge.kt`，三处要同步修改。
+
+**契约文件** `app/src/host.contract.json` 给每个 `honk.*` 调用和事件列出样例参数与返回值（`optional` 是可缺省的键，`demo: false` 是演示后端不实现的调用）。三端测试都读它：`app/src/host.contract.test.ts` 检查 `host.ts` 发出的调用名和参数形状、`demo.ts` 的返回形状；HonkKit 的 `HostContractTests` 和 `:core` 的 `HostContractTest` 检查原生侧。为此参数解码和结果、事件编码从 NshBridge 下沉到 HonkKit（`HostContract.swift`：`Args`、`HostArgs`、`HostJSON`）和 `:core`（`HostContract.kt`：`Args`、`HostArgs`、`HostJson`），桥只剩平台胶水（把调用接到 `HonkService` 上）；Android 的桥在回答前把 Map 里的 null 换成 `JSONObject.NULL`（org.json 会丢掉 null 值）。已覆盖：每个调用的样例参数都能被解码、缺必填参数会报错；bot、message、chat、status、gateway 和 bot 创建的结果、全部四个事件，编码后与样例逐字段相同。没覆盖：真正的 nsh 传输、`HonkService` 里的业务逻辑、卡片调用的返回内容（只是字符串）。改协议时先改契约文件，再改 `host.ts`、`demo.ts`、两个 HonkKit / `:core` 文件和两个桥。`botId` 和 `Bot.id` 都是字符串（短 id），消息 id 是数字。
 
 | 调用 | 参数 | 返回 |
 | --- | --- | --- |
@@ -234,20 +253,23 @@ App 用 TSX 写，跑在 QuickJS 上。页面：
 | `honk.bot.setMuted` / `honk.bot.setPinned` | `{botId, muted / pinned}` | |
 | `honk.message.delete` | `{messageId}` | 只删本机 |
 | `honk.chat.clear` | `{botId}` | 只删本机 |
+| `honk.device.delete` | | 先请求网关 `DELETE /v1/devices/me`（401 视为网关已忘记这台设备），成功后清空本机：本地库、凭据、bot token、`local:` 头像、已显示的通知（Android 还有 channel 和快捷方式），复用切换网关时的清空逻辑。网关失败就整个调用失败，本机不动。之后不立即重新注册：下次创建 bot（`honk.bot.create` 发现未注册会先注册）或重新打开 App（推送 token 到达时）才注册；这期间 `honk.status` 的 `registration` 是 `notRegistered` |
 | `honk.notifications.open` | | 打开系统的通知设置 |
 | `honk.register.retry` | | 重试注册，返回新的 status |
-| `honk.gateway.get` | | `{url, defaultURL, custom}` |
-| `honk.gateway.test` | `{url}` | `{ok, url?, version?, error?}` |
-| `honk.gateway.set` | `{url}`（`null` 表示恢复默认） | 切换网关，清空本机数据并重新注册 |
+| `honk.gateway.get` | | `{url, defaultURL, custom, registerKey}`（`registerKey` 是已保存的注册口令，没有就是空串） |
+| `honk.gateway.test` | `{url}` | `{ok, url?, version?, registerKeyRequired?, error?}` |
+| `honk.gateway.set` | `{url, registerKey?}`（`url` 为 `null` 表示恢复默认；`registerKey` 没有或为空表示不用口令） | 切换网关，清空本机数据并重新注册；地址不变时只更新口令 |
 | `honk.avatar.save` | `{data, type}`（base64 的 JPEG / PNG / WebP / GIF） | 存到本机，返回头像字符串 `local:<文件名>` |
 | `honk.avatar.image` | `{avatar}` | `local:` 头像的 `data:` URL；文件不在本机时是 `null` |
 
 新建 / 编辑 Bot 的图标列表最后是一个“+”：用 nsh 的 `Picker.pickImages`（`picker` 权限，缩到 512px）选一张图，经 `honk.avatar.save` 存在本机，头像字符串作为 `avatar` 发给网关。图片本身不上传，所以换手机、重装或切换网关后会变回默认头像。nsh 端用 `data:` URL 显示本机头像，加载失败时退回预设图标。
 
-宿主发给 App 的事件有两个：
+宿主发给 App 的事件有这些（样例在契约文件里）：
 
 - `honk.changed`：本地库有变化，App 重新加载
 - `honk.open {botId}`：用户点了通知，打开对应会话
+- `honk.incoming {botId, messageId}`：App 打开时来了消息，由 App 自己显示横幅
+- `honk.card.changed {key, result}`：卡片脚本的定时器改变了画面
 
 静音和置顶只存在本地，不上传网关。
 
@@ -357,7 +379,7 @@ Telegram 的 widget 一般用 class 加 `<style>` 写，所以 Honk 也按样式
 | `level=passive` | `interruption-level: passive`，priority 5，无声 | priority NORMAL |
 | `level=active` | `interruption-level: active` | priority HIGH |
 | `level=timeSensitive` | `interruption-level: time-sensitive` | priority HIGH |
-| `group` | `thread-id: b<bot>:<group>` | data 里的 `group` |
+| `group` | `thread-id: b<bot>:<group>`（NSE 再把它改成 `bot-<id>:<group>`） | data 里的 `group` |
 | `id` | `apns-collapse-id: b<bot>:<id>`（超过 64 字节时取哈希） | `collapse_key`；data 里的 `id`，App 用它做通知 tag |
 | edit / delete | `content-available: 1` 后台推送 | priority NORMAL 的 data message |
 
@@ -379,8 +401,9 @@ cd android && make setup && ./gradlew assembleDebug   # 下载 nsh AAR 并编译
 
 ## 9. 待办与风险
 
-- [ ] 真机跑通 APNs、NSE 和通讯通知头像（模拟器已能连真实网关完成注册、建 bot、发送和同步）
-- [ ] 用 Android SDK 编译 `android/app`（`./gradlew test assembleDebug`），在有 GMS 的设备或模拟器上跑通 FCM、通知和 nsh 界面
+- [ ] 真机跑通 APNs、NSE 和通讯通知头像（模拟器已能连真实网关完成注册、建 bot、发送和同步；CI 的 `iosapp` job 已构建模拟器版）
+- [ ] 在有 GMS 的设备或模拟器上跑通 FCM、通知和 nsh 界面（CI 的 `android` job 已用 Android SDK 跑 `:core:test` 并构建 debug 版）
+- [ ] 后台刷新（iOS `BGAppRefreshTask`、Android WorkManager 每 6 小时）和「删除这台设备的数据」的原生代码只在 CI 里编译，没在真机上跑过；Android 的后台同步还不补发通知
 - [ ] Android 预设头像现在画的是 bot 名称首字，和 App 内的图标不一致；可以给 Android 加一套对应的矢量图标
 - [x] 卡片 profile 2：JS（宿主里的 quickjs-ng）、`TelegramWidget` 兼容接口
 - [ ] 卡片按钮回调：`TelegramWidget.request()` 和 `answerWidgetQuery`（需要 bot webhook 或长轮询）；`publicData` / 共享卡片

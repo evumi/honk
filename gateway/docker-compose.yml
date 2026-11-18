@@ -20,6 +20,10 @@ services:
       HONK_APNS_SANDBOX: ${HONK_APNS_SANDBOX:-false}
       HONK_FCM_CREDENTIALS_FILE: /secrets/fcm.json
       HONK_MESSAGE_TTL: ${HONK_MESSAGE_TTL:-168h}
+      # Optional; empty means off or the default.
+      HONK_REGISTER_KEY: ${HONK_REGISTER_KEY:-}
+      HONK_LOG_FORMAT: ${HONK_LOG_FORMAT:-text}
+      HONK_LOG_LEVEL: ${HONK_LOG_LEVEL:-info}
 
 volumes:
   honk-data:

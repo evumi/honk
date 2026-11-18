@@ -12,8 +12,8 @@ Honk 是一个以 bot 为渠道的推送通知服务：每个 bot 都是一个�
 | --- | --- | --- |
 | `gateway/` | Go + SQLite 网关：bot API、App API、短期消息队列、APNs/FCM 推送 | 第一版 |
 | `app/` | nsh App（TSX）：会话列表、消息流、卡片渲染 | 第一版 |
-| `ios/` | Swift 宿主、Notification Service Extension、共享包 HonkKit | 第一版（未在 Xcode 中编译验证） |
-| `android/` | Kotlin 宿主（嵌入 nsh App）、FirebaseMessagingService、共享模块 `:core`（网关客户端、本地库、同步） | 第一版（`:core` 已在 JVM 上测试；App 尚未用 Android SDK 编译） |
+| `ios/` | Swift 宿主、Notification Service Extension、共享包 HonkKit | 第一版；CI 的 `iosapp` job 构建模拟器版，尚未在真机上验证 |
+| `android/` | Kotlin 宿主（嵌入 nsh App）、FirebaseMessagingService、共享模块 `:core`（网关客户端、本地库、同步） | 第一版；`:core` 在 JVM 上测试，CI 的 `android` job 构建 App，尚未在真机上验证 |
 
 开发设计文档见 [docs/DESIGN.zh-CN.md](docs/DESIGN.zh-CN.md)，界面稿和截图见 [docs/design](docs/design/)。
 
@@ -26,6 +26,8 @@ Honk 是一个以 bot 为渠道的推送通知服务：每个 bot 都是一个�
 5. App 打开时调 `GET /v1/sync` 补齐离线期间漏掉的消息，存好后调 `POST /v1/ack`。
 
 队列里的消息默认保存 7 天；已 ack 的消息保留 1 天后删除。
+
+推送失败而且可能恢复时（网络错误、超时、5xx、带 `retry_after` 的 429），网关从内存里的有界队列重试：2 秒、10 秒、60 秒后各一次，一共发 4 次；设备在这期间已 ack 这条消息、或者 push token 换了，就放弃。重试状态不跨重启保存，设备仍能从 `/v1/sync` 拿到消息。App 还会在后台大约每 6 小时同步一次（iOS 用 `BGAppRefreshTask`，Android 用 WorkManager）：应用修改和删除、更新角标，但不会补发通知。
 
 ## 运行网关
 
@@ -62,6 +64,13 @@ docker run -p 8080:8080 -v honk-data:/data \
 | `HONK_APNS_KEY_ID` / `HONK_APNS_TEAM_ID` / `HONK_APNS_TOPIC` | | 设置了 key 文件时必填；topic 就是 bundle ID |
 | `HONK_APNS_SANDBOX` | `false` | 用 APNs 开发环境，开发版构建要设为 true |
 | `HONK_FCM_CREDENTIALS_FILE` | | Firebase service account JSON；不设就不推 Android |
+| `HONK_PUSH_QUEUE` / `HONK_PUSH_WORKERS` | `1024` / `16` | 推送队列最多排几条（满了就丢弃并计数）/ 同时在发的推送数 |
+| `HONK_REGISTER_KEY` | | 设了以后 `POST /v1/devices` 必须带相同的 `register_key`，`/v1/info` 会返回 `register_key_required`。App 的网关页有可选的「注册口令」输入框 |
+| `HONK_METRICS_ADDR` | | 例如 `127.0.0.1:9100`：在单独的端口提供 Prometheus 文本格式的 `/metrics`；留空就不开 |
+| `HONK_LOG_FORMAT` | `text` | 设成 `json` 输出结构化日志 |
+| `HONK_LOG_LEVEL` | `info` | 设成 `debug` 会再记录每个请求（路径里的 bot token 不会出现在日志里） |
+
+`/metrics` 有 `honk_messages_total{kind}`、`honk_pushes_total{platform,route,result}`（结果是 `ok`、`retry`、`token_gone`、`failed`）、`honk_push_retries_total`、`honk_push_dropped_total{reason}`、`honk_http_requests_total{class}`，以及量表 `honk_devices`、`honk_bots`、`honk_push_queue_length`。
 
 ## Bot API
 
@@ -164,8 +173,9 @@ App 把内联 SVG（`svg`、`g`、各种图形、`text`/`tspan`、渐变、`symb
 
 | 接口 | 说明 |
 | --- | --- |
-| `POST /v1/devices` | `{"platform":"ios"\|"android","push_token":"…"}`，返回 `device` 和 `device_secret` |
-| `GET` / `PUT` / `DELETE /v1/devices/me` | 读取设备信息；更新 push token；删除设备及它的所有 bot 和消息 |
+| `GET /v1/info` | `{"name":"honk","version","api":2}`；设了 `HONK_REGISTER_KEY` 时多一个 `register_key_required` |
+| `POST /v1/devices` | `{"platform":"ios"\|"android","push_token":"…","register_key":"…"}`（网关要求口令时才需要带 `register_key`），返回 `device` 和 `device_secret` |
+| `GET` / `PUT` / `DELETE /v1/devices/me` | 读取设备信息；更新 push token；删除设备及它的所有 bot 和消息（App「设置 → 删除这台设备的数据」调用它，成功后再清空本机） |
 | `GET` / `POST /v1/bots` | 列出 bot；创建 bot：`{"name","avatar","default_level"}`，返回 `bot` 和 `token`。`avatar` 是 `preset:<icon>:<#rrggbb>`、https URL，或 `local:<文件名>`：用户在 App 里从相册选的图片，只存在手机上（网关只存这个名字） |
 | `GET` / `PATCH` / `DELETE /v1/bots/:id` | 读取、修改、删除一个 bot（`:id` 是 bot 的短 id） |
 | `POST /v1/bots/:id/token` | 重置 token，旧 token 立即失效 |
