@@ -7,10 +7,12 @@ import HonkCardC
 /// .set and .close, and hears timer changes as honk.card.changed.
 ///
 /// Strings in and out are JSON (see honk_card.h); this class only keeps cards,
-/// schedules ticks and drops the oldest card past `maxCards`.
+/// schedules ticks and drops the least recently used cards past `maxCards` or `memoryBudget`.
 public final class CardHost: @unchecked Sendable {
     /// Cards kept at once; opening one more closes the least recently used.
-    public static let maxCards = 16
+    public static let maxCards = 8
+    /// Heap of all cards together; past it the least recently used other cards are closed.
+    public static let memoryBudget: UInt = 32 * 1024 * 1024
 
     private let queue = DispatchQueue(label: "honk.cards", qos: .userInitiated)
     private var cards: [String: OpaquePointer] = [:]
@@ -44,6 +46,7 @@ public final class CardHost: @unchecked Sendable {
             self.cards[key] = card
             self.touch(key)
             self.schedule(key)
+            self.keepWithinBudget(sparing: key)
             return Self.take(result)
         }
     }
@@ -85,6 +88,7 @@ public final class CardHost: @unchecked Sendable {
             self.touch(key)
             let result = Self.take(body(card))
             self.schedule(key)
+            self.keepWithinBudget(sparing: key)
             return result
         }
     }
@@ -92,6 +96,15 @@ public final class CardHost: @unchecked Sendable {
     private func touch(_ key: String) {
         used.removeAll { $0 == key }
         used.append(key)
+    }
+
+    /// Closes the least recently used cards (never `key`) while all cards together hold more than the budget.
+    private func keepWithinBudget(sparing key: String) {
+        var total = cards.values.reduce(UInt(0)) { $0 + UInt(honk_card_memory($1)) }
+        for other in used where total > Self.memoryBudget && other != key {
+            if let card = cards[other] { total -= UInt(honk_card_memory(card)) }
+            closeNow(other)
+        }
     }
 
     private func closeNow(_ key: String) {
@@ -116,6 +129,7 @@ public final class CardHost: @unchecked Sendable {
         guard let card = cards[key] else { return }
         let result = Self.take(honk_card_tick(card))
         schedule(key)
+        keepWithinBudget(sparing: key)
         // Only changes are worth a message to the app.
         if !result.hasPrefix(#"{"tree":null,"prevented":false,"stopped":null,"logs":[]}"#) { changed(key, result) }
     }

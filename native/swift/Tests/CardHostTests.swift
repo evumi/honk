@@ -65,6 +65,17 @@ private final class Changes: @unchecked Sendable {
     #expect(host.count == 0)
 }
 
+@Test func closesOldCardsPastTheMemoryBudget() async throws {
+    let host = CardHost { _, _ in }
+    // About 5 MB each: seven of them pass 32 MB.
+    for i in 0..<7 { _ = await host.open(key: "m\(i)", load: load("var keep = []; for (var i = 0; i < 60; i++) keep.push(new Array(10000).fill(i + 0.5));")) }
+    #expect(host.count < 7)
+    let newest = await host.set(key: "m6", state: "{}")
+    #expect(!newest.contains("\"stopped\":\"closed\""))
+    let oldest = await host.set(key: "m0", state: "{}")
+    #expect(oldest.contains("\"stopped\":\"closed\""))
+}
+
 @Test func keepsAtMostMaxCards() async throws {
     let host = CardHost { _, _ in }
     for i in 0..<(CardHost.maxCards + 3) { _ = await host.open(key: "k\(i)", load: load("")) }

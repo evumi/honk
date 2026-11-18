@@ -552,6 +552,8 @@ double honk_card_next(HonkCard *c) {
     return left < 0 ? 0 : left;
 }
 
+unsigned long honk_card_memory(HonkCard *c) { return (unsigned long)c->allocated; }
+
 void honk_card_close(HonkCard *c) {
     if (!c) return;
     for (int i = 0; i < FN_COUNT; i++) JS_FreeValue(c->ctx, c->fns[i]);

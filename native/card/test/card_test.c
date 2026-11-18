@@ -168,6 +168,22 @@ static void test_timers_and_promises(void) {
     honk_card_close(c);
 }
 
+static void test_same_writes_change_nothing(void) {
+    char *r;
+    HonkCard *c = open_card(
+        "\"var p = document.getElementById('out'); p.textContent = 'same'; p.setAttribute('class', 'a');"
+        "setInterval(function () { p.textContent = 'same'; p.setAttribute('class', 'a'); p.innerHTML = 'same' }, 16)\"",
+        &r);
+    honk_card_free_string(r);
+    unsigned long mem = honk_card_memory(c);
+    CHECK(mem > 0 && mem < 8 * 1024 * 1024, "memory: %lu", mem);
+    usleep(20000);
+    r = honk_card_tick(c);
+    CHECK(has(r, "\"tree\":null"), "same writes sent a tree: %.200s", r);
+    honk_card_free_string(r);
+    honk_card_close(c);
+}
+
 static void test_cpu_per_second(void) {
     char *r;
     HonkCardLimits l = honk_card_default_limits();
@@ -245,6 +261,7 @@ int main(void) {
     test_taps_links_and_copy();
     test_tampering_cannot_forge_effects();
     test_timers_and_promises();
+    test_same_writes_change_nothing();
     test_cpu_per_second();
     test_dom_and_output_limits();
     test_bad_scripts_and_theme_events();

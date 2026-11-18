@@ -66,6 +66,10 @@ JNIEXPORT jdouble JNICALL Java_dev_evumi_honk_core_CardNative_next(JNIEnv *env, 
     return honk_card_next(CARD(h));
 }
 
+JNIEXPORT jlong JNICALL Java_dev_evumi_honk_core_CardNative_memory(JNIEnv *env, jclass cls, jlong h) {
+    return (jlong)honk_card_memory(CARD(h));
+}
+
 JNIEXPORT void JNICALL Java_dev_evumi_honk_core_CardNative_close(JNIEnv *env, jclass cls, jlong h) {
     honk_card_close(CARD(h));
 }

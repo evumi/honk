@@ -76,6 +76,14 @@ class CardHostTest {
         assertEquals(0, host.count)
     }
 
+    @Test fun closesOldCardsPastTheMemoryBudget() {
+        // About 5 MB each: seven of them pass 32 MB.
+        repeat(7) { host.open("m$it", load("var keep = []; for (var i = 0; i < 60; i++) keep.push(new Array(10000).fill(i + 0.5));")) }
+        assertTrue(host.count < 7)
+        assertTrue(!host.set("m6", "{}").contains("\"stopped\":\"closed\""))
+        assertTrue(host.set("m0", "{}").contains("\"stopped\":\"closed\""))
+    }
+
     @Test fun keepsAtMostMaxCards() {
         repeat(CardHost.MAX_CARDS + 3) { host.open("k$it", load("")) }
         assertEquals(CardHost.MAX_CARDS, host.count)

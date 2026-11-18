@@ -17,6 +17,7 @@ internal object CardNative {
     @JvmStatic external fun tick(card: Long): ByteArray?
     @JvmStatic external fun set(card: Long, state: ByteArray): ByteArray?
     @JvmStatic external fun next(card: Long): Double
+    @JvmStatic external fun memory(card: Long): Long
     @JvmStatic external fun close(card: Long)
 }
 
@@ -32,7 +33,9 @@ internal object CardNative {
 class CardHost(private val changed: (key: String, result: String) -> Unit) {
     companion object {
         /** Cards kept at once; opening one more closes the least recently used. */
-        const val MAX_CARDS = 16
+        const val MAX_CARDS = 8
+        /** Heap of all cards together; past it the least recently used other cards are closed. */
+        const val MEMORY_BUDGET = 32L * 1024 * 1024
         private const val NO_RUNTIME = """{"tree":null,"prevented":false,"stopped":"error","logs":["no runtime"]}"""
         private const val CLOSED = """{"tree":null,"prevented":false,"stopped":"closed","logs":[]}"""
         private const val UNCHANGED = """{"tree":null,"prevented":false,"stopped":null,"logs":[]}"""
@@ -56,6 +59,7 @@ class CardHost(private val changed: (key: String, result: String) -> Unit) {
         if (card == 0L) return@onThread NO_RUNTIME
         cards[key] = card
         schedule(key)
+        keepWithinBudget(sparing = key)
         text(out[0])
     }
 
@@ -86,7 +90,19 @@ class CardHost(private val changed: (key: String, result: String) -> Unit) {
         val card = cards[key] ?: return@onThread CLOSED
         val result = text(body(card))
         schedule(key)
+        keepWithinBudget(sparing = key)
         result
+    }
+
+    /** Closes the least recently used cards (never `sparing`) while all cards together hold more than the budget. */
+    private fun keepWithinBudget(sparing: String) {
+        var total = cards.values.sumOf { CardNative.memory(it) }
+        for (other in cards.keys.toList()) {
+            if (total <= MEMORY_BUDGET) break
+            if (other == sparing) continue
+            total -= CardNative.memory(cards.entries.first { it.key == other }.value)
+            closeNow(other)
+        }
     }
 
     private fun closeNow(key: String) {
@@ -109,6 +125,7 @@ class CardHost(private val changed: (key: String, result: String) -> Unit) {
         val card = cards.entries.firstOrNull { it.key == key }?.value ?: return
         val result = text(CardNative.tick(card))
         schedule(key)
+        keepWithinBudget(sparing = key)
         // Only changes are worth a message to the app.
         if (!result.startsWith(UNCHANGED)) changed(key, result)
     }

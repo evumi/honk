@@ -85,7 +85,9 @@
       return this._text;
     }
     set textContent(v) {
-      this._text = v == null ? "" : String(v);
+      const t = v == null ? "" : String(v);
+      if (t === this._text) return; // writing the same text again changes nothing
+      this._text = t;
       if (this.isConnected) mutate();
     }
     get data() {
@@ -385,12 +387,18 @@
     }
     set textContent(v) {
       const s = v == null ? "" : String(v);
+      const only = this._children.length === 1 ? this._children[0] : null;
+      if (only instanceof Text ? only._text === s : s === "" && this._children.length === 0) return;
       this.replaceChildren(...(s ? [new Text(s)] : []));
     }
     get innerText() { return this.textContent; }
     set innerText(v) { this.textContent = v; }
     get innerHTML() { return serialize(this._children); }
-    set innerHTML(v) { this.replaceChildren(...parseHTML(v == null ? "" : String(v))); }
+    set innerHTML(v) {
+      const html = v == null ? "" : String(v);
+      if (html === serialize(this._children)) return;
+      this.replaceChildren(...parseHTML(html));
+    }
     get outerHTML() { return serialize([this]); }
     insertAdjacentHTML(pos, html) {
       const nodes = parseHTML(String(html));

@@ -65,6 +65,9 @@ char *honk_card_set(HonkCard *card, const char *state_json);
 /** Milliseconds until the next tick is due; negative when there is none (or the card stopped). */
 double honk_card_next(HonkCard *card);
 
+/** Bytes the card's runtime holds now (at most the memory limit); hosts use it for a budget across cards. */
+unsigned long honk_card_memory(HonkCard *card);
+
 void honk_card_close(HonkCard *card);
 
 void honk_card_free_string(char *s);

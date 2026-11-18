@@ -310,7 +310,7 @@ Telegram 的 widget 一般用 class 加 `<style>` 写，所以 Honk 也按样式
 | `native/quickjs/` | quickjs-ng 的引擎核心（只有 `quickjs.c`、`libregexp.c`、`libunicode.c`、`dtoa.c` 和头文件），不带 `quickjs-libc`，所以卡片没有文件、网络、进程和 `std` / `os` 模块。版本见 `VERSION` |
 | `native/card/honk_card.c` | 沙箱：每张卡片一个 `JSRuntime`，自己的分配器计内存（超过 8MB 拒绝分配并中断，脚本抓不到），中断回调按截止时间停任务，栈上限 256KB；每秒脚本时间超过 300ms 时，下一次 tick 推到下一秒。读脚本返回的东西时只读自有数据属性和自己解析的 JSON，不会触发卡片的 getter；链接只放行 https、≤ 256 字符、每次点击一次，复制 1–256 字符、每次点击一次；树超过 512KB 就停止卡片 |
 | `native/card/runtime.js` | 卡片里的页面：精简 DOM（节点、属性、`classList`、`style`、`dataset`、`innerHTML`、选择器、事件冒泡、`onclick`）、定时器（由宿主的 tick 驱动）、4KB 的 `localStorage` / `sessionStorage`、`console`、`TelegramWidget`。`gen_runtime.py` 把它生成 `runtime_js.h` 编进 C 里 |
-| `native/Package.swift`、`native/swift/HonkCard/CardHost.swift` | iOS：本地 Swift 包。`CardHost` 把所有卡片放在一个串行队列上，按 `honk_card_next` 安排 tick，最多同时保留 16 张卡片（多了关掉最久没用的） |
+| `native/Package.swift`、`native/swift/HonkCard/CardHost.swift` | iOS：本地 Swift 包。`CardHost` 把所有卡片放在一个串行队列上，按 `honk_card_next` 安排 tick；最多同时保留 8 张卡片，所有卡片的堆加起来超过 32MB 时也关掉最久没用的（`honk_card_memory`） |
 | `native/jni/`、`android/core/.../CardHost.kt` | Android：JNI（字符串用 UTF-8 字节数组传，JNI 自己的字符串是修改过的 UTF-8）和与 Swift 相同的 `CardHost`，在一个 4MB 栈的后台线程上；`libhonkcard.so` 由 `android/app` 的 CMake 构建 |
 | `app/src/widget/Widget.tsx`、`sanitize.ts` | App：有 `<script>` 的卡片先显示静态卡片，再把填好 `{{key}}` 的节点树交给宿主；之后按宿主返回的树渲染。返回的树一律再过一遍白名单（`cleanTree`：标签、属性、链接、CSS、2000 个节点、128 层），因为卡片在自己的运行时里能改掉一切 |
 
@@ -324,7 +324,7 @@ Telegram 的 widget 一般用 class 加 `<style>` 写，所以 Honk 也按样式
 | `honk.card.close` | `{key}` | `true` |
 | 事件 `honk.card.changed` | `{key, result}` | 定时器或 Promise 改了卡片 |
 
-结果是 `{tree, prevented, open?, copy?, stopped, logs}`：`tree` 只在变化时给；`open` / `copy` 由 App 用已有的 `openUrl` 和剪贴板执行；`prevented` 为假时，再执行被点元素自己的链接。有点击处理函数的元素在树里带 `on: true`，App 只让这些元素可点。
+结果是 `{tree, prevented, open?, copy?, stopped, logs}`：`tree` 只在变化时给（写入相同的文字、属性或 `innerHTML` 不算变化），App 收到和屏幕上相同的树也不重画；`open` / `copy` 由 App 用已有的 `openUrl` 和剪贴板执行；`prevented` 为假时，再执行被点元素自己的链接。有点击处理函数的元素在树里带 `on: true`，App 只让这些元素可点。
 
 限制，和 Telegram 对比：
 
@@ -338,7 +338,7 @@ Telegram 的 widget 一般用 class 加 `<style>` 写，所以 Honk 也按样式
 | 定时器 | 64；`setInterval` 最短 16ms；App 不在前台时每秒最多一次 | 64 |
 | 每种事件的处理函数 | 16 | 16 |
 | `localStorage` | 4KB，只在这次运行内有效 | 4KB / 条消息 |
-| 同时运行的卡片 | 16 | |
+| 同时运行的卡片 | 8 张，堆合计 32MB，超出关掉最久没用的 | |
 
 脚本在宿主的后台线程上跑，卡死也不会卡住界面。“停止”：卡片保留最后一次画出的样子，不再响应；因为超时停止的卡片还会把最后的树交出来。没被捕获的异常只写日志（`logs`，App 打到控制台），卡片继续运行。
 

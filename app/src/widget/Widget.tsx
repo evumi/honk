@@ -457,6 +457,8 @@ function fillTree(nodes: WidgetNode[], data: Record<string, unknown>): WidgetNod
 
 interface CardResult {
   tree: WidgetNode[] | null;
+  /** The tree as the card sent it, to skip a redraw when nothing changed. */
+  raw: string | null;
   paths: Map<ElementNode, number[]>;
   prevented: boolean;
   open: string | null;
@@ -473,7 +475,8 @@ function readResult(json: unknown): CardResult {
   const str = (v: unknown) => (typeof v === "string" ? v : null);
   for (const line of Array.isArray(r.logs) ? r.logs.slice(0, 20) : []) console.log(`[card] ${String(line)}`);
   const paths = new Map<ElementNode, number[]>();
-  return { tree: r.tree == null ? null : cleanTree(r.tree, paths), paths, prevented: r.prevented === true, open: str(r.open), copy: str(r.copy) };
+  const raw = r.tree == null ? null : JSON.stringify(r.tree);
+  return { tree: r.tree == null ? null : cleanTree(r.tree, paths), raw, paths, prevented: r.prevented === true, open: str(r.open), copy: str(r.copy) };
 }
 
 let cardSeq = 0;
@@ -484,10 +487,13 @@ function ScriptedWidget(props: { nodes: WidgetNode[]; data: Record<string, unkno
   const tree = signal<WidgetNode[] | null>(null);
   let paths = new Map<ElementNode, number[]>();
   let closed = false;
+  let lastRaw: string | null = null;
 
   const apply = (json: unknown): CardResult => {
     const r = readResult(json);
-    if (r.tree && !closed) {
+    // A tree equal to the one on screen (a timer wrote the same text again) is not drawn again.
+    if (r.tree && !closed && r.raw !== lastRaw) {
+      lastRaw = r.raw;
       paths = r.paths;
       tree.set(r.tree);
     }
