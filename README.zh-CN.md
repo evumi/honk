@@ -255,7 +255,7 @@ honk preview card.html --data data.json --watch             # 每次保存都重
 
 ## 端到端加密
 
-按 bot 打开：Bot 设置里的「端到端加密」。App 生成 32 字节的随机密钥，存在 iOS 与通知扩展共用的钥匙串组，或 Android 的 Keystore 加密偏好里，和 token 并排显示并可复制，同时告诉网关这个 bot 已加密（`PATCH /v1/bots/:id {"encrypted":true}`）。之后网关对这个 bot 的明文 `sendMessage`、`editMessageData` 一律返回 400。发送方需要 token 和密钥。重置密钥会换一把新的，旧的作废，已收到的消息不受影响；关闭加密会删除本机的密钥，bot 又可以发明文。
+按 bot 打开：Bot 设置里的「端到端加密」。App 生成 32 字节的随机密钥，存在 iOS 与通知扩展共用的钥匙串组，或 Android 的 Keystore 加密偏好里，和 token 并排显示并可复制，同时告诉网关这个 bot 已加密（`PATCH /v1/bots/:id {"encrypted":true}`）。之后网关对这个 bot 的明文 `sendMessage`、`editMessageData` 一律返回 400。发送方需要 token 和密钥。重置密钥会换一把新的，旧的作废，已收到的消息不受影响。多台设备（[设备组](#工作方式)）时，设备组有一把 32 字节的组密钥，第一次配对时生成，各设备存在自己的钥匙串 / Keystore 里，不会明文到网关：配对数据包（用配对码封装）把它和各 bot 的密钥带给新手机。任何一台设备打开加密或重置密钥时，App 用组密钥把 bot 密钥封装起来，存到网关上作为 bot 的 `key_wrapped`（`PATCH /v1/bots/:id`，`GET /v1/bots` 返回），组里的其他设备在下次刷新时、或收到解不开的消息时解开它，马上就能解密。带着自己加密 bot 的手机加入设备组时，采用组的密钥并用它重新封装这些 bot 的密钥。网关打不开 `key_wrapped`；关闭加密会删除本机的密钥，bot 又可以发明文。
 
 它让网关运营者、泄露的数据库、推送中继、苹果和谷歌读不到消息内容。它不防发送方被攻破、设备本机被攻破和流量分析：网关仍然知道哪个 bot 在什么时候收到多大的消息，以及仍是明文的 `level`、`group`、`id`、`ttl`、`silent`。加密消息的推送不带标题、正文和 bot 名（横幅在设备上解密后再生成）；解不开的消息（这台设备没有密钥、密钥不对）显示为「无法解密的通知」。
 
@@ -263,7 +263,7 @@ honk preview card.html --data data.json --watch             # 每次保存都重
 | --- | --- |
 | 参数 | `sendMessage` 的 `ciphertext`，base64url，最大 64 KB。此时 `body` 不必填；旁边再带 `title`、`body`、`html`、`data`、`url`、`copy`、`icon` 会被拒绝 |
 | 字节 | 12 字节 nonce，接 AES-256-GCM 密文，再接 16 字节 tag；无填充 base64url |
-| 明文 | JSON `{"title","body","html","data","url","copy","icon"}`，字段都是字符串且可省略（`data` 和明文发送一样是 JSON 文本） |
+| 明文 | JSON `{"title","body","html","data","url","copy","icon","image"}`，字段都是字符串且可省略（`data` 和明文发送一样是 JSON 文本） |
 | AAD | bot 的短 id，即 token 里冒号前的部分 |
 | 仍是明文 | `level`、`group`、`id`、`ttl`、`silent` |
 | 修改 | `editMessageData` 的 `ciphertext`，明文是 `{"data":"…"}` |
@@ -407,7 +407,7 @@ GitHub 适配不校验 `X-Hub-Signature-256`：URL 里的 token 就是密钥，�
 | `POST /v1/links` | `{"link_id","bundle"}`：保存一份配对数据（不透明的 base64url，最大 16 KB；`link_id` 是 16 到 64 个 base64url 字符），10 分钟有效，每个设备组同时只有一个，返回 `expires_in` 秒数；`link_id` 已被占用时返回 409 |
 | `POST /v1/links/claim` | 新设备发 `{"link_id"}`：把它所在的整个设备组（设备、bot、排队的消息）并入创建配对的设备组，返回 `bundle`。只能用一次；未知、过期或已用过返回 404；合并后超过 bot 上限返回 400；同一 IP 尝试太多返回 429（突发 5 次，之后每小时 10 次） |
 | `GET` / `POST /v1/bots` | 列出 bot；创建 bot：`{"name","avatar","default_level"}`，返回 `bot` 和 `token`。`avatar` 是 `preset:<icon>:<#rrggbb>`、https URL，或 `local:<文件名>`：用户在 App 里从相册选的图片，只存在手机上（网关只存这个名字） |
-| `GET` / `PATCH` / `DELETE /v1/bots/:id` | 读取、修改、删除一个 bot（`:id` 是 bot 的短 id）。`PATCH` 接受 `name`、`avatar`、`default_level` 和 `encrypted`（`true`：拒绝这个 bot 的明文发送；密钥本身不会到网关） |
+| `GET` / `PATCH` / `DELETE /v1/bots/:id` | 读取、修改、删除一个 bot（`:id` 是 bot 的短 id）。`PATCH` 接受 `name`、`avatar`、`default_level`、`encrypted`（`true`：拒绝这个 bot 的明文发送）和 `key_wrapped`（用组密钥封装的 bot 密钥，80 个 base64url 字符，空串表示清除；密钥本身不会明文到网关） |
 | `POST /v1/bots/:id/token` | 重置 token，旧 token 立即失效 |
 | `GET /v1/messages/:id` | 拉一条消息；条目可能是 `message`、`edit` 或 `delete` |
 | `GET /v1/sync?cursor=&limit=` | 拉 cursor 之后的消息，返回 `messages`、`cursor`、`has_more` |
