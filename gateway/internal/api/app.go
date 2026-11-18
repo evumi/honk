@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -59,6 +60,7 @@ func (s *Server) registerDevice(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Platform  string `json:"platform"`
 		PushToken string `json:"push_token"`
+		Key       string `json:"register_key"`
 	}
 	if err := decode(r, &in); err != nil {
 		s.fail(w, r, err)
@@ -66,6 +68,10 @@ func (s *Server) registerDevice(w http.ResponseWriter, r *http.Request) {
 	}
 	if !s.allowRegistration(r) {
 		s.fail(w, r, apiError{http.StatusTooManyRequests, "Too Many Requests: too many devices registered from this address"})
+		return
+	}
+	if k := s.opts.RegisterKey; k != "" && subtle.ConstantTimeCompare([]byte(in.Key), []byte(k)) != 1 {
+		s.fail(w, r, apiError{http.StatusUnauthorized, "Unauthorized: this gateway needs a register_key"})
 		return
 	}
 	if in.Platform != "ios" && in.Platform != "android" {

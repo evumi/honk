@@ -95,6 +95,7 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request, bot store.B
 		s.fail(w, r, err)
 		return
 	}
+	s.m.messages.Inc(store.KindMessage)
 	s.notify(dev, push.Notification{
 		Kind: store.KindMessage, MessageID: m.ID, BotID: bot.ID, BotName: bot.Name,
 		Title: m.Title, Body: m.Body, Group: m.Group, Level: m.Level, CollapseID: m.CollapseID,
@@ -141,6 +142,7 @@ func (s *Server) changeMessage(w http.ResponseWriter, r *http.Request, bot store
 		s.fail(w, r, err)
 		return
 	}
+	s.m.messages.Inc(kind)
 	s.notify(dev, push.Notification{
 		Kind: kind, MessageID: m.ID, TargetID: m.TargetID, BotID: bot.ID, BotName: bot.Name, CollapseID: m.CollapseID,
 	})

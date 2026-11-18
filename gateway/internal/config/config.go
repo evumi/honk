@@ -3,6 +3,7 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"strconv"
 	"time"
@@ -19,6 +20,11 @@ type Config struct {
 
 	RegisterPerHour  float64 // HONK_REGISTER_PER_HOUR: device registrations per client IP, default 10
 	MaxBotsPerDevice int     // HONK_MAX_BOTS_PER_DEVICE, default 100
+
+	MetricsAddr string // HONK_METRICS_ADDR: listen address of /metrics; empty (default) turns it off
+	RegisterKey string // HONK_REGISTER_KEY: when set, device registration must send the same register_key
+	LogFormat   string // HONK_LOG_FORMAT: text (default) or json
+	LogLevel    string // HONK_LOG_LEVEL: debug, info (default), warn or error; debug also logs every request
 
 	PushQueue   int // HONK_PUSH_QUEUE: pushes that may wait, default 1024
 	PushWorkers int // HONK_PUSH_WORKERS: concurrent pushes, default 16
@@ -52,6 +58,10 @@ func Load() (Config, error) {
 		SendBurst:        20,
 		RegisterPerHour:  10,
 		MaxBotsPerDevice: 100,
+		MetricsAddr:      os.Getenv("HONK_METRICS_ADDR"),
+		RegisterKey:      os.Getenv("HONK_REGISTER_KEY"),
+		LogFormat:        env("HONK_LOG_FORMAT", "text"),
+		LogLevel:         env("HONK_LOG_LEVEL", "info"),
 		PushQueue:        1024,
 		PushWorkers:      16,
 		APNs: APNs{
@@ -104,10 +114,25 @@ func Load() (Config, error) {
 			return c, fmt.Errorf("HONK_APNS_SANDBOX: %w", err)
 		}
 	}
+	if c.LogFormat != "text" && c.LogFormat != "json" {
+		return c, fmt.Errorf("HONK_LOG_FORMAT: want text or json, got %q", c.LogFormat)
+	}
+	if _, err := ParseLevel(c.LogLevel); err != nil {
+		return c, fmt.Errorf("HONK_LOG_LEVEL: %w", err)
+	}
 	if c.APNs.KeyFile != "" && (c.APNs.KeyID == "" || c.APNs.TeamID == "" || c.APNs.Topic == "") {
 		return c, fmt.Errorf("HONK_APNS_KEY_FILE is set: HONK_APNS_KEY_ID, HONK_APNS_TEAM_ID and HONK_APNS_TOPIC are required too")
 	}
 	return c, nil
+}
+
+// ParseLevel maps debug, info, warn or error to a slog level.
+func ParseLevel(v string) (slog.Level, error) {
+	var l slog.Level
+	if err := l.UnmarshalText([]byte(v)); err != nil {
+		return l, fmt.Errorf("want debug, info, warn or error, got %q", v)
+	}
+	return l, nil
 }
 
 func env(key, def string) string {

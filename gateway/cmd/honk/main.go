@@ -32,6 +32,13 @@ func run(log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	level, _ := config.ParseLevel(cfg.LogLevel) // validated by Load
+	opts := &slog.HandlerOptions{Level: level}
+	if cfg.LogFormat == "json" {
+		log = slog.New(slog.NewJSONHandler(os.Stderr, opts))
+	} else {
+		log = slog.New(slog.NewTextHandler(os.Stderr, opts))
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -65,6 +72,7 @@ func run(log *slog.Logger) error {
 		Version: version, MessageTTL: cfg.MessageTTL, SendRate: cfg.SendRate, SendBurst: cfg.SendBurst,
 		RegisterPerHour: cfg.RegisterPerHour, MaxBotsPerDevice: cfg.MaxBotsPerDevice,
 		PushQueue: cfg.PushQueue, PushWorkers: cfg.PushWorkers,
+		RegisterKey: cfg.RegisterKey, AccessLog: level <= slog.LevelDebug,
 	})
 	httpSrv := &http.Server{
 		Addr:              cfg.Addr,
@@ -73,6 +81,19 @@ func run(log *slog.Logger) error {
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       120 * time.Second,
+	}
+
+	var metricsSrv *http.Server
+	if cfg.MetricsAddr != "" {
+		mux := http.NewServeMux()
+		mux.Handle("/metrics", srv.Metrics())
+		metricsSrv = &http.Server{Addr: cfg.MetricsAddr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+		go func() {
+			log.Info("metrics listening", "addr", cfg.MetricsAddr)
+			if err := metricsSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Error("metrics", "err", err)
+			}
+		}()
 	}
 
 	go cleanup(ctx, st, srv, cfg.AckedKeep, log)
@@ -93,6 +114,9 @@ func run(log *slog.Logger) error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	err = httpSrv.Shutdown(shutdownCtx)
+	if metricsSrv != nil {
+		_ = metricsSrv.Shutdown(shutdownCtx)
+	}
 	srv.Close() // pushes in flight finish (each has its own 10 s timeout); waiting retries are dropped
 	return err
 }

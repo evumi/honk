@@ -3,6 +3,8 @@ package api
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
@@ -165,4 +167,11 @@ func TestCloseDropsWaitingRetries(t *testing.T) {
 		t.Errorf("calls = %d after Close, want 1", p.calls())
 	}
 	e.s.notify(store.Device{PushOK: true, PushToken: "t", Platform: "ios"}, push.Notification{}) // must not panic
+}
+
+func httptestServe(t *testing.T, h http.Handler) string {
+	t.Helper()
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+	return srv.URL
 }

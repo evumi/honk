@@ -97,7 +97,7 @@ func New(st *store.Store, p push.Pusher, log *slog.Logger, opts Options) *Server
 // Handler returns the HTTP routes.
 func (s *Server) Handler() http.Handler {
 	r := chi.NewRouter()
-	r.Use(middleware.RealIP, middleware.Recoverer)
+	r.Use(middleware.RealIP, middleware.Recoverer, s.instrument)
 	r.Use(func(next http.Handler) http.Handler { // bodies here are small
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			r.Body = http.MaxBytesReader(w, r.Body, 128<<10)
@@ -111,7 +111,11 @@ func (s *Server) Handler() http.Handler {
 		// Lets the app check that an address is a Honk gateway before switching to it.
 		// api 2: bot ids are short strings (1: integers).
 		r.Get("/info", func(w http.ResponseWriter, r *http.Request) {
-			ok(w, map[string]any{"name": "honk", "version": s.opts.Version, "api": APIVersion})
+			info := map[string]any{"name": "honk", "version": s.opts.Version, "api": APIVersion}
+			if s.opts.RegisterKey != "" {
+				info["register_key_required"] = true
+			}
+			ok(w, info)
 		})
 		r.Post("/devices", s.registerDevice)
 		r.Group(func(r chi.Router) {
