@@ -17,9 +17,8 @@ import (
 	"github.com/evumi/honk/gateway/internal/store"
 )
 
-// maxRelayBody is the largest POST /v1/relay/push body. The biggest push
-// (full content) is about 2 KB of text; this leaves room for escapes.
-const maxRelayBody = 8 << 10
+// maxRelayBody is the largest POST /v1/relay/push body; see push.MaxRelayRequest.
+const maxRelayBody = push.MaxRelayRequest
 
 // relayWindow is the period over which a relay's dead-token ratio is judged.
 const relayWindow = time.Hour
@@ -170,12 +169,6 @@ func (s *Server) relayPush(w http.ResponseWriter, r *http.Request) {
 		relayError(w, http.StatusUnauthorized, "Unauthorized: relay blocked", 0)
 		return
 	}
-	if wait := s.relayWait(rel.ID); wait > 0 {
-		s.m.relayReqs.Inc("rate_limited")
-		relayError(w, http.StatusTooManyRequests, "Too Many Requests", wait)
-		return
-	}
-
 	r.Body = http.MaxBytesReader(w, r.Body, maxRelayBody)
 	var q relayPushRequest
 	if err := json.NewDecoder(r.Body).Decode(&q); err != nil {
@@ -209,6 +202,13 @@ func (s *Server) relayPush(w http.ResponseWriter, r *http.Request) {
 		relayError(w, http.StatusTooManyRequests, "Too Many Requests", wait)
 		return
 	}
+	// The relay's own budget is spent last: a request that is malformed or
+	// over the token's limit must not cost the relay's other pushes.
+	if wait := s.relayWait(rel.ID); wait > 0 {
+		s.m.relayReqs.Inc("rate_limited")
+		relayError(w, http.StatusTooManyRequests, "Too Many Requests", wait)
+		return
+	}
 	s.touchRelay(rel.ID)
 
 	n := push.Notification{
@@ -222,7 +222,7 @@ func (s *Server) relayPush(w http.ResponseWriter, r *http.Request) {
 	if q.TTL > 0 {
 		n.Expires = time.Now().Add(time.Duration(q.TTL) * time.Second)
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), push.RelayServerTimeout)
 	defer cancel()
 	err = p.Push(ctx, n)
 	switch {

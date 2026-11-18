@@ -294,9 +294,9 @@ func TestRelayRegistrationAuthAndValidation(t *testing.T) {
 	if code, _, _ := relayCall(t, e.srv.URL, "/v1/relay/push", key, []byte("{nope")); code != 400 {
 		t.Errorf("bad JSON: %d", code)
 	}
-	huge := map[string]any{"platform": "ios", "token": "t", "kind": "message", "msg_id": 1, "bot_id": "Kx3abcde", "body": strings.Repeat("x", 9000)}
+	huge := map[string]any{"platform": "ios", "token": "t", "kind": "message", "msg_id": 1, "bot_id": "Kx3abcde", "body": strings.Repeat("x", 40000)}
 	if code, _, _ := relayCall(t, e.srv.URL, "/v1/relay/push", key, huge); code != 413 {
-		t.Errorf("over 8 KB: %d", code)
+		t.Errorf("over 32 KB: %d", code)
 	}
 	// No FCM credentials on this relay.
 	if code, _, _ := relayCall(t, e.srv.URL, "/v1/relay/push", key, map[string]any{"platform": "android", "token": "t", "kind": "message", "msg_id": 1, "bot_id": "Kx3abcde"}); code != 503 {
@@ -340,11 +340,17 @@ func TestRelayRateLimits(t *testing.T) {
 	if code != 429 || params["retry_after"] == nil {
 		t.Errorf("per-token limit: %d %v", code, out)
 	}
-	// ... another token still works, until the relay's own bucket (burst 4) is empty.
-	if code, _ := push("b"); code != 200 {
-		t.Errorf("other token: %d", code)
+	// ... another token still works, until the relay's own bucket (burst 4) is
+	// empty. The refused third push and the malformed ones cost the relay nothing.
+	for i := 0; i < 5; i++ {
+		relayCall(t, e.srv.URL, "/v1/relay/push", key, map[string]any{"platform": "ios", "token": "x"})
 	}
-	code, out = push("c")
+	for _, tok := range []string{"b", "c"} {
+		if code, _ := push(tok); code != 200 {
+			t.Errorf("other token %s: %d", tok, code)
+		}
+	}
+	code, out = push("d")
 	if code != 429 {
 		t.Errorf("per-relay limit: %d %v", code, out)
 	}

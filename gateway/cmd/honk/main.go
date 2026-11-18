@@ -154,7 +154,7 @@ func run(log *slog.Logger) error {
 	if metricsSrv != nil {
 		_ = metricsSrv.Shutdown(shutdownCtx)
 	}
-	srv.Close() // pushes in flight finish (each has its own 10 s timeout); waiting retries are dropped
+	srv.Close() // pushes in flight finish (each has its own 15 s timeout); waiting retries are dropped
 	return err
 }
 
