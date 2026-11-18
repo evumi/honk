@@ -123,12 +123,24 @@ curl https://honk.example.com/bot$TOKEN/sendMessage \
 
 渲染时客户端还会再按自己的 CSS 白名单过滤一遍。
 
+### 卡片样式
+
+除了 `style=""`，卡片也可以像 Telegram widget 那样写 `<style>`：
+
+- 选择器：标签、`.class`、`#id`、属性选择器，组合写法（`div.card`），后代、子元素（`>`）和兄弟（`+`、`~`）组合符，`:first-child`、`:last-child`、`:nth-child()`，`:root`（`html`、`body` 也指它），一条规则可以写多个选择器
+- 层叠：按优先级和先后顺序；内联 `style` 优先，除非规则写了 `!important`
+- 变量：`:root` 或任意元素上的 `--x`，用 `var()` 读取；主题变量 `--tg-theme-*`
+- 深色模式：`@media (prefers-color-scheme: dark)` 和 `light-dark()` 跟随 App 的外观
+- `display: none` 隐藏元素；`<style>` 和 `class` 里也可以用 `{{key}}`
+
+只生效前 400 条规则；其他媒体查询、`@keyframes`、伪元素和 `:hover` 会被忽略。
+
 ### 卡片脚本（profile 2）
 
 卡片里的脚本和 Telegram HTML widget 的用法一样：
 
 - `window.TelegramWidget`：`chatData`（消息的 `data`）、`themeParams`、`colorScheme`；`onEvent('themeChanged' | 'activated' | 'deactivated', …)`；在点击处理函数里调用 `openLink(url)`、`copyText(text)`
-- 精简 DOM：`getElementById`、`querySelector`、`textContent`、`innerHTML`、`classList`、`style`、`dataset`、`createElement`、`addEventListener('click', …)`
+- 精简 DOM：`getElementById`、`querySelector`、`textContent`、`innerHTML`、`classList`（改 class 会按 `<style>` 重新套样式）、`style`、`dataset`、`createElement`、`addEventListener('click', …)`
 - 定时器，以及 4 KB 的 `localStorage`
 
 App 在自己的沙箱里运行脚本：一个只支持 JavaScript 子集的解释器（不支持 class、`async`、生成器和正则表达式），不能联网，也碰不到 App。每个任务（加载时的脚本、一次定时器、一次点击）最多 100 毫秒，超时或超出内存预算时卡片停止运行，保留最后画出的样子。`request()` 一律返回 `NOT_ALLOWED`：Honk 还没有 bot 回调。不支持脚本的旧版 App，以及脚本无法解析的卡片，显示填好 `{{key}}` 的静态卡片。例子：

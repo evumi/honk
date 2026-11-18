@@ -76,6 +76,25 @@ func TestCleanKeepsInlineScript(t *testing.T) {
 	}
 }
 
+func TestCleanKeepsStyleSheet(t *testing.T) {
+	// A card written as for a Telegram widget: a <style> block in <head>,
+	// classes and ids, media queries, custom properties and {{key}} in both.
+	sheet := `:root { --accent: #f00 } .card > .title, #x { color: var(--accent) } ` +
+		`.status-{{status}} .pill { background: {{tone}} } ` +
+		`@media (prefers-color-scheme: dark) { .card { color: light-dark(#000, #fff) } }`
+	src := `<html><head><style>` + sheet + `</style></head><body>` +
+		`<div class="card status-{{status}}"><p class="title" id="x">t</p><span class="pill">{{label}}</span></div></body></html>`
+	got, err := Clean(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"<style>" + sheet + "</style>", `class="card status-{{status}}"`, `class="title" id="x"`, `class="pill"`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("cleaned HTML lost %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestCleanKeepsDataImage(t *testing.T) {
 	src := `<img src="data:image/png;base64,iVBORw0KGgo=" alt="x"><div style="background:url(data:image/png;base64,iVBO)">y</div>`
 	got, err := Clean(src)

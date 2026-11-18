@@ -10,6 +10,7 @@ import { Abort, ArrayObj, FnObj, Interp, LIMITS, Native, Obj, PlainObj, Throw, t
 import { parse, parseStyle, type ElementNode, type TextNode, type WidgetNode } from "./parse";
 import { ALLOWED_TAGS, allowedAttr, badCSS, sanitize } from "./sanitize";
 import { parseScript, ScriptSyntaxError, type Program } from "./script";
+import { matches, parseSelector, type TreeEnv } from "./selector";
 
 /** Limits, after Telegram's widget limits (core.telegram.org/bots/widgets), scaled for an interpreter on the UI thread. */
 export const SANDBOX_LIMITS = {
@@ -632,116 +633,20 @@ function camel(s: string): string {
 
 // MARK: selectors
 
-interface Compound {
-  tag?: string;
-  id?: string;
-  classes: string[];
-  attrs: { name: string; op?: string; value?: string }[];
-}
-type Selector = { parts: Compound[]; combinators: string[] }[];
-
-const selectorCache = new Map<string, Selector>();
-
-export function parseSelector(src: string): Selector | null {
-  const cached = selectorCache.get(src);
-  if (cached) return cached;
-  const groups: Selector = [];
-  for (const raw of src.split(",")) {
-    const s = raw.trim();
-    if (!s) return null;
-    const parts: Compound[] = [];
-    const combinators: string[] = [];
-    const re = /\s*(>)\s*|\s+|([^\s>]+)/g;
-    let m: RegExpExecArray | null;
-    let pending = "";
-    while ((m = re.exec(s))) {
-      if (m[2]) {
-        const c = parseCompound(m[2]);
-        if (!c) return null;
-        if (parts.length) combinators.push(pending || " ");
-        parts.push(c);
-        pending = "";
-      } else if (m[1]) pending = ">";
-      else if (!pending) pending = " ";
-    }
-    if (!parts.length) return null;
-    groups.push({ parts, combinators });
-  }
-  if (selectorCache.size > 256) selectorCache.clear();
-  selectorCache.set(src, groups);
-  return groups;
-}
-
-function parseCompound(s: string): Compound | null {
-  const c: Compound = { classes: [], attrs: [] };
-  const re = /^(\*|[a-zA-Z][\w-]*)|#([\w-]+)|\.([\w-]+)|\[\s*([\w-]+)\s*(?:([~^$*|]?=)\s*(?:"([^"]*)"|'([^']*)'|([\w-]+))\s*)?\]/y;
-  let i = 0;
-  let first = true;
-  while (i < s.length) {
-    re.lastIndex = i;
-    const m = re.exec(s);
-    if (!m || m.index !== i || (m[1] && !first)) return null;
-    if (m[1]) c.tag = m[1] === "*" ? undefined : m[1].toLowerCase();
-    else if (m[2]) c.id = m[2];
-    else if (m[3]) c.classes.push(m[3]);
-    else c.attrs.push({ name: m[4].toLowerCase(), op: m[5], value: m[6] ?? m[7] ?? m[8] });
-    i = re.lastIndex;
-    first = false;
-  }
-  return c;
-}
-
-function matchCompound(el: ElementNode, c: Compound): boolean {
-  if (c.tag && el.tag !== c.tag) return false;
-  if (c.id !== undefined && el.attrs.id !== c.id) return false;
-  if (c.classes.length) {
-    const cls = (el.attrs.class ?? "").split(/\s+/);
-    if (!c.classes.every((x) => cls.includes(x))) return false;
-  }
-  for (const a of c.attrs) {
-    const v = el.attrs[a.name];
-    if (v === undefined) return false;
-    if (!a.op) continue;
-    const want = a.value ?? "";
-    switch (a.op) {
-      case "=": if (v !== want) return false; break;
-      case "~=": if (!v.split(/\s+/).includes(want)) return false; break;
-      case "^=": if (!want || !v.startsWith(want)) return false; break;
-      case "$=": if (!want || !v.endsWith(want)) return false; break;
-      case "*=": if (!want || !v.includes(want)) return false; break;
-      case "|=": if (v !== want && !v.startsWith(want + "-")) return false; break;
-    }
-  }
-  return true;
-}
-
-function matches(sb: Sandbox, el: ElementNode, sel: Selector): boolean {
-  return sel.some((g) => {
-    const match = (node: ElementNode, k: number): boolean => {
-      if (!matchCompound(node, g.parts[k])) return false;
-      if (k === 0) return true;
-      const comb = g.combinators[k - 1];
-      let p = sb.parentOf(node);
-      if (comb === ">") return !!p && p.tag !== "#root" && match(p, k - 1);
-      while (p && p.tag !== "#root") {
-        if (match(p, k - 1)) return true;
-        p = sb.parentOf(p);
-      }
-      return false;
-    };
-    return match(el, g.parts.length - 1);
-  });
+function treeEnv(sb: Sandbox): TreeEnv {
+  return { parentOf: (n) => sb.parentOf(n), attr: (el, name) => el.attrs[name] };
 }
 
 function query(sb: Sandbox, root: ElementNode, src: string, all: boolean): ElementNode[] {
   const sel = parseSelector(src);
   if (!sel) sb.it.throwError("SyntaxError", `'${src}' is not a valid selector`);
   const out: ElementNode[] = [];
+  const env = treeEnv(sb);
   const walk = (el: ElementNode): boolean => {
     for (const c of el.children) {
       if (c.type !== "element") continue;
       sb.it.charge(1);
-      if (matches(sb, c, sel)) {
+      if (matches(c, sel, env)) {
         out.push(c);
         if (!all) return true;
       }
@@ -1141,14 +1046,14 @@ method(ELEMENT_METHODS, "matches", (it, s, a) => {
   const e = el(it, s);
   const sel = parseSelector(it.toStr(a[0]));
   if (!sel) return it.throwError("SyntaxError", "Not a valid selector");
-  return e.node !== e.sb.root && matches(e.sb, e.node, sel);
+  return e.node !== e.sb.root && matches(e.node, sel, treeEnv(e.sb));
 });
 method(ELEMENT_METHODS, "closest", (it, s, a) => {
   const e = el(it, s);
   const sel = parseSelector(it.toStr(a[0]));
   if (!sel) return it.throwError("SyntaxError", "Not a valid selector");
   for (let n: ElementNode | undefined = e.node; n && n !== e.sb.root; n = e.sb.parentOf(n)) {
-    if (matches(e.sb, n, sel)) return e.sb.wrap(n);
+    if (matches(n, sel, treeEnv(e.sb))) return e.sb.wrap(n);
   }
   return null;
 });

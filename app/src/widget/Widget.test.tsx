@@ -64,3 +64,65 @@ test("a card whose script stops keeps what it drew; one that cannot parse stays 
   await app2.press("id:chat-aZ3kQ9xT");
   await app2.waitFor("text:still static");
 });
+
+const styled = `<style>
+  :root { --accent: #ff0000 }
+  .card .title { color: var(--accent); font-weight: 700 }
+  p.note { color: #00ff00 }
+  #special { color: #0000ff }
+  .hidden, .{{hide}} { display: none }
+  .badge { color: {{tone}} }
+  @media (prefers-color-scheme: dark) { .card .title { color: #ffffff } }
+</style>
+<div class="card">
+  <p class="title">Title</p>
+  <p class="note" id="special">Special</p>
+  <p class="note">Note</p>
+  <p class="hidden">Gone</p>
+  <p class="{{state}}">State {{state}}</p>
+  <p><span class="badge">Badge</span> <span class="hidden">inline gone</span></p>
+</div>`;
+
+test("<style> rules apply by type, class and id, with {{key}} in classes and the sheet", async () => {
+  const app = await open("../../App.tsx", { locale: "zh-Hans-CN", colorScheme: "light", host: host(styled, { state: "off", hide: "off", tone: "#123456" }) });
+  await app.press("id:chat-aZ3kQ9xT");
+  await app.waitFor("text:Title");
+  expect(app.spanStyle("text:Title").color).toBe("#ff0000ff");
+  expect(app.spanStyle("text:Title").fontWeight).toBe(700);
+  expect(app.spanStyle("text:Special").color).toBe("#0000ffff");
+  expect(app.spanStyle("text:Note").color).toBe("#00ff00ff");
+  expect(app.spanStyle("text:Badge").color).toBe("#123456ff");
+  const texts = app.texts().join("|");
+  expect(texts).not.toContain("Gone");
+  expect(texts).not.toContain("State off");
+  expect(texts).not.toContain("inline gone");
+});
+
+test("@media (prefers-color-scheme: dark) follows the app's appearance, also when it changes", async () => {
+  const app = await open("../../App.tsx", { locale: "zh-Hans-CN", colorScheme: "light", host: host(styled, { state: "on", hide: "x", tone: "red" }) });
+  await app.press("id:chat-aZ3kQ9xT");
+  await app.waitFor("text:Title");
+  expect(app.spanStyle("text:Title").color).toBe("#ff0000ff");
+  await app.setColorScheme("dark");
+  expect(app.spanStyle("text:Title").color).toBe("#ffffffff");
+  expect(app.texts()).toContain("State on");
+});
+
+test("a script that toggles a class restyles the card", async () => {
+  const card = `<style>.off { display: none } .on { color: #ff0000 }</style>
+<p id="msg" class="off">Details</p><button id="t">Toggle</button>
+<script>
+  document.getElementById("t").addEventListener("click", function () {
+    var m = document.getElementById("msg");
+    m.classList.toggle("off");
+    m.classList.add("on");
+  });
+</script>`;
+  const app = await open("../../App.tsx", { locale: "zh-Hans-CN", host: host(card, {}) });
+  await app.press("id:chat-aZ3kQ9xT");
+  await app.waitFor("text:Toggle");
+  expect(app.texts()).not.toContain("Details");
+  await app.press("text:Toggle");
+  await app.waitFor("text:Details");
+  expect(app.spanStyle("text:Details").color).toBe("#ff0000ff");
+});

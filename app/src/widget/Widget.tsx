@@ -7,8 +7,10 @@ import type { JSX } from "nsh";
 import { cleanup, Clipboard, effect, Image, lifecycle, locale, openUrl, signal, Text, untracked, View } from "nsh";
 import type { Palette } from "../theme";
 import { widgetVars } from "../theme";
-import { countNodes, fill, parse, parseData, parseStyle, type ElementNode, type WidgetNode } from "./parse";
+import { countNodes, fill, parse, parseData, type ElementNode, type WidgetNode } from "./parse";
+import { cascade, parseDecls, parseSheet, styleText, type Scheme, type Sheet } from "./css";
 import { Sandbox, scriptsOf } from "./sandbox";
+import type { TreeEnv } from "./selector";
 
 const MAX_NODES = 2000;
 
@@ -23,10 +25,39 @@ type Style = Record<string, unknown>;
 
 interface Ctx {
   data: Record<string, unknown>;
+  /** CSS custom properties in scope: the theme's, then those the card sets on :root and on ancestors. */
   vars: Record<string, string>;
   p: Palette;
   /** The card's script sandbox: its tree is already filled, and elements with click handlers are pressable. */
   sb?: Sandbox;
+  /** The card's <style> rules, and how to match them. */
+  sheet: Sheet;
+  env: TreeEnv;
+  scheme: Scheme;
+  /** Styles worked out in this render, by element. */
+  computed: Map<ElementNode, Computed>;
+}
+
+interface Computed {
+  css: ReturnType<typeof mapStyle>;
+  /** The context for the element's children: its custom properties added. */
+  ctx: Ctx;
+}
+
+/** An element's style: its <style> rules and style attribute, cascaded, mapped to nsh styles. */
+function computed(el: ElementNode, ctx: Ctx): Computed {
+  const hit = ctx.computed.get(el);
+  if (hit) return hit;
+  const decls = cascade(el, ctx.sheet, ctx.env, ctx.scheme, parseDecls(f(el.attrs.style ?? "", ctx)));
+  let inner = ctx;
+  for (const [k, v] of Object.entries(decls)) {
+    if (!k.startsWith("--")) continue;
+    if (inner === ctx) inner = { ...ctx, vars: { ...ctx.vars } };
+    inner.vars[k] = resolveVars(v, inner);
+  }
+  const r = { css: mapStyle(decls, inner), ctx: inner };
+  ctx.computed.set(el, r);
+  return r;
 }
 
 /** `{{key}}` from the data; a scripted card's tree was filled once, before its scripts ran. */
@@ -37,7 +68,11 @@ function f(s: string, ctx: Ctx): string {
 // MARK: CSS values
 
 function resolveVars(v: string, ctx: Ctx): string {
-  return v.replace(/var\(\s*(--[\w-]+)\s*(?:,\s*([^)]*))?\)/g, (_, name: string, fallback?: string) => ctx.vars[name] ?? fallback?.trim() ?? "");
+  let out = v.replace(/var\(\s*(--[\w-]+)\s*(?:,\s*([^)]*))?\)/g, (_, name: string, fallback?: string) => ctx.vars[name] ?? fallback?.trim() ?? "");
+  if (out.includes("light-dark(")) {
+    out = out.replace(/light-dark\(\s*((?:[^,()]|\([^()]*\))+?)\s*,\s*((?:[^,()]|\([^()]*\))+?)\s*\)/g, (_, light: string, dark: string) => (ctx.scheme === "dark" ? dark : light));
+  }
+  return out;
 }
 
 function length(v: string): number | string | undefined {
@@ -234,12 +269,13 @@ function renderInline(node: WidgetNode, ctx: Ctx, inherited: Style): JSX.Element
   if (SKIP.has(node.tag) || hidden(node)) return null;
   if (node.tag === "br") return "\n";
   const own = tagStyle(node.tag, ctx.p);
-  const css = mapStyle(parseStyle(f(node.attrs.style ?? "", ctx)), ctx);
+  const { css, ctx: inner } = computed(node, ctx);
+  if (css.display === "none") return null;
   const style = { ...own.text, ...css.text };
   const href = node.tag === "a" ? link(node, ctx) : null;
   return (
     <Text style={style as never} onPress={pressHandler(node, ctx, href)}>
-      {node.children.map((c) => renderInline(c, ctx, { ...inherited, ...style }))}
+      {node.children.map((c) => renderInline(c, inner, { ...inherited, ...style }))}
     </Text>
   );
 }
@@ -268,7 +304,8 @@ function renderChildren(children: WidgetNode[], ctx: Ctx, text: Style, listTag?:
   };
   for (const c of children) {
     if (c.type === "element" && (SKIP.has(c.tag) || hidden(c))) continue;
-    const css = c.type === "element" ? mapStyle(parseStyle(f(c.attrs.style ?? "", ctx)), ctx) : null;
+    const css = c.type === "element" ? computed(c, ctx).css : null;
+    if (css?.display === "none") continue;
     const boxy = css != null && BOX_KEYS.some((k) => k in css.box);
     if (c.type === "element" && (flex || boxy || isBlock(c, css?.display))) {
       flush();
@@ -284,7 +321,7 @@ function renderChildren(children: WidgetNode[], ctx: Ctx, text: Style, listTag?:
 
 function renderBlock(el: ElementNode, ctx: Ctx, inherited: Style, listTag?: string, index = 1, inFlex = false): JSX.Element {
   const own = tagStyle(el.tag, ctx.p);
-  const css = mapStyle(parseStyle(f(el.attrs.style ?? "", ctx)), ctx);
+  const { css, ctx: inner } = computed(el, ctx);
   const text = { ...inherited, ...own.text, ...css.text };
   const box: Style = { ...own.box, ...css.box };
   // Inline boxes (inline-flex, inline-block, a styled span) take their content's width.
@@ -302,7 +339,7 @@ function renderBlock(el: ElementNode, ctx: Ctx, inherited: Style, listTag?: stri
   const press = pressHandler(el, ctx, href);
   const isFlex = css.display === "flex" || css.display === "inline-flex";
   if (isFlex && box.alignItems === undefined) box.alignItems = "stretch";
-  const children = renderChildren(el.children, ctx, text, el.tag === "ul" || el.tag === "ol" ? el.tag : undefined, isFlex);
+  const children = renderChildren(el.children, inner, text, el.tag === "ul" || el.tag === "ol" ? el.tag : undefined, isFlex);
   if (el.tag === "li") {
     const marker = listTag === "ol" ? `${index}.` : "•";
     return (
@@ -337,7 +374,8 @@ function parseCached(html: string): WidgetNode[] {
 function fillTree(nodes: WidgetNode[], data: Record<string, unknown>): WidgetNode[] {
   return nodes.map((n) => {
     if (n.type === "text") return { type: "text", text: fill(n.text, data) };
-    if (n.tag === "script" || n.tag === "style") return n;
+    if (n.tag === "script") return n;
+    if (n.tag === "style") return { type: "element", tag: "style", attrs: {}, children: [{ type: "text", text: fill(styleText([n]), data) }] };
     const attrs: Record<string, string> = {};
     for (const [k, v] of Object.entries(n.attrs)) attrs[k] = fill(v, data);
     return { type: "element", tag: n.tag, attrs, children: fillTree(n.children, data) };
@@ -355,36 +393,101 @@ function storeFor(key: string): Map<string, string> {
   return s;
 }
 
+/** The card's root (what :root, html and body name) over a static tree, with each node's parent. */
+const trees = new WeakMap<WidgetNode[], { root: ElementNode; parents: WeakMap<WidgetNode, ElementNode> }>();
+function treeOf(nodes: WidgetNode[]) {
+  let t = trees.get(nodes);
+  if (!t) {
+    const root: ElementNode = { type: "element", tag: "#root", attrs: {}, children: nodes };
+    const parents = new WeakMap<WidgetNode, ElementNode>();
+    const walk = (el: ElementNode) => {
+      for (const c of el.children) {
+        parents.set(c, el);
+        if (c.type === "element") walk(c);
+      }
+    };
+    walk(root);
+    t = { root, parents };
+    trees.set(nodes, t);
+  }
+  return t;
+}
+
+/** Draws a card from its root: :root rules give the base text style, the outer box and custom properties. */
+function renderCard(root: ElementNode, ctx: Ctx, base: Style): JSX.Element {
+  const decls = cascade(root, ctx.sheet, ctx.env, ctx.scheme, []);
+  let inner = ctx;
+  for (const [k, v] of Object.entries(decls)) {
+    // The theme's variables are fixed on the root, as in Telegram.
+    if (!k.startsWith("--") || k.startsWith("--tg-")) continue;
+    if (inner === ctx) inner = { ...ctx, vars: { ...ctx.vars } };
+    inner.vars[k] = resolveVars(v, inner);
+  }
+  const css = mapStyle(decls, inner);
+  return <View style={css.box as never}>{renderChildren(root.children, inner, { ...base, ...css.text })}</View>;
+}
+
+function schemeOf(vars: Record<string, string>): Scheme {
+  return vars["--tg-color-scheme"] === "dark" ? "dark" : "light";
+}
+
+/** The context for a card without a sandbox: `{{key}}` filled as it renders. */
+function staticCtx(nodes: WidgetNode[], data: Record<string, unknown>, palette: Palette): { ctx: Ctx; root: ElementNode } {
+  const { root, parents } = treeOf(nodes);
+  const vars = widgetVars(palette);
+  const env: TreeEnv = {
+    parentOf: (n) => parents.get(n),
+    attr: (el, name) => (el.attrs[name] === undefined ? undefined : fill(el.attrs[name], data)),
+  };
+  const sheet = parseSheet(styleText(nodes, (s) => fill(s, data)));
+  return { ctx: { data, vars, p: palette, sheet, env, scheme: schemeOf(vars), computed: new Map() }, root };
+}
+
 export function Widget(props: { html: string; data: string; palette: Palette }): JSX.Element {
   const nodes = parseCached(props.html);
   if (nodes.length === 0 || countNodes(nodes) > MAX_NODES) return <View />;
-  const ctx: Ctx = { data: parseData(props.data), vars: widgetVars(props.palette), p: props.palette };
+  const data = parseData(props.data);
   const base: Style = { color: props.palette.text, fontSize: 15, lineHeight: 21 };
-  if (scriptsOf(nodes).length === 0) return <View>{renderChildren(nodes, ctx, base)}</View>;
-  return <ScriptedWidget nodes={nodes} ctx={ctx} base={base} html={props.html} data={props.data} palette={props.palette} />;
+  if (scriptsOf(nodes).length === 0) {
+    // Read the palette inside the view, so the card is drawn again when the appearance changes.
+    const draw = () => {
+      const { ctx, root } = staticCtx(nodes, data, props.palette);
+      return renderCard(root, ctx, { ...base, color: props.palette.text });
+    };
+    return <View>{draw()}</View>;
+  }
+  return <ScriptedWidget nodes={nodes} data={data} base={base} html={props.html} rawData={props.data} palette={props.palette} />;
 }
 
-function ScriptedWidget(props: { nodes: WidgetNode[]; ctx: Ctx; base: Style; html: string; data: string; palette: Palette }): JSX.Element {
-  const { nodes, ctx, base } = props;
+function ScriptedWidget(props: { nodes: WidgetNode[]; data: Record<string, unknown>; base: Style; html: string; rawData: string; palette: Palette }): JSX.Element {
+  const { nodes, data, base } = props;
   const version = signal(0);
-  const sb = new Sandbox(fillTree(nodes, ctx.data), props.data, { vars: ctx.vars }, {
+  const sb = new Sandbox(fillTree(nodes, data), props.rawData, { vars: widgetVars(props.palette) }, {
     openLink: open,
     copyText: (t) => void Clipboard.writeText(t).catch(() => {}),
     changed: () => version.update((n) => n + 1),
-    storage: storeFor(`${props.html}\u0000${props.data}`),
+    storage: storeFor(`${props.html}\u0000${props.rawData}`),
     language: untracked(locale),
   });
   // Scripts that cannot run leave the static card.
-  if (!sb.start()) return <View>{renderChildren(nodes, ctx, base)}</View>;
+  if (!sb.start()) {
+    const drawStatic = () => {
+      const { ctx, root } = staticCtx(nodes, data, props.palette);
+      return renderCard(root, ctx, { ...base, color: props.palette.text });
+    };
+    return <View>{drawStatic()}</View>;
+  }
   cleanup(() => sb.dispose());
   effect(() => sb.setActive(lifecycle() === "active"));
   effect(() => sb.setTheme({ vars: widgetVars(props.palette) }));
-  const live: Ctx = { ...ctx, sb };
-  return (
-    <View>
-      {(version(), renderChildren(sb.root.children, { ...live, vars: widgetVars(props.palette), p: props.palette }, { ...base, color: props.palette.text }))}
-    </View>
-  );
+  const env: TreeEnv = { parentOf: (n) => sb.parentOf(n), attr: (el, name) => el.attrs[name] };
+  const draw = () => {
+    const vars = widgetVars(props.palette);
+    // Scripts may change classes and <style> text: match again on every redraw.
+    const ctx: Ctx = { data, vars, p: props.palette, sb, sheet: parseSheet(styleText(sb.root.children)), env, scheme: schemeOf(vars), computed: new Map() };
+    return renderCard(sb.root, ctx, { ...base, color: props.palette.text });
+  };
+  return <View>{(version(), draw())}</View>;
 }
 
 // Exposed for tests.

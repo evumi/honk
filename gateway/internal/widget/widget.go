@@ -8,7 +8,8 @@
 // them and show the static card. Inline event handlers (on*), external
 // scripts and every other way to load a resource are removed. The client
 // applies its own CSS whitelist when it renders, so the server only removes
-// what could reach the network.
+// what could reach the network. <style> blocks stay as they are when they
+// load nothing; the app applies their rules (up to 400, as Telegram does).
 package widget
 
 import (

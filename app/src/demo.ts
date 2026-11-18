@@ -59,6 +59,37 @@ setInterval(tick, 1000);
 </script>
 </div>`;
 
+// A card written as for a Telegram widget: classes and a <style> block, theme
+// variables, dark-mode media, and {{status}} in a class that shows or hides
+// the failures.
+const ciCard = `<style>
+:root { --ok: #1a9e6e; --bad: #d9480f }
+.ci .head { display: flex; align-items: center; justify-content: space-between }
+.ci h3 { margin: 0 }
+.pill { padding: 2px 10px; border-radius: 999px; color: #fff; font-size: 13px }
+.status-passed .pill { background: var(--ok) }
+.status-failed .pill { background: var(--bad) }
+.meta { margin: 4px 0 10px; color: var(--tg-theme-hint-color) }
+.stats { display: flex; gap: 8px }
+.stat { flex: 1; padding: 8px 10px; border-radius: 10px; background: var(--tg-theme-secondary-bg-color) }
+.stat b { font-size: 18px }
+.stat .label { display: block; font-size: 12px; color: var(--tg-theme-hint-color) }
+.failures { display: none; margin-top: 10px; padding: 2px 10px; border-left: 3px solid var(--bad) }
+.status-failed .failures { display: block }
+.failures code { font-size: 12px }
+@media (prefers-color-scheme: dark) { :root { --ok: #34c08a; --bad: #ff6b3d } }
+</style>
+<div class="ci status-{{status}}">
+<div class="head"><h3>{{repo}} #{{run}}</h3><span class="pill">{{status_label}}</span></div>
+<p class="meta">{{branch}} · {{duration}}</p>
+<div class="stats">
+<div class="stat"><b>{{passed}}</b><span class="label">${L("通过", "passed")}</span></div>
+<div class="stat"><b>{{failed}}</b><span class="label">${L("失败", "failed")}</span></div>
+<div class="stat"><b>{{skipped}}</b><span class="label">${L("跳过", "skipped")}</span></div>
+</div>
+<div class="failures"><p style="margin:4px 0">${L("失败的测试", "Failing tests")}</p><code>{{failing}}</code></div>
+</div>`;
+
 const bots: Bot[] = [
   { id: "Bx7kQ2mT", name: L("Berth 部署", "Berth Deploys"), avatar: "preset:box:#1c1c1e", defaultLevel: "active", createdAt: now - 864e5 * 5 },
   { id: "aR4nW9pZ", name: L("服务器告警", "Server Alerts"), avatar: "preset:alert:#c2410c", defaultLevel: "timeSensitive", createdAt: now - 864e5 * 4 },
@@ -82,6 +113,15 @@ const messages: Message[] = [
     title: L("部署成功", "Deployed"), body: L("部署成功：evumi / sluice (production) 已上线。", "evumi / sluice is live in production."), html: card,
     data: JSON.stringify({ status: L("已上线", "Live"), dot: "#1a9e6e", service: "evumi / sluice", env: "production", deploy_id: "dep_w3tn2cnlrvwtspmjmpol", url: "https://example.com" }),
   }),
+  msg("Bx7kQ2mT", 25, { title: L("每日部署汇总", "Daily deploy summary"), body: L("今天共 6 次部署，5 次成功，1 次回滚。", "6 deploys today: 5 succeeded, 1 rolled back.") }),
+  // Added after the first cards, so the ids above stay as tests know them.
+  msg("Kc3vH8sL", 50, {
+    title: L("main #483 失败", "main #483 failed"), body: L("2 个测试失败，点开看是哪些。", "2 tests failed; open to see which."), html: ciCard,
+    data: JSON.stringify({
+      repo: "evumi/honk", run: 483, branch: "main", duration: L("3 分 41 秒", "3m 41s"), status: "failed", status_label: L("失败", "Failed"),
+      passed: 126, failed: 2, skipped: 3, failing: "widget › css cascade, sync › ack after edit",
+    }),
+  }),
   msg("aR4nW9pZ", 12, {
     title: "hk-edge-02 CPU 96%", body: L("持续超过阈值 85%，点开看负载曲线。", "Above the 85% threshold; open for the load chart."), html: alertCard,
     data: JSON.stringify({
@@ -90,7 +130,6 @@ const messages: Message[] = [
       cpu24: [22, 18, 15, 14, 19, 33, 47, 52, 49, 61, 78, 96],
     }),
   }),
-  msg("Bx7kQ2mT", 25, { title: L("每日部署汇总", "Daily deploy summary"), body: L("今天共 6 次部署，5 次成功，1 次回滚。", "6 deploys today: 5 succeeded, 1 rolled back.") }),
 ];
 const DEFAULT_GATEWAY = "https://honk.example.com/";
 let gateway = DEFAULT_GATEWAY;
