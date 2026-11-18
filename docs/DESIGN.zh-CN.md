@@ -64,8 +64,8 @@ Honk 是一个以 bot 为渠道的推送通知服务：每个 bot 是一个独�
 - `devices`：`id`（UUIDv7）、`secret_hash`、`platform`（ios / android）、`push_token`、`push_ok`（APNs/FCM 报告 token 失效后置 0）；v4 加 `owner_id`、`name`（机型名）、`seen_at`（最近一次请求，最多每小时写一次）、`acked_up_to`（这台设备的 ack 水位）
 - `owners`（v4）：设备组，`id`（UUIDv7，不透明）、`created_at`。bot、队列和设备都属于一个组；授权只看 `owner_id`
 - `links`（v4）：配对数据，`link_hash`（`link_id` 的 sha256）、`owner_id`、`bundle`（网关不能解开）、`created_at`、`expires_at`
-- `bots`：`id`（自增整数，只在库内使用）、`public_id`（对外的 bot id，v2 加入）、`device_id`（v1 的列，v4 之后只表示创建它的设备，不再用来授权）、`owner_id`（v4）、`token_hash`、`name`、`avatar`、`default_level`、`webhook_url`、`webhook_secret`（v6 加入：`setWebhook` 设的地址和密钥，空表示没有）
-- `messages`：队列（v4 起按 `owner_id` 查，`device_id` 不再写入；`acked_at` 不再用）。`kind` 是 message / edit / delete；edit 和 delete 用 `target_id` 或 `collapse_id` 指向原消息。发送选项：`open_mode`（`url` 或空）、`image`、`parse_mode`（`Markdown` 或空）、`silent`（0 / 1），v5 加入，JSON 里分别叫 `open`、`image`、`parse_mode`、`silent`，空值不输出；`allow_queries`（v6 加入）表示这条消息的卡片可以 `request()`；`expires_at` 由 `ttl` 参数决定（不填用 `HONK_MESSAGE_TTL`）
+- `bots`：`id`（自增整数，只在库内使用）、`public_id`（对外的 bot id，v2 加入）、`device_id`（v1 的列，v4 之后只表示创建它的设备，不再用来授权）、`owner_id`（v4）、`token_hash`、`name`、`avatar`、`default_level`、`encrypted`（端到端加密已打开，见「端到端加密」）、`webhook_url`、`webhook_secret`（v6 加入：`setWebhook` 设的地址和密钥，空表示没有）
+- `messages`：队列（v4 起按 `owner_id` 查，`device_id` 不再写入；`acked_at` 不再用）。`kind` 是 message / edit / delete；edit 和 delete 用 `target_id` 或 `collapse_id` 指向原消息。发送选项：`open_mode`（`url` 或空）、`image`、`parse_mode`（`Markdown` 或空）、`silent`（0 / 1），v5 加入，JSON 里分别叫 `open`、`image`、`parse_mode`、`silent`，空值不输出；`allow_queries`（v6 加入）表示这条消息的卡片可以 `request()`；`expires_at` 由 `ttl` 参数决定（不填用 `HONK_MESSAGE_TTL`）；`ciphertext` 是加密消息的密文（此时 title、body、html、data、image 等为空）
 - `relays`（v3）：登记过的自建网关，`id`、`key_hash`、`created_at`、`last_used_at`（每分钟最多写一次）、`blocked`；只有开了 `HONK_RELAY_SERVE` 的网关用它
 - `meta`（v3）：这个网关自己的键值设置；中继客户端把 `relay_url`、`relay_id`、`relay_key` 存在这里
 
@@ -83,8 +83,8 @@ v4 迁移：建 `owners`、`links`；给 `devices`、`bots`、`messages` 加 `ow
 
 | 接口 | 调用方 | 说明 |
 | --- | --- | --- |
-| `/bot<token>/sendMessage` | 发送方 | `body` 必填；`title`、`html`、`data`、`level`、`group`、`id`、`url`、`copy`、`icon`、`open`、`image`、`ttl`、`silent`、`parse_mode`、`allow_queries` 可选；GET 查询串、表单、JSON 都行 |
-| `/bot<token>/editMessageData` | 发送方 | `message_id` 或 `id` + `data`，卡片原地更新，不弹通知 |
+| `/bot<token>/sendMessage` | 发送方 | `body` 必填；`title`、`html`、`data`、`level`、`group`、`id`、`url`、`copy`、`icon`、`open`、`image`、`ttl`、`silent`、`parse_mode`、`allow_queries` 可选；GET 查询串、表单、JSON 都行。端到端加密时用 `ciphertext` 代替内容参数（`body` 不必填） |
+| `/bot<token>/editMessageData` | 发送方 | `message_id` 或 `id` + `data`（或 `ciphertext`，明文 `{"data":…}`），卡片原地更新，不弹通知 |
 | `/bot<token>/deleteMessage` | 发送方 | `message_id` 或 `id` |
 | `/bot<token>/getMe` | 发送方 | 测试 token |
 | `/bot<token>/setWebhook`、`deleteWebhook`、`getWebhookInfo` | 发送方 | 卡片回调的 webhook：`url`（只能 https，空表示删除）+ 可选 `secret_token`；见下面「卡片回调」 |
@@ -97,7 +97,7 @@ v4 迁移：建 `owners`、`links`；给 `devices`、`bots`、`messages` 加 `ow
 | `GET` / `PUT` / `DELETE /v1/devices/me` | App | 读取；更新 push token 和 `name`；把这台设备从设备组移除（最后一台时连组、bot、队列一起删）；`?all=true` 删除整个设备组 |
 | `GET /v1/devices`、`DELETE /v1/devices/:id` | App | 设备组里的设备（`id`、`name`、`platform`、`seen_at`、`current`）；移除组里的一台 |
 | `POST /v1/links`、`POST /v1/links/claim` | App | 配对，见下面「设备组」 |
-| `GET` / `POST /v1/bots`，`GET` / `PATCH` / `DELETE /v1/bots/:id`，`POST /v1/bots/:id/token` | App | bot 管理；token 只在创建和重置时返回 |
+| `GET` / `POST /v1/bots`，`GET` / `PATCH` / `DELETE /v1/bots/:id`，`POST /v1/bots/:id/token` | App | bot 管理；token 只在创建和重置时返回；`PATCH` 的 `encrypted` 打开 / 关闭端到端加密 |
 | `GET /v1/messages/:id` | NSE / FCM Service | 拉一条 |
 | `GET /v1/sync?cursor=&limit=`、`POST /v1/ack` | App | 补拉和确认 |
 
@@ -106,6 +106,7 @@ v4 迁移：建 `owners`、`links`；给 `devices`、`bots`、`messages` 加 `ow
 - **卡片**（`internal/widget`）：原文 ≤ 32KB，zlib 9 压缩后 ≤ 4KB，`data` ≤ 1KB，脚本也算在里面。按白名单清理：保留内联的普通 `<script>`（profile 2，见第 6 节「卡片脚本」）；删掉其他脚本、`on*` 属性、表单控件、外部资源；链接只允许 `https://`、`#id`、`{{key}}`；CSS 里禁止 `@import`、`expression()`、非 data: 的 `url()` 和反斜杠转义。
 - **字段长度**：`title` ≤ 256 字，`body` ≤ 4096 字，`id` ≤ 128 字节，`icon` 和 `image` 必须是 https。
 - **发送选项**：`open` 只能是 `chat` 或 `url`，`url` 要同时给 `url`；`parse_mode` 只认 `Markdown`（不分大小写）；`silent` 是 `true` / `false` / `1` / `0`；`ttl` 是 60 到 `HONK_MESSAGE_TTL` 之间的整数秒。校验不过一律 400。Markdown 正文的横幅文字由网关去掉标记（`internal/api/markdown.go` 的 `StripMarkdown`），和 App 的渲染子集（`app/src/markup.ts`）保持一致。
+- **加密消息**：网关读不到内容，只校验 `ciphertext` 的形状和 64 KB 上限；上面这些内容限制改由设备解密后检查（见「端到端加密」）。
 - **限流**：每个 bot 每秒 5 条，突发 20 条（可配）。
 - **模拟器身份**：push token 以 `simulator-` 开头的设备照常注册和排队，但不发推送（见第 5 节「模拟器开发」）。
 - **清理**：每小时删除过期的消息、设备组里每台设备都已 ack 且创建超过 `HONK_ACKED_KEEP`（1 天）的消息，以及按 `HONK_DEVICE_GC` 回收的废弃设备（见下面「设备组」）。
@@ -190,11 +191,23 @@ webhook 和 `getUpdates` 互斥（同 Telegram）：设了 webhook 后 `getUpdat
 - `HONK_METRICS_ADDR`（默认空，不开）：在单独的监听地址提供 `/metrics`，Prometheus 文本格式，手写（`internal/metrics`），没有新依赖。计数：`honk_messages_total{kind}`、`honk_pushes_total{platform,route,result}`、`honk_push_retries_total`、`honk_push_dropped_total{reason}`（`queue_full`、`not_wanted`、`shutdown`）、`honk_http_requests_total{class}`；量表：`honk_devices`、`honk_bots`、`honk_push_queue_length`。`route` 是 `direct` 或 `relay`（见上一节），中继一侧另有 `honk_relay_requests_total`、`honk_relay_pushes_total`。
 - `HONK_LOG_FORMAT=json` 输出 JSON 日志；`HONK_LOG_LEVEL=debug` 时每个请求记一条访问日志（`/bot<token>/…` 里的 token 替换成 `<token>`）。
 
+### 端到端加密（单设备部分）
+
+目标：网关运营者、泄露的数据库、推送中继、苹果和谷歌读不到消息内容。不防：发送方被攻破（它有密钥）、设备本机被攻破、流量分析（网关仍知道哪个 bot 何时收到多大的消息，以及明文的 `level`、`group`、`id`）。
+
+- **打开**：Bot 设置里的开关调 `honk.bot.encryption.enable`：宿主生成 32 字节随机密钥，存下来，`PATCH /v1/bots/:id {"encrypted":true}` 通知网关，返回 base64url 密钥，App 把它和 token 并排显示、可复制。网关失败就撤回本机的密钥。`disable` 先 PATCH 成 `false` 再删密钥；`resetKey` 换一把新的（失败则还原旧的）；`key` 返回当前密钥或 `null`（开关状态就取自它）。删除 bot 或「删除这台设备的数据」时密钥一并删除。
+- **网关**：`bots.encrypted`、`messages.ciphertext`（迁移 `migrateEncryption`，本分支是 v4：两条 `ALTER TABLE … ADD COLUMN`）。`sendMessage` 和 `editMessageData` 接受 `ciphertext`（unpadded base64url，≤ 64 KB，只校验形状：能解码、不短于 nonce + tag），此时 `body` 不必填，旁边再带 `title`、`body`、`html`、`data`、`url`、`copy`、`icon` 一律 400。`bots.encrypted` 为真时明文的 `sendMessage` / `editMessageData` 返回 400（「this bot is end-to-end encrypted…」）；`level`、`group`、`id` 仍是明文。加密消息和加密 bot 的 edit / delete 的推送不带标题、正文、bot 名、group、id（`push.Notification{Bare: true}`，字段清空，横幅在设备上解密后生成）。加密 edit 不更新队列里还在的原消息（网关读不到它），设备按队列顺序先应用消息再应用 edit。
+- **密文**：`ciphertext` 是 12 字节 nonce ‖ AES-256-GCM 密文 ‖ 16 字节 tag 的 unpadded base64url，AAD 是 bot 短 id；明文是 JSON：title、body、html、data、url、copy、icon（字段都是字符串，可省略；`data` 为对象时按其 JSON 文本）。edit 的明文是 `{"data": "…"}`。三端用同一组向量测试（`app/src/e2e.vector.json`，被 Go 的 `client`、HonkKit、`:core` 读取）。
+- **设备上的校验**：HonkKit 的 `MessageOpener`、`:core` 的 `MessageOpener` 在每条进 `LocalStore.apply` 的队列项上先解密：`SyncEngine`、iOS NSE 的拉取、静默推送的拉取、Android 的 FCM 拉取，没有绕过的路径（`SyncEngine` 的 `opener` 参数是必填的）。解密后检查网关没法检查的限制：html 原文 ≤ 32 KB、zlib 9 后 ≤ 4 KB、data ≤ 1 KB（超了丢掉整张卡片，消息保留正文）；title ≤ 256、body ≤ 4096、copy ≤ 4096 个字符（截断）；`url` 必须 http(s)，`icon` 必须 https（否则清空）。edit 的 data 超过 1 KB 就忽略这条 edit。HonkKit 用系统 zlib（`CZlib` system library）量 zlib 9 的大小，`:core` 用 `Deflater(9)`。
+- **解密失败**：没有密钥、密钥不对、AAD 不对、不是 JSON，都存一条占位消息（正文「无法解密的通知」/ "Couldn't decrypt this notification"；iOS 用 `Localizable.strings`，Android 用字符串资源；`level`、`group`、`id`、日期保留），横幅也显示它。解不开的 edit 直接忽略。本机有某个 bot 的密钥时，发给它的明文消息（网关本来会拒绝，所以是伪造或开启加密前的残留）同样不被信任，存成占位。
+- **密钥存放**：iOS 的 `BotKeyStore`（`Encryption.swift`）在和 bot token 同一个共享 Keychain 组里（service `dev.evumi.honk.bot-key`，account 是 bot id，`AfterFirstUnlock`，NSE 锁屏时也能读）；Android 的 `PrefsBotKeyStore`（`SecureStores.kt`）在 EncryptedSharedPreferences 里，键 `bot-key.<id>`。两边都是「按 bot 取一把 32 字节密钥」的接口（HonkKit 的 `BotKeyProviding` / `BotKeyStoring`，`:core` 的 `BotKeyProvider` / `BotKeyStore`），`MessageOpener` 只依赖 provider。**多设备密钥共享**（设备组的 `group_key` 加密每个 bot 的密钥存 `bots.key_wrapped`）还没做，接入点是再实现一个 provider：本机没有密钥时向网关取回包裹过的密钥，用 `group_key` 解开后写进同一个 store；密文格式、`MessageOpener` 和宿主调用都不用改。
+- **卡片白名单**：`app/src/widget/sanitize.ts` 的 `cleanHTML` 在 `parseCached` 里对每张卡片执行（`parse` 之后、渲染之前），规则和 `gateway/internal/widget` 一致：脚本只留内联、无 `src`、类型是 JS、文本里没有 `<!--`、`<script`、`</script`、且不在 SVG 里；`on*`、表单控件、外部资源、链接协议、CSS 的 `@import`、`expression()`、非 data 的 `url()`、反斜杠转义，SVG 属性里 `url()` 只能是 `#id`；`href="{{key}}"` 占位符保留。加密的卡片网关没见过，所以这一步是它们唯一的清理。`app/src/widget/sanitize.fixtures.json` 是共用的样例（输入、必须包含、必须不含的片段），Go 的 `widget/fixtures_test.go` 和 TS 的 `sanitize.test.ts` 各跑一遍；TS 另有带种子的 fuzz 测试（随机标记和对样例的变异，断言没有白名单之外的标签或属性留下、清理后再清理结果不变）。
+
 ### 命令行与 webhook 适配（发送方生态）
 
 - **`dry_run`**：`sendMessage` 加 `dry_run=true` 只校验。`widget.Inspect` 是 `Clean` 的带报告版本，返回清理后的 HTML、输入和清理后的原文大小、zlib 9 压缩大小，以及被白名单删掉的元素和属性（每种只列一次）；`Clean` 就是它的包装。`dry_run` 不入队、不推送，但计入限流。
 - **命令行**：同一个 `honk` 二进制。`cmd/honk/cli.go` 在 `main()` 开头分派：无参数或 `serve` 走原来的网关（环境变量配置不变），`send`、`edit`、`delete`、`me`、`preview`、`help` 交给 `internal/client`。`client.Client.Call` 向 `/bot<token>/<method>` POST JSON，失败的信封变成带 `description` 的错误，进程退出码 1（用法错误 2）；错误里不出现 token。地址和 token 优先级：命令行参数、`HONK_URL` / `HONK_TOKEN`、`~/.config/honk/config.json`。管道输入的标准输入作正文；`--html`、`--data` 的 `@文件` 读文件，data 会压成单行。`preview` 每次先 `dry_run` 打印大小和删除项，再用固定 `id`、`level=passive` 发送；`--watch` 轮询两个文件的修改时间和大小（500ms），不引依赖。
-- **`--key`**：客户端按第 7 节的密文格式加密（`client.Encrypt`：AES-256-GCM，12 字节 nonce ‖ 密文 ‖ 16 字节 tag，无填充 base64url，AAD 是 token 冒号前的 bot id），把 title、body、html、data、url、copy、icon 放进一段 JSON，作为 `ciphertext` 发送；`edit` 加密 `{"data": …}`。网关还没有 `ciphertext` 参数（加密一期），所以现在只有发送端和单元测试，帮助文字和 README 都注明了。
+- **`--key`**：客户端按「端到端加密」一节的密文格式加密（`client.Encrypt`：AES-256-GCM，12 字节 nonce ‖ 密文 ‖ 16 字节 tag，无填充 base64url，AAD 是 token 冒号前的 bot id），把 title、body、html、data、url、copy、icon 放进一段 JSON，作为 `ciphertext` 发送；`edit` 加密 `{"data": …}`。网关接受 `ciphertext` 之后，`api` 测试用 `client.Encrypt` 加密、再用 `client.Decrypt` 解开取回的密文，保证两边格式一致。
 - **webhook 适配**：`internal/hooks` 里每种格式一个纯函数 `Request → url.Values`（参数名就是 sendMessage 的），`hooks.Convert` 统一加上查询串覆盖（`level`、`group`、`icon`、`copy`、`url`、`title`）和空正文兜底。路由 `/{bot}/hook/{kind}[/*]` 在 `internal/api/hook.go`，鉴权用和 `botAPI` 同一个 `authBot`，转换后直接调用 `sendMessage`，所以限流、字段检查和卡片白名单完全一致；`ErrIgnored` 返回 `{"ignored":true}`。`alertmanager` / `grafana` 的 `id` 取 groupKey 的哈希（Grafana 单条告警取 fingerprint），自带的状态卡片所有文字都转义，并有测试保证它通过白名单且不被删减。`github` 不校验签名，token 就是密钥。`bark` 的 `<key>` 段被忽略。`json` 用 `$.a.b` 路径，由 `hooks.Lookup` 实现。
 - **GitHub Action**：根目录 `action.yml`，composite，用 `jq` 拼 JSON、`curl` 发送，输入经环境变量传入，避免注入。
 - **卡片手册**：`docs/CARDS.md`、`docs/CARDS.zh-CN.md`；`widget/docs_test.go` 抽出文档里每个 `html` 代码块，要求通过 `Inspect` 且没有任何删除，`json data` 代码块必须是 1 KB 以内的 JSON。
@@ -216,15 +229,16 @@ webhook 和 `getUpdates` 互斥（同 Telegram）：设了 webhook 后 `getUpdat
 | --- | --- |
 | `APIClient.swift` | `/v1` 接口客户端 |
 | `Credentials.swift` | 设备凭据和各 bot token 存 Keychain，用共享 access group，`AfterFirstUnlock`，NSE 在锁屏时也能读 |
+| `Encryption.swift` | 端到端加密：`Seal`（CryptoKit AES-256-GCM，和 `honk send --key` 同一格式）、`BotKeyStore`（各 bot 的密钥，同一个共享 Keychain 组）、`ContentLimits`（解密后的限制，zlib 经 `CZlib` system library）、`MessageOpener`（解密队列项，失败存占位） |
 | `LocalStore.swift` | App Group 里的 SQLite，WAL + busy timeout，App 和 NSE 两个进程共用。`apply()` 处理 message / edit / delete，重复调用安全，返回需要撤掉的系统通知 id。bot id 是 TEXT；v2 迁移把 v1 的整数 bot id 转成文本，`renameBot` 再把它们换成短 id，并在 `meta` 里记下旧 id → 新 id（`currentBotID`）。改名规则在 `LegacyBotIDs.swift`，App 和 NSE 共用 |
-| `Honk.swift` | `HonkConfig`（从 Info.plist 读网关地址、App Group、Keychain 组）；`ChangeSignal`（Darwin 通知，NSE 写库后通知 App 刷新）；`SyncEngine`（分页拉取、应用、ack） |
+| `Honk.swift` | `HonkConfig`（从 Info.plist 读网关地址、App Group、Keychain 组）；`ChangeSignal`（Darwin 通知，NSE 写库后通知 App 刷新）；`SyncEngine`（分页拉取、经 `MessageOpener` 解密、应用、ack） |
 | `Avatar.swift` | 头像格式 `preset:<icon>:<#rrggbb>`、https URL 或 `local:<文件名>`；https 图片缓存到 App Group。`LocalAvatars`：用户从相册选的头像只存在本机 App Group 的 `Library/Avatars`（NSE 也能读），网关的 `avatar` 字段只存 `local:<文件名>` 这个字符串；只收 JPEG / PNG / WebP / GIF（按文件头判断），≤ 1MB；刷新时删掉没有 bot 在用、且超过 1 小时的文件。预设图标里已去掉船，旧的 `preset:ship:<颜色>` 显示为同色的铃铛 |
 | `CommunicationNotification.swift` | iOS 15 通讯通知：`INSendMessageIntent` + bot 头像 |
 
 #### NSE 流程
 
 1. 从 `userInfo` 读 `msg_id`、`bot_id`
-2. 读 Keychain 凭据，调 `GET /v1/messages/:id`
+2. 读 Keychain 凭据，调 `GET /v1/messages/:id`；加密的消息用 `MessageOpener` 解密（密钥在共享 Keychain 组），解不开就是占位消息，横幅显示「无法解密的通知」
 3. `LocalStore.apply(..., notificationID: request.identifier)` 记下这条消息对应哪个系统通知，之后删除或被替换时用来撤回
 4. 设置角标（本地未读数，静音的 bot 不算）；静音的 bot 改成 passive、无声；`threadIdentifier` 设成 `bot-<id>`，消息有 `group` 时是 `bot-<id>:<group>`（`group` 取自拉到的消息，没拉到就从推送自带的 `thread-id`（`b<bot>:<group>`）里解析，见 `NotificationThread`）
 5. 渲染头像（预设图标用 SF Symbol 画在色块上；https 头像先下载，5 秒超时；`local:` 头像读本机文件），转成通讯通知
@@ -271,7 +285,8 @@ Gradle 工程，minSdk 26，compileSdk / targetSdk 35。只支持有 GMS 的设�
 | `Credentials.kt` | `CredentialStore`、`BotTokenStore` 接口；`DeviceRegistrar` 注册设备或更新 push token，网关返回 401 时清掉凭据重新注册 |
 | `Gateway.kt` | 网关地址规范化（规则同 `HonkConfig.normalizeGateway`）；`check()` 请求 `/v1/info` 确认是 Honk 网关；`describe()` 把错误转成中文说明 |
 | `LocalStore.kt` | 表结构和 `apply()` 语义与 `LocalStore.swift` 一致：collapse 替换、edit / delete 先按 `target_id`（同一个 bot）再按 collapse id 找原消息、重复调用安全、返回要撤掉的通知。SQL 通过 `Sql` 接口执行，App 里是 `AndroidSql`，测试里是 JDBC |
-| `Sync.kt` | `SyncEngine`：分页 `/v1/sync`，逐条 `apply`，先存 cursor 再 ack |
+| `Sync.kt` | `SyncEngine`：分页 `/v1/sync`，逐条经 `MessageOpener` 解密再 `apply`，先存 cursor 再 ack |
+| `Encryption.kt` | 对应 `Encryption.swift`：`Seal`（javax.crypto AES-256-GCM）、`BotKeyProvider` / `BotKeyStore`、`ContentLimits`、`MessageOpener` |
 | `Models.kt`、`Avatar.kt` | 数据模型；FCM data 字段解析（`PushInfo`）；头像字符串解析 |
 
 #### app
@@ -280,7 +295,7 @@ Gradle 工程，minSdk 26，compileSdk / targetSdk 35。只支持有 GMS 的设�
   - 注册状态和 iOS 一样有四种（等待推送 token、注册中、已注册、失败），`honk.status` 返回；`pushMode` 固定是 `apns`（FCM 是真实推送通道，没有模拟器模式）。重试：先用 `/v1/bots` 检查已有设备（401 就清掉凭据），再用上次的 FCM token 注册，都没有就重新向 Firebase 要 token（最多等 20 秒）。
   - 切换网关：先 `Gateway.check`，地址存进 SharedPreferences（恢复默认时删掉），然后清空本机的 bot、消息、各 bot 的 token、通知和 bot 的 channel，用当前 FCM token 在新网关上重新注册。
   - 数据库在 `noBackupFilesDir/honk.sqlite`。Android 没有单独的扩展进程，FCM Service 和界面在同一个进程里共用一个 `LocalStore`。
-- `SecureStores.kt`：设备凭据和各 bot token 存 EncryptedSharedPreferences（密钥在 Android Keystore），`allowBackup=false`。
+- `SecureStores.kt`：设备凭据、各 bot token 和各 bot 的端到端密钥（`PrefsBotKeyStore`）存 EncryptedSharedPreferences（密钥在 Android Keystore），`allowBackup=false`。
 - `HonkMessagingService`（`FirebaseMessagingService`）：
   - `onNewToken`：注册或更新 token；App 每次启动也会取一次当前 token 走同样的流程（token 没变就不发请求）。刷新时网关返回 401，同样清掉凭据重新注册。
   - `onMessageReceived`：按 `gateway/internal/push/fcm.go` 的字段解析。`message`：拉 `GET /v1/messages/:id`、写库、显示通知；拉取失败就用推送里自带的标题正文显示。`edit` / `delete`：拉取后应用到本地库，按 tag 撤掉过时的通知；拉不到就整体同步。
@@ -345,6 +360,10 @@ App 用 TSX 写，跑在 QuickJS 上。页面：
 | `honk.bot.create` | `{name, avatar, defaultLevel}` | `{bot, token}` |
 | `honk.bot.update` | `{botId, name?, avatar?, defaultLevel?}` | `Bot` |
 | `honk.bot.token` / `honk.bot.resetToken` / `honk.bot.delete` | `{botId}` | |
+| `honk.bot.encryption.key` | `{botId}` | 这个 bot 在本机的端到端密钥（base64url），没有就是 `null`；Bot 设置的开关取自它 |
+| `honk.bot.encryption.enable` | `{botId}` | 生成 32 字节密钥（已有就沿用）存进钥匙串 / Keystore，`PATCH` 网关 `encrypted:true`，返回密钥；网关失败则撤回 |
+| `honk.bot.encryption.disable` | `{botId}` | 先 `PATCH` `encrypted:false`，再删本机密钥 |
+| `honk.bot.encryption.resetKey` | `{botId}` | 生成新密钥，返回；旧消息本机已解密保存，不受影响 |
 | `honk.bot.setMuted` / `honk.bot.setPinned` | `{botId, muted / pinned}` | |
 | `honk.message.delete` | `{messageId}` | 只删本机 |
 | `honk.chat.clear` | `{botId}` | 只删本机 |
@@ -532,6 +551,8 @@ cd android && make setup && ./gradlew assembleDebug   # 下载 nsh AAR 并编译
 - [x] 卡片按钮回调：`request()` → 宿主 → `POST /v1/queries` → webhook / 长轮询 → `answerWidgetQuery`，网关和 HonkKit / `:core` 有测试；两端 `NshBridge` 的接线只在 CI 里编译，没在真机上跑过
 - [ ] `publicData` / 共享卡片
 - [ ] 卡片脚本在真机上的耗时和内存还没测过；pointer 事件、canvas 没有
-- [ ] 推送内容端到端加密（参考 Bark 的 ciphertext），消息在网关上只存密文
+- [x] 端到端加密（单设备）：网关只存密文，设备解密并校验；加密 bot 的推送不带内容
+- [ ] 端到端加密的多设备密钥共享：等设备组，`group_key` 加密各 bot 密钥存 `bots.key_wrapped`（接入点见「端到端加密」）
+- [ ] 加密的路径（NSE 解密横幅、FCM 解密、钥匙串组 / Keystore 存取）只有 HonkKit 和 `:core` 的单元测试，`ios/App`、`ios/NotificationService`、`android/app` 的接线只在 CI 里编译，没在真机上跑过
 - **nsh 还是 0.5.x**：推送和扩展全部用原生写，nsh 只负责 App 内界面，把升级的影响面控制在 UI 层。
 - **NSE 资源有限**：NSE 内存约 24MB、运行约 30 秒，所以只做拉取、写库和渲染头像，不加载 nsh。

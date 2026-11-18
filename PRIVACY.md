@@ -16,7 +16,7 @@ These data are used to provide, secure, and troubleshoot the notification servic
 
 ## Data on your device
 
-Message history and preferences are stored locally. Device credentials are stored using Apple's Keychain. A photo selected as a bot avatar is saved on the device; the app sends only its local filename reference to the gateway, not the selected photo. The app does not upload your photo library or contacts.
+Message history and preferences are stored locally. Device credentials and bot encryption keys are stored using Apple's Keychain. A photo selected as a bot avatar is saved on the device; the app sends only its local filename reference to the gateway, not the selected photo. The app does not upload your photo library or contacts.
 
 ## Notification delivery and other services
 
@@ -26,7 +26,7 @@ If you select a gateway that has no push credentials of its own, for example a s
 
 Honk Push does not include advertising or cross-app tracking features. Data is not sold or used for advertising profiling.
 
-The default gateway uses HTTPS. Messages are not end-to-end encrypted: the gateway operator can access queued message content, and Apple processes the notification payload. Keep device secrets and bot tokens private. A party holding a bot token can send notifications to that bot.
+The default gateway uses HTTPS. By default, messages are not end-to-end encrypted: the gateway operator can access queued message content, and Apple and Google process the notification payload. For each bot you can turn on end-to-end encryption in the app: the app generates a key that stays on your devices (in the Keychain or Android Keystore-backed storage) and is never sent to the gateway, and the sender encrypts the message content with it. The gateway then stores and forwards only ciphertext and refuses that bot's plaintext messages, and its pushes carry no title, body or bot name, so the gateway operator, a push relay, Apple and Google cannot read the content. Encryption does not hide the metadata the gateway needs to deliver a message: which bot receives it, when, its approximate size, and its level, group and replace id. It does not protect against a compromised sender (which holds the key) or a compromised device. A message the device cannot decrypt is shown as "Couldn't decrypt this notification". Keep device secrets, bot tokens and encryption keys private. A party holding a bot token can send notifications to that bot; with end-to-end encryption on, sending also needs the key.
 
 Opening a link in a notification or loading a configured remote avatar may contact the relevant website. That site's own privacy practices apply.
 
