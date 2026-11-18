@@ -4,7 +4,7 @@
 // from the same subset: keep the two in step.
 //
 // Subset: **bold** or __bold__, *italic* or _italic_, `code`, fenced code
-// blocks, [text](url) with an http(s) url, "-", "*", "+" and "1." lists, and
+// blocks, [text](url) with an https url (text that looks like another site's address shows the url instead), "-", "*", "+" and "1." lists, and
 // "#" headings (drawn bold). Everything else is text.
 
 /** A run of text with one style. */
@@ -13,7 +13,7 @@ export interface Span {
   bold?: boolean;
   italic?: boolean;
   code?: boolean;
-  /** Present on a link; always http(s). */
+  /** Present on a link; always https. */
   href?: string;
 }
 
@@ -28,9 +28,19 @@ const URL_RE = /https:\/\/[^\s<>"'`\u3000-\u303f\uff00-\uffef]+/g;
 // What a url does not end with when it closes a sentence or a bracket.
 const TRAILING = /[.,;:!?)\]}'"。，；：！？）】」』、]/;
 
-/** Whether `url` is one a link may open: http(s) with a host. */
+/** Whether `url` is one a link may open: https with a host (as the auto-links and cards). */
 export function safeUrl(url: string): boolean {
-  return /^https?:\/\/[^\s/?#]+/i.test(url);
+  return /^https:\/\/[^\s/?#]+/i.test(url);
+}
+
+const hostOf = (url: string) => /^(?:https?:\/\/)?([^\s/?#:]+)/i.exec(url.trim())?.[1].toLowerCase().replace(/^www\./, "");
+// Link text that reads as a web address: an optional scheme, a dotted host, an optional port and path.
+const LOOKS_LIKE_URL = /^(?:https?:\/\/)?(?:[\p{L}\p{N}-]+\.)+[\p{L}]{2,}(?::\d+)?(?:[/?#]\S*)?$/u;
+
+/** Link text that names another site than the link opens is a disguise. */
+function misleading(text: string, target: string): boolean {
+  const t = text.trim();
+  return LOOKS_LIKE_URL.test(t) && hostOf(t) !== hostOf(target);
 }
 
 /** Splits text into plain spans and https links (a link closing a sentence leaves its punctuation outside). */
@@ -85,7 +95,10 @@ export function inline(s: string, base: Omit<Span, "text" | "href"> = {}): Span[
       const m = /^\[([^\]\n]+)\]\(([^)\s]+)\)/.exec(s.slice(i));
       if (m && safeUrl(m[2])) {
         flush();
-        out.push(...inline(m[1], base).map((sp) => ({ ...sp, href: m[2] })));
+        const label = inline(m[1], base);
+        // Text that looks like a url for another host: show where the link really goes.
+        if (misleading(plainText(label), m[2])) out.push({ ...base, text: m[2], href: m[2] });
+        else out.push(...label.map((sp) => ({ ...sp, href: m[2] })));
         i += m[0].length;
         continue;
       }

@@ -46,12 +46,24 @@ test("marks that do not close, or are not marks, stay text", () => {
 test("markdown links", () => {
   expect(inline("[详情](https://a.example/d)")).toEqual([{ text: "详情", href: "https://a.example/d" }]);
   expect(inline("**[粗](https://a.example)**")).toEqual([{ text: "粗", bold: true, href: "https://a.example" }]);
-  // Only http(s) links open.
+  // Only https links open; http stays text.
+  expect(plainText(inline("[x](http://a.example)"))).toBe("[x](http://a.example)");
+  expect(inline("[x](http://a.example)").some((s) => s.href && s.text.startsWith("["))).toBe(false);
+  expect(safeUrl("http://a.example")).toBe(false);
   expect(plainText(inline("[x](javascript:alert(1))"))).toBe("[x](javascript:alert(1))");
   expect(inline("[x](javascript:alert(1))").some((s) => s.href)).toBe(false);
   expect(safeUrl("https://a.example")).toBe(true);
   expect(safeUrl("ftp://a.example")).toBe(false);
   expect(safeUrl("https://")).toBe(false);
+});
+
+test("link text that names another host shows the real target", () => {
+  expect(inline("[paypal.com](https://evil.example/x)")).toEqual([{ text: "https://evil.example/x", href: "https://evil.example/x" }]);
+  expect(inline("[https://bank.example/login](https://evil.example)")).toEqual([{ text: "https://evil.example", href: "https://evil.example" }]);
+  // The same host (www aside) or ordinary words keep their text.
+  expect(inline("[www.a.example](https://a.example/d)")).toEqual([{ text: "www.a.example", href: "https://a.example/d" }]);
+  expect(inline("[A.Example/docs](https://a.example/d)")).toEqual([{ text: "A.Example/docs", href: "https://a.example/d" }]);
+  expect(inline("[详情 paypal.com](https://evil.example)")).toEqual([{ text: "详情 paypal.com", href: "https://evil.example" }]);
 });
 
 test("bare urls inside Markdown are linked too", () => {
