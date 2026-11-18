@@ -146,7 +146,7 @@ App 把内联 SVG（`svg`、`g`、各种图形、`text`/`tspan`、渐变、`symb
 - 精简 DOM：`getElementById`、`querySelector`、`textContent`、`innerHTML`、`classList`、`style`、`dataset`、`createElement`、`addEventListener('click', …)`
 - 定时器，以及 4 KB 的 `localStorage`
 
-脚本画出来的内容，App 同样按白名单过滤后再显示。`request()` 一律返回 `NOT_ALLOWED`：Honk 还没有 bot 回调。旧版 App 和桌面演示（没有宿主）显示填好 `{{key}}` 的静态卡片，所以关键信息要写在 HTML 里。例子：
+脚本画出来的内容，App 同样按白名单过滤后再显示。消息允许查询（`allow_queries`）时，`request(data)`（1–64 字节，只能在点击处理函数里调，每次点击一次）把查询发给 bot，返回的 Promise 以 bot 的答案兑现；否则以 `WidgetRequestError` 拒绝（`NOT_ALLOWED`、`INVALID_DATA`、`TOO_MANY_REQUESTS`，15 秒无答案为 `TIMEOUT`）。旧版 App 和桌面演示（没有宿主）显示填好 `{{key}}` 的静态卡片，所以关键信息要写在 HTML 里。例子：
 
 ```html
 <p id="n">{{count}}</p><button id="b">+1</button>
