@@ -260,10 +260,27 @@ App 用 TSX 写，跑在 QuickJS 上。页面：
    - 块级元素渲染成 `View`，连续的行内内容合并成一个带嵌套 span 的 `Text`
    - flex 容器的子元素按 flex item 处理，`inline-flex` / `inline-block` 宽度跟随内容，带尺寸或背景的行内元素渲染成盒子
    - CSS 子集映射到 nsh 样式：布局、间距、边框、圆角、颜色、字体、阴影、渐变
+   - 样式来自 `<style>` 和 `style` 属性，见下面「样式表」
+   - 带 `hidden` 属性的元素不渲染
    - `var(--tg-theme-*)` 从当前主题取色，深色模式自动切换
    - `https://` 链接和 `button[data-url]` 点击后用系统打开
    - 超过 2000 个节点时不渲染卡片，只显示正文
 3. **v1 不执行 JS**。v2 计划在 QuickJS 里做精简 DOM，并提供和 `TelegramWidget` 同名的接口。
+
+### 样式表
+
+Telegram 的 widget 一般用 class 加 `<style>` 写，所以 Honk 也按样式表渲染，而不只是内联 `style`：
+
+- `selector.ts`：选择器解析和匹配。支持标签、`*`、`#id`、`.class`、属性选择器（`=`、`~=`、`^=`、`$=`、`*=`、`|=`），后代、`>`、`+`、`~` 组合符，`:first-child`、`:last-child`、`:only-child`、`:nth-child(odd | even | an+b)`、`:root`。卡片没有 `<html>` 和 `<body>`，`html`、`body` 都指卡片的根（`:root`），但优先级按标签算。`:hover`、伪元素等不支持的选择器，所在规则整条忽略
+- `css.ts`：把所有 `<style>` 的文本（静态卡片先填 `{{key}}`）解析成规则，按最右边一段的 id / class / 标签建索引。`@media` 只认 `prefers-color-scheme`（加上 `screen`、`all`），跟随 App 的深浅色；其他媒体查询、`@keyframes`、`@font-face`、`@supports`、嵌套规则都跳过。最多 400 条规则（Telegram 的上限），后面的不生效。和网关一样，能加载资源的声明（`url()`、`image-set()` 等）会被丢掉
+- 层叠：普通声明按优先级、再按先后；然后是内联 `style`；最后是规则里的 `!important`
+- 变量：`--x` 按继承传给子元素，`var()` 先在元素自己和祖先上找，再找主题变量；`:root` 上不能覆盖 `--tg-*`（Telegram 也是这样）。`light-dark(a, b)` 按当前深浅色取值。`:root` 的其他声明作用于整张卡片（文字样式和外框）
+- `display: none` 的元素（块级和行内）不渲染
+- 静态卡片在读取调色板的表达式里渲染，切换深浅色时整张重画
+
+网关早就保留 `<style>`（有危险写法时整块删掉），这次没有改规则，只加了测试，确认 class、id、媒体查询、变量和 `{{key}}` 原样保留。
+
+演示数据（`src/demo.ts`）里“CI 构建”的最新一条是用 class 和 `<style>` 写的卡片：`{{status}}` 写在 class 里，失败时才显示失败的测试，深色模式换一组颜色。
 
 ## 7. 推送字段映射
 

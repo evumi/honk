@@ -122,6 +122,18 @@ curl https://honk.example.com/bot$TOKEN/sendMessage \
 
 渲染时客户端还会再按自己的 CSS 白名单过滤一遍。
 
+### 卡片样式
+
+除了 `style=""`，卡片也可以像 Telegram widget 那样写 `<style>`：
+
+- 选择器：标签、`.class`、`#id`、属性选择器，组合写法（`div.card`），后代、子元素（`>`）和兄弟（`+`、`~`）组合符，`:first-child`、`:last-child`、`:nth-child()`，`:root`（`html`、`body` 也指它），一条规则可以写多个选择器
+- 层叠：按优先级和先后顺序；内联 `style` 优先，除非规则写了 `!important`
+- 变量：`:root` 或任意元素上的 `--x`，用 `var()` 读取；主题变量 `--tg-theme-*`
+- 深色模式：`@media (prefers-color-scheme: dark)` 和 `light-dark()` 跟随 App 的外观
+- `display: none` 隐藏元素；`<style>` 和 `class` 里也可以用 `{{key}}`
+
+只生效前 400 条规则；其他媒体查询、`@keyframes`、伪元素和 `:hover` 会被忽略。脚本仍然会被删掉，App 目前不执行 JavaScript。
+
 ## App API
 
 除了注册设备，其他接口都需要带 `Authorization: Bearer <device_secret>`。
