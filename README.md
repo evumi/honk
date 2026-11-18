@@ -67,6 +67,7 @@ See `gateway/Dockerfile` for the container. Settings:
 | `HONK_ACKED_KEEP` | `24h` | how long a message that every device of the group has acked is kept (counted from its creation) |
 | `HONK_DEVICE_GC` | `2160h` | a device whose push token is gone and that made no request for this long is deleted, with the group's bots and queue if it was the last |
 | `HONK_SEND_RATE` / `HONK_SEND_BURST` | `5` / `20` | per-bot messages per second / burst |
+| `HONK_TRUSTED_PROXIES` | loopback + private ranges | comma-separated CIDRs of reverse proxies whose `X-Forwarded-For` / `X-Real-IP` are believed for per-IP limits (the right-most address not in the list is the client; IPv6 clients are keyed by /64); `none` trusts no one, so only the TCP peer counts |
 | `HONK_REGISTER_PER_HOUR` | `10` | device registrations per client IP per hour (burst 5) |
 | `HONK_MAX_BOTS_PER_DEVICE` | `100` | bots one device group can own (the name is from before groups); a pairing that would exceed it is refused |
 | `HONK_WEBHOOK_ALLOW_PRIVATE` | `false` | let bots set a `setWebhook` url on loopback, private and link-local addresses (off: refused, so a bot cannot make the gateway call your internal network) |

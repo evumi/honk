@@ -107,7 +107,7 @@ v4 迁移：建 `owners`、`links`；给 `devices`、`bots`、`messages` 加 `ow
 - **字段长度**：`title` ≤ 256 字，`body` ≤ 4096 字，`id` ≤ 128 字节，`icon` 和 `image` 必须是 https。
 - **发送选项**：`open` 只能是 `chat` 或 `url`，`url` 要同时给 `url`；`parse_mode` 只认 `Markdown`（不分大小写）；`silent` 是 `true` / `false` / `1` / `0`；`ttl` 是 60 到 `HONK_MESSAGE_TTL` 之间的整数秒。校验不过一律 400。Markdown 正文的横幅文字由网关去掉标记（`internal/api/markdown.go` 的 `StripMarkdown`），和 App 的渲染子集（`app/src/markup.ts`）保持一致。
 - **加密消息**：网关读不到内容，只校验 `ciphertext` 的形状和 64 KB 上限；上面这些内容限制改由设备解密后检查（见「端到端加密」）。
-- **限流**：每个 bot 每秒 5 条，突发 20 条（可配）。
+- **限流**：每个 bot 每秒 5 条，突发 20 条（可配）。按 IP 的限流（设备注册、配对 claim、relay 登记）用的客户端地址：只有 TCP 对端在 `HONK_TRUSTED_PROXIES`（默认回环 + 私有网段，`none` 为不信任）里时才读 `X-Forwarded-For`（取不在信任列表里的最右一个）和 `X-Real-IP`，否则就是对端地址；IPv6 按 /64 归并。限流表超过 5 万项时先清掉空闲项，再清一半，不会在两次每小时清理之间无限增长。
 - **模拟器身份**：push token 以 `simulator-` 开头的设备照常注册和排队，但不发推送（见第 5 节「模拟器开发」）。
 - **清理**：每小时删除过期的消息、设备组里每台设备都已 ack 且创建超过 `HONK_ACKED_KEEP`（1 天）的消息，以及按 `HONK_DEVICE_GC` 回收的废弃设备（见下面「设备组」）。
 - **注册口令**：`HONK_REGISTER_KEY` 不为空时，`POST /v1/devices` 必须带相同的 `register_key`（常量时间比较，先过 IP 限流）。App 的网关页有可选的「注册口令」输入框；iOS 存在 Keychain（`RegisterKeyStore`），Android 存在加密的 SharedPreferences，注册时作为 `register_key` 发出。只改口令（网关地址不变）不清本机数据，设备还没注册就立刻重试注册。

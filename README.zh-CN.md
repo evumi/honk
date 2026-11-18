@@ -79,6 +79,7 @@ docker run -p 8080:8080 -v honk-data:/data \
 | `HONK_ACKED_KEEP` | `24h` | 设备组里每台设备都已 ack 的消息再保留多久（从创建时算起） |
 | `HONK_DEVICE_GC` | `2160h` | push token 已失效、且这么久没有任何请求的设备会被删除；它是组里最后一台时，bot 和队列一并删除 |
 | `HONK_SEND_RATE` / `HONK_SEND_BURST` | `5` / `20` | 每个 bot 每秒最多发几条 / 突发上限 |
+| `HONK_TRUSTED_PROXIES` | 回环 + 私有网段 | 逗号分隔的 CIDR：来自这些反向代理的 `X-Forwarded-For` / `X-Real-IP` 才会用来做按 IP 的限流（取不在列表里的最右一个地址；IPv6 客户端按 /64 计）；`none` 表示不信任任何代理，只看 TCP 对端 |
 | `HONK_REGISTER_PER_HOUR` | `10` | 每个 IP 每小时最多注册几台设备（突发 5） |
 | `HONK_MAX_BOTS_PER_DEVICE` | `100` | 每个设备组最多几个 bot（名字沿用分组之前的叫法）；会超出上限的配对会被拒绝 |
 | `HONK_WEBHOOK_ALLOW_PRIVATE` | `false` | 允许 bot 用 `setWebhook` 把地址设在回环、内网和链路本地地址上（默认拒绝，防止 bot 让网关去访问你的内网） |

@@ -109,6 +109,7 @@ func run(log *slog.Logger) error {
 		RelayServe: cfg.RelayServe, RelayRate: cfg.RelayRate, RelayBurst: cfg.RelayBurst, RelayTokenPerMinute: cfg.RelayTokenPerMinute,
 		RelayAPNs: direct.APNs, RelayFCM: direct.FCM,
 		WebhookAllowPrivate: cfg.WebhookAllowPrivate,
+		TrustedProxies:      cfg.TrustedProxies,
 	})
 	httpSrv := &http.Server{
 		Addr:              cfg.Addr,

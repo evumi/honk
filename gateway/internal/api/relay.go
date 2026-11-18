@@ -342,16 +342,10 @@ func (s *Server) recordRelay(id string, gone bool) {
 // allowRelayRegistration takes a registration from the client IP's bucket; it
 // is separate from device registration, with the same rules.
 func (s *Server) allowRelayRegistration(r *http.Request) bool {
-	ip := clientIP(r)
+	ip := s.clientIP(r)
 	s.rs.mu.Lock()
 	defer s.rs.mu.Unlock()
-	l, found := s.rs.byIP[ip]
-	if !found {
-		l = &limiter{Limiter: rate.NewLimiter(rate.Limit(s.opts.RegisterPerHour/3600), s.opts.RegisterBurst)}
-		s.rs.byIP[ip] = l
-	}
-	l.last = time.Now()
-	return l.Allow()
+	return bucket(s.rs.byIP, ip, rate.Limit(s.opts.RegisterPerHour/3600), s.opts.RegisterBurst).Allow()
 }
 
 // pruneRelay drops idle relay state; part of PruneLimiters.

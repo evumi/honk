@@ -4,10 +4,13 @@ package config
 import (
 	"fmt"
 	"log/slog"
+	"net/netip"
 	"net/url"
 	"os"
 	"strconv"
 	"time"
+
+	"github.com/evumi/honk/gateway/internal/api"
 )
 
 // Config holds every setting the gateway reads at start-up.
@@ -40,6 +43,11 @@ type Config struct {
 	// WebhookAllowPrivate (HONK_WEBHOOK_ALLOW_PRIVATE=true) lets bots set
 	// webhooks on loopback, private and link-local addresses. Default false.
 	WebhookAllowPrivate bool
+
+	// TrustedProxies (HONK_TRUSTED_PROXIES): comma-separated CIDRs whose
+	// X-Forwarded-For / X-Real-IP are believed for per-IP limits. Empty means
+	// loopback and private ranges; "none" trusts no one.
+	TrustedProxies []netip.Prefix
 
 	APNs APNs
 	FCM  FCM
@@ -136,6 +144,9 @@ func Load() (Config, error) {
 	}
 	if c.DeviceGC, err = duration("HONK_DEVICE_GC", 2160*time.Hour); err != nil {
 		return c, err
+	}
+	if c.TrustedProxies, err = api.ParseTrustedProxies(os.Getenv("HONK_TRUSTED_PROXIES")); err != nil {
+		return c, fmt.Errorf("HONK_TRUSTED_PROXIES: %w", err)
 	}
 	if v := os.Getenv("HONK_SEND_RATE"); v != "" {
 		if c.SendRate, err = strconv.ParseFloat(v, 64); err != nil || c.SendRate <= 0 {

@@ -60,7 +60,7 @@ or as another service in the same compose file:
       - caddy-data:/data
 ```
 
-(with `reverse_proxy honk:8080` and no `ports` on the `honk` service, and `caddy-data` under `volumes`). With nginx, proxy to `127.0.0.1:8080` and pass `X-Forwarded-For` or `X-Real-IP`: the gateway reads the client address from them for its registration rate limit, so a proxy that does not set them makes every client look like one address. Bodies are small; nothing special is needed for timeouts.
+(with `reverse_proxy honk:8080` and no `ports` on the `honk` service, and `caddy-data` under `volumes`). With nginx, proxy to `127.0.0.1:8080` and pass `X-Forwarded-For` or `X-Real-IP`: the gateway reads the client address from them for its per-IP rate limits (registration, pairing), but only when the connection comes from `HONK_TRUSTED_PROXIES` (default: loopback and private ranges, which covers a local proxy or a docker network; set it to your proxy's address, or `none` when nothing sits in front). A proxy that does not set them makes every client look like one address; headers from any other peer are ignored, so clients cannot spoof them. Bodies are small; nothing special is needed for timeouts.
 
 Then, in the app: Settings, Gateway, enter `https://honk.example.com/`, "Test connection", and save. The app registers this device on your gateway, with the register key if you set one. Switching clears the bots and messages on the phone; they stay on the old gateway.
 

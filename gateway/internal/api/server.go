@@ -8,8 +8,8 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
-	"net"
 	"net/http"
+	"net/netip"
 	"strings"
 	"sync"
 	"time"
@@ -50,6 +50,10 @@ type Options struct {
 	PushBackoff []time.Duration
 	// RegisterKey, when set, must be sent as register_key to register a device.
 	RegisterKey string
+	// TrustedProxies are the peers whose X-Forwarded-For / X-Real-IP are
+	// believed (HONK_TRUSTED_PROXIES). nil trusts none; config supplies the
+	// default (DefaultTrustedProxies).
+	TrustedProxies []netip.Prefix
 	// AccessLog logs every request at debug level.
 	AccessLog bool
 
@@ -94,6 +98,8 @@ type Server struct {
 	pusher push.Pusher
 	log    *slog.Logger
 	opts   Options
+
+	trustedProxies []netip.Prefix
 
 	mu         sync.Mutex
 	limiters   map[string]*limiter // per bot: sends
@@ -151,7 +157,7 @@ func New(st *store.Store, p push.Pusher, log *slog.Logger, opts Options) *Server
 	if opts.RelayGoneLimit <= 0 {
 		opts.RelayGoneLimit = 100
 	}
-	s := &Server{store: st, pusher: p, log: log, opts: opts, limiters: map[string]*limiter{}, registrars: map[string]*limiter{}, claimers: map[string]*limiter{},
+	s := &Server{store: st, pusher: p, log: log, opts: opts, trustedProxies: opts.TrustedProxies, limiters: map[string]*limiter{}, registrars: map[string]*limiter{}, claimers: map[string]*limiter{},
 		hub: newQueryHub(), whClient: newWebhookClient(opts.WebhookAllowPrivate, nil)}
 	s.rs = relayState{relays: map[string]*relayEntry{}, tokens: map[string]*limiter{}, byIP: map[string]*limiter{}}
 	s.initMetrics()
@@ -162,7 +168,7 @@ func New(st *store.Store, p push.Pusher, log *slog.Logger, opts Options) *Server
 // Handler returns the HTTP routes.
 func (s *Server) Handler() http.Handler {
 	r := chi.NewRouter()
-	r.Use(middleware.RealIP, middleware.Recoverer, s.instrument)
+	r.Use(middleware.Recoverer, s.instrument)
 	r.Use(func(next http.Handler) http.Handler { // bodies here are small
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			r.Body = http.MaxBytesReader(w, r.Body, 128<<10)
@@ -301,42 +307,52 @@ func (s *Server) route(platform string) string {
 	return r
 }
 
-// clientIP is the client address; middleware.RealIP has put the proxy's
-// client address in RemoteAddr.
-func clientIP(r *http.Request) string {
-	ip := r.RemoteAddr
-	if host, _, err := net.SplitHostPort(ip); err == nil {
-		ip = host
+// maxLimiters bounds each limiter map between prunes (hourly). When one is
+// full, entries idle for over a minute go first, then, if it is still full, an
+// arbitrary half; a bucket that is dropped starts full again, which only
+// matters to an attacker already spraying thousands of addresses.
+const maxLimiters = 50000
+
+// bucket returns the limiter for key in m, making room first when m is full.
+// The caller holds the lock that guards m.
+func bucket(m map[string]*limiter, key string, lim rate.Limit, burst int) *limiter {
+	if l, found := m[key]; found {
+		l.last = time.Now()
+		return l
 	}
-	return ip
+	if len(m) >= maxLimiters {
+		cutoff := time.Now().Add(-time.Minute)
+		for k, l := range m {
+			if l.last.Before(cutoff) {
+				delete(m, k)
+			}
+		}
+		for k := range m {
+			if len(m) < maxLimiters/2 {
+				break
+			}
+			delete(m, k)
+		}
+	}
+	l := &limiter{Limiter: rate.NewLimiter(lim, burst), last: time.Now()}
+	m[key] = l
+	return l
 }
 
 // allowRegistration takes a registration from the client IP's bucket.
 func (s *Server) allowRegistration(r *http.Request) bool {
-	ip := clientIP(r)
+	ip := s.clientIP(r)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	l, found := s.registrars[ip]
-	if !found {
-		l = &limiter{Limiter: rate.NewLimiter(rate.Limit(s.opts.RegisterPerHour/3600), s.opts.RegisterBurst)}
-		s.registrars[ip] = l
-	}
-	l.last = time.Now()
-	return l.Allow()
+	return bucket(s.registrars, ip, rate.Limit(s.opts.RegisterPerHour/3600), s.opts.RegisterBurst).Allow()
 }
 
 // allowClaim takes a pairing claim from the client IP's bucket.
 func (s *Server) allowClaim(r *http.Request) bool {
-	ip := clientIP(r)
+	ip := s.clientIP(r)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	l, found := s.claimers[ip]
-	if !found {
-		l = &limiter{Limiter: rate.NewLimiter(rate.Limit(s.opts.ClaimPerHour/3600), s.opts.ClaimBurst)}
-		s.claimers[ip] = l
-	}
-	l.last = time.Now()
-	return l.Allow()
+	return bucket(s.claimers, ip, rate.Limit(s.opts.ClaimPerHour/3600), s.opts.ClaimBurst).Allow()
 }
 
 // forgetBot drops a deleted bot's limiter.
