@@ -212,6 +212,12 @@ func (s *Store) Sync(ctx context.Context, ownerID string, cursor int64, limit in
 	return out, rows.Err()
 }
 
+// ClearResync clears the device's resync flag: it is syncing from cursor 0.
+func (s *Store) ClearResync(ctx context.Context, deviceID string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE devices SET resync = 0 WHERE id = ? AND resync <> 0`, deviceID)
+	return err
+}
+
 // Ack raises the device's watermark to upTo: it has stored every item up to
 // and including that id. The watermark never goes down, and is capped at the
 // last id ever issued, so a bogus value cannot cover items that do not exist

@@ -408,7 +408,8 @@ func (s *Server) sync(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = l
 	}
-	msgs, err := s.store.Sync(r.Context(), device(r).OwnerID, cursor, limit)
+	d := device(r)
+	msgs, err := s.store.Sync(r.Context(), d.OwnerID, cursor, limit)
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -417,7 +418,19 @@ func (s *Server) sync(w http.ResponseWriter, r *http.Request) {
 	if len(msgs) > 0 {
 		next = msgs[len(msgs)-1].ID
 	}
-	ok(w, map[string]any{"messages": msgs, "cursor": next, "has_more": len(msgs) == limit})
+	out := map[string]any{"messages": msgs, "cursor": next, "has_more": len(msgs) == limit}
+	if d.Resync {
+		if cursor == 0 {
+			// Starting over is what the flag asks for.
+			if err := s.store.ClearResync(r.Context(), d.ID); err != nil {
+				s.fail(w, r, err)
+				return
+			}
+		} else {
+			out["reset"] = true // the group took in messages below this device's cursor
+		}
+	}
+	ok(w, out)
 }
 
 func (s *Server) ack(w http.ResponseWriter, r *http.Request) {

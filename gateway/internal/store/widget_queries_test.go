@@ -28,6 +28,7 @@ func TestMigrateWidgetQueries(t *testing.T) {
 		`ALTER TABLE bots DROP COLUMN encrypted`,
 		`ALTER TABLE bots DROP COLUMN key_wrapped`,
 		`ALTER TABLE messages DROP COLUMN ciphertext`,
+		`ALTER TABLE devices DROP COLUMN resync`,
 		`PRAGMA user_version = 5`,
 	} {
 		if _, err := db.Exec(q); err != nil {

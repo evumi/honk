@@ -73,6 +73,7 @@ func (s *Store) migrate(ctx context.Context) error {
 		migrateSendOptions,
 		migrateWidgetQueries,
 		migrateEncryption,
+		migrateResync,
 	}
 	for ; v < len(steps); v++ {
 		if err := s.step(ctx, v+1, steps[v]); err != nil {
@@ -98,7 +99,7 @@ func (s *Store) step(ctx context.Context, version int, f func(context.Context, *
 	return tx.Commit()
 }
 
-// migrateSendOptions (v3) adds the sendMessage options open, image,
+// migrateSendOptions (v5) adds the sendMessage options open, image,
 // parse_mode and silent to the queue.
 func migrateSendOptions(ctx context.Context, tx *sql.Tx) error {
 	for _, q := range []string{
@@ -248,7 +249,7 @@ CREATE INDEX messages_owner ON messages(owner_id, id);`)
 	return err
 }
 
-// migrateWidgetQueries adds what widget queries (card request()) need: whether
+// migrateWidgetQueries (v6) adds what widget queries (card request()) need: whether
 // a message's card may query its bot, and the bot's webhook.
 func migrateWidgetQueries(ctx context.Context, tx *sql.Tx) error {
 	for _, q := range []string{
@@ -263,7 +264,7 @@ func migrateWidgetQueries(ctx context.Context, tx *sql.Tx) error {
 	return nil
 }
 
-// migrateEncryption adds end-to-end encryption: bots.encrypted (the device
+// migrateEncryption (v7) adds end-to-end encryption: bots.encrypted (the device
 // turned it on; plaintext sends are then refused), messages.ciphertext (the
 // sealed content, which the gateway stores and never reads) and
 // bots.key_wrapped (the bot's key sealed with the device group's group key,
@@ -279,6 +280,15 @@ func migrateEncryption(ctx context.Context, tx *sql.Tx) error {
 		}
 	}
 	return nil
+}
+
+// migrateResync (v8) adds devices.resync: set on a device whose group was
+// merged with another that held queued messages the device has not seen. Its
+// sync cursor is past their ids, so /v1/sync tells it to start again from 0
+// (see ClaimLink).
+func migrateResync(ctx context.Context, tx *sql.Tx) error {
+	_, err := tx.ExecContext(ctx, `ALTER TABLE devices ADD COLUMN resync INTEGER NOT NULL DEFAULT 0`)
+	return err
 }
 
 // Bot ids are botIDLen characters of base62 starting with a letter, so one can
@@ -363,13 +373,16 @@ type Device struct {
 	// AckedUpTo is the device's ack watermark: it has stored every queued item
 	// up to and including this id.
 	AckedUpTo int64 `json:"-"`
+	// Resync: the group was merged with messages this device has not seen;
+	// /v1/sync answers "reset": true until it syncs from cursor 0.
+	Resync bool `json:"-"`
 }
 
-const devCols = `id, owner_id, name, platform, push_token, push_ok, created_at, seen_at, acked_up_to`
+const devCols = `id, owner_id, name, platform, push_token, push_ok, created_at, seen_at, acked_up_to, resync`
 
 func scanDevice(row interface{ Scan(...any) error }) (Device, error) {
 	var d Device
-	err := row.Scan(&d.ID, &d.OwnerID, &d.Name, &d.Platform, &d.PushToken, &d.PushOK, &d.CreatedAt, &d.SeenAt, &d.AckedUpTo)
+	err := row.Scan(&d.ID, &d.OwnerID, &d.Name, &d.Platform, &d.PushToken, &d.PushOK, &d.CreatedAt, &d.SeenAt, &d.AckedUpTo, &d.Resync)
 	if errors.Is(err, sql.ErrNoRows) {
 		return d, ErrNotFound
 	}

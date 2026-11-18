@@ -339,7 +339,7 @@ func TestMigrateV3Groups(t *testing.T) {
 	}
 	var v int
 	s.db.QueryRow(`PRAGMA user_version`).Scan(&v)
-	if v != 7 {
+	if v != 8 {
 		t.Errorf("user_version = %d", v)
 	}
 }
