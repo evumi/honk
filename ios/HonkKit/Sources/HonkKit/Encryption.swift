@@ -403,6 +403,19 @@ public final class MemoryGroupKey: GroupKeyStoring, @unchecked Sendable {
     }
 }
 
+/// Why turning encryption on or resetting its key was refused.
+public enum EncryptionError: Error, Equatable, LocalizedError {
+    /// The gateway already has encryption on for the bot, but its key has not reached this device (a phone paired
+    /// a moment ago). Making a new key here would replace the group's, so the device waits for another one to share it.
+    case waitingForKey
+
+    public var errorDescription: String? {
+        switch self {
+        case .waitingForKey: return "等待其他设备同步密钥：这个 Bot 已开启加密，密钥还没到这台设备。"
+        }
+    }
+}
+
 /// The bot keys and the group key of this device, and how they agree with the
 /// wrapped keys on the gateway.
 public struct KeyRing: Sendable {
@@ -429,6 +442,37 @@ public struct KeyRing: Sendable {
     public func wrapped(botID: String, createGroupKey: Bool = false) -> String? {
         guard let k = keys.key(botID: botID), let g = createGroupKey ? ensureGroupKey() : group.groupKey() else { return nil }
         return try? KeyWrap.wrap(botKey: k, groupKey: g, botID: botID)
+    }
+
+    /// Turns encryption on for `bot` (as the gateway lists it now) and returns its key.
+    ///
+    /// Off at the gateway: this device's key, else a new one, is wrapped with the group key and sent through
+    /// `patch` (which also sets `encrypted`); the key is stored only once that succeeded. On at the gateway: the
+    /// key is the group's, so it is taken from the gateway's wrapped one (`reconcile`); with no key to be had
+    /// this throws `waitingForKey` instead of making a new one.
+    public func enable(bot: Bot, patch: (_ wrapped: String) async throws -> Void) async throws -> Data {
+        if bot.encrypted {
+            await reconcile(bots: [bot]) { _, wrapped in try await patch(wrapped) }
+            guard let k = keys.key(botID: bot.id) else { throw EncryptionError.waitingForKey }
+            return k
+        }
+        let k = keys.key(botID: bot.id) ?? Seal.generateKey()
+        try await publish(k, botID: bot.id, patch)
+        return k
+    }
+
+    /// Replaces the bot's key with a new one and returns it. The old key stays if `patch` fails.
+    public func reset(botID: String, patch: (_ wrapped: String) async throws -> Void) async throws -> Data {
+        let k = Seal.generateKey()
+        try await publish(k, botID: botID, patch)
+        return k
+    }
+
+    /// Wraps `key` with the group key (made now if need be: a patch is about to be sent), sends it, then keeps it.
+    private func publish(_ key: Data, botID: String, _ patch: (String) async throws -> Void) async throws {
+        let wrapped = try KeyWrap.wrap(botKey: key, groupKey: ensureGroupKey(), botID: botID)
+        try await patch(wrapped)
+        keys.save(key, botID: botID)
     }
 
     /// What a pairing bundle carries: every listed bot's key (base64url).

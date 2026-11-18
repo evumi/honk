@@ -116,7 +116,7 @@ object HostArgs {
  */
 object HostJson {
     fun bot(b: Bot): Map<String, Any?> =
-        mapOf("id" to b.id, "name" to b.name, "avatar" to b.avatar, "defaultLevel" to b.defaultLevel, "createdAt" to b.createdAt)
+        mapOf("id" to b.id, "name" to b.name, "avatar" to b.avatar, "defaultLevel" to b.defaultLevel, "createdAt" to b.createdAt, "encrypted" to b.encrypted)
 
     fun message(m: StoredMessage): Map<String, Any?> = mapOf(
         "id" to m.id, "botId" to m.botId, "title" to m.title, "body" to m.body, "html" to m.html, "data" to m.data,

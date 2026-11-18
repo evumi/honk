@@ -100,9 +100,13 @@ final class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationC
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
                                 withCompletionHandler completionHandler: @escaping () -> Void) {
-        defer { completionHandler() }
-        guard let info = PushInfo(userInfo: response.notification.request.content.userInfo) else { return }
+        guard let info = PushInfo(userInfo: response.notification.request.content.userInfo) else {
+            completionHandler()
+            return
+        }
         Task { @MainActor in
+            // The system may suspend the app once this is called: only after the action ran.
+            defer { completionHandler() }
             let service = HonkService.shared
             // A notification from before the bot got its short id names the old one.
             let botID = service.store.currentBotID(info.botID)

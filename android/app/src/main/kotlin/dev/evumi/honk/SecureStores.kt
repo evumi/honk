@@ -55,6 +55,8 @@ class PrefsBotTokenStore(private val prefs: SharedPreferences) : BotTokenStore {
         prefs.edit().remove(key(botId)).apply()
     }
 
+    override fun ids(): List<String> = prefs.all.keys.filter { it.startsWith(PREFIX) }.map { it.removePrefix(PREFIX) }
+
     override fun removeAll() {
         val edit = prefs.edit()
         prefs.all.keys.filter { it.startsWith(PREFIX) }.forEach(edit::remove)
@@ -84,6 +86,8 @@ class PrefsBotKeyStore(private val prefs: SharedPreferences) : BotKeyStore {
     override fun remove(botId: String) {
         prefs.edit().remove(prefKey(botId)).commit()
     }
+
+    override fun ids(): List<String> = prefs.all.keys.filter { it.startsWith(PREFIX) }.map { it.removePrefix(PREFIX) }
 
     override fun removeAll() {
         val edit = prefs.edit()

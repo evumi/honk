@@ -52,6 +52,13 @@ class LocalStore(private val sql: Sql) {
                 sql.exec("PRAGMA user_version = 5")
             }
         }
+        // v6: whether the gateway lists a bot as end-to-end encrypted.
+        if ((scalar("PRAGMA user_version") ?: 0) < 6) {
+            transaction {
+                sql.exec("ALTER TABLE bots ADD COLUMN encrypted INTEGER NOT NULL DEFAULT 0")
+                sql.exec("PRAGMA user_version = 6")
+            }
+        }
     }
 
     // applying queued items
@@ -204,14 +211,19 @@ class LocalStore(private val sql: Sql) {
 
     fun saveBot(b: Bot) = locked { upsert(b) }
 
+    /** Records whether the gateway lists the bot as encrypted (after this device turned it on or off). */
+    fun setEncrypted(botId: String, encrypted: Boolean) = locked {
+        sql.run("UPDATE bots SET encrypted = ? WHERE id = ?", listOf(encrypted, botId))
+    }
+
     private fun upsert(b: Bot) {
         sql.run(
             """
-            INSERT INTO bots (id, name, avatar, default_level, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO bots (id, name, avatar, default_level, created_at, updated_at, encrypted) VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET name = excluded.name, avatar = excluded.avatar,
-              default_level = excluded.default_level, updated_at = excluded.updated_at
+              default_level = excluded.default_level, updated_at = excluded.updated_at, encrypted = excluded.encrypted
             """.trimIndent(),
-            listOf(b.id, b.name, b.avatar, b.defaultLevel, b.createdAt, b.updatedAt),
+            listOf(b.id, b.name, b.avatar, b.defaultLevel, b.createdAt, b.updatedAt, b.encrypted),
         )
     }
 
@@ -381,12 +393,12 @@ class LocalStore(private val sql: Sql) {
             """
             SELECT b.id, b.name, b.avatar, b.default_level, b.created_at, b.updated_at, b.muted, b.pinned,
                    (SELECT COUNT(*) FROM messages m WHERE m.bot_id = b.id AND m.read = 0),
-                   (SELECT MAX(id) FROM messages m WHERE m.bot_id = b.id)
+                   (SELECT MAX(id) FROM messages m WHERE m.bot_id = b.id), b.encrypted
             FROM bots b
             """.trimIndent(),
         ) { r ->
             ChatSummary(
-                bot = readBot(r),
+                bot = readBot(r, encryptedColumn = 10),
                 muted = r.long(6) != 0L,
                 pinned = r.long(7) != 0L,
                 last = null,
@@ -467,6 +479,23 @@ class LocalStore(private val sql: Sql) {
             )
         }
 
+    /**
+     * Whether [name] may run now: true at most once per [interval] milliseconds, and the time is recorded when it
+     * is. Kept in `meta`, as LocalStore.swift does for the extension's key refresh.
+     */
+    fun claimSlot(name: String, interval: Long, now: Long = System.currentTimeMillis()): Boolean = locked {
+        transaction {
+            val key = "slot:$name"
+            val last = sql.query("SELECT value FROM meta WHERE key = ?", listOf(key)) { it.text(0) }.firstOrNull()?.toLongOrNull()
+            if (last != null && now >= last && now - last < interval) return@transaction false
+            sql.run(
+                "INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                listOf(key, now.toString()),
+            )
+            true
+        }
+    }
+
     fun close() = locked { sql.close() }
 
     // plumbing
@@ -499,11 +528,14 @@ class LocalStore(private val sql: Sql) {
             append('%')
         }
 
-        private const val BOT_COLS = "id, name, avatar, default_level, created_at, updated_at"
+        private const val BOT_COLS = "id, name, avatar, default_level, created_at, updated_at, encrypted"
 
-        /** Reads [BOT_COLS] from the first six columns of a row. */
-        private fun readBot(r: Sql.Row) =
-            Bot(r.text(0).orEmpty(), r.text(1).orEmpty(), r.text(2).orEmpty(), r.text(3) ?: "active", r.long(4), r.long(5))
+        /** Reads [BOT_COLS] from a row; [encryptedColumn] is where `encrypted` is when other columns come before it. */
+        private fun readBot(r: Sql.Row, encryptedColumn: Int = 6) =
+            Bot(
+                r.text(0).orEmpty(), r.text(1).orEmpty(), r.text(2).orEmpty(), r.text(3) ?: "active", r.long(4), r.long(5),
+                encrypted = r.long(encryptedColumn) != 0L,
+            )
 
         private const val MESSAGE_COLS =
             "id, bot_id, title, body, html, data, level, group_key, url, copy_text, icon, open_mode, image, parse_mode, silent, collapse_id, allow_queries, date, read"

@@ -84,6 +84,7 @@ public final class LocalStore: @unchecked Sendable {
         try migrateSendOptions()
         try migrateWidgetQueries()
         try migratePlaceholder()
+        try migrateEncrypted()
     }
 
     private func migrateV1() throws {
@@ -215,6 +216,19 @@ public final class LocalStore: @unchecked Sendable {
             try exec("""
             ALTER TABLE messages ADD COLUMN placeholder INTEGER NOT NULL DEFAULT 0;
             PRAGMA user_version = 5;
+            """)
+        }
+    }
+
+    /// v6: whether the gateway lists a bot as end-to-end encrypted (the app shows "waiting for the key" when the
+    /// flag is on and this device has no key yet).
+    private func migrateEncrypted() throws {
+        guard try scalar("PRAGMA user_version") ?? 0 < 6 else { return }
+        try transaction {
+            guard try scalar("PRAGMA user_version") ?? 0 < 6 else { return }
+            try exec("""
+            ALTER TABLE bots ADD COLUMN encrypted INTEGER NOT NULL DEFAULT 0;
+            PRAGMA user_version = 6;
             """)
         }
     }
@@ -360,12 +374,21 @@ public final class LocalStore: @unchecked Sendable {
         try locked { try query("SELECT \(Self.botCols) FROM bots ORDER BY created_at, id", [], Self.readBot) }
     }
 
-    private static let botCols = "id, name, avatar, default_level, created_at, updated_at"
+    private static let botCols = "id, name, avatar, default_level, created_at, updated_at, encrypted"
 
-    /// Reads `botCols` from the first six columns of a row.
-    private static func readBot(_ r: Row) -> Bot {
-        Bot(id: r.text(0) ?? "", name: r.text(1) ?? "", avatar: r.text(2) ?? "", defaultLevel: r.text(3) ?? "active",
-            createdAt: r.int(4), updatedAt: r.int(5))
+    /// Reads `botCols` from a row; `encryptedColumn` is where `encrypted` is when the query has other columns before it.
+    private static func readBot(_ r: Row) -> Bot { readBot(r, encryptedColumn: 6) }
+
+    private static func readBot(_ r: Row, encryptedColumn: Int32) -> Bot {
+        var b = Bot(id: r.text(0) ?? "", name: r.text(1) ?? "", avatar: r.text(2) ?? "", defaultLevel: r.text(3) ?? "active",
+                    createdAt: r.int(4), updatedAt: r.int(5))
+        b.encrypted = r.int(encryptedColumn) != 0
+        return b
+    }
+
+    /// Records whether the gateway lists the bot as encrypted (after this device turned it on or off).
+    public func setEncrypted(botID: String, _ encrypted: Bool) throws {
+        try locked { try run("UPDATE bots SET encrypted = ? WHERE id = ?", [encrypted, botID]) }
     }
 
     /// The ids of the stored bots.
@@ -379,10 +402,10 @@ public final class LocalStore: @unchecked Sendable {
 
     private func upsert(_ b: Bot) throws {
         try run("""
-            INSERT INTO bots (id, name, avatar, default_level, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO bots (id, name, avatar, default_level, created_at, updated_at, encrypted) VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET name = excluded.name, avatar = excluded.avatar,
-              default_level = excluded.default_level, updated_at = excluded.updated_at
-            """, [b.id, b.name, b.avatar, b.defaultLevel, b.createdAt, b.updatedAt])
+              default_level = excluded.default_level, updated_at = excluded.updated_at, encrypted = excluded.encrypted
+            """, [b.id, b.name, b.avatar, b.defaultLevel, b.createdAt, b.updatedAt, b.encrypted])
     }
 
     public func bot(id: String) throws -> Bot? {
@@ -570,11 +593,10 @@ public final class LocalStore: @unchecked Sendable {
             let bots = try query("""
                 SELECT b.id, b.name, b.avatar, b.default_level, b.created_at, b.updated_at, b.muted, b.pinned,
                        (SELECT COUNT(*) FROM messages m WHERE m.bot_id = b.id AND m.read = 0),
-                       (SELECT MAX(id) FROM messages m WHERE m.bot_id = b.id)
+                       (SELECT MAX(id) FROM messages m WHERE m.bot_id = b.id), b.encrypted
                 FROM bots b
                 """) { r in
-                (ChatSummary(bot: Bot(id: r.text(0) ?? "", name: r.text(1) ?? "", avatar: r.text(2) ?? "",
-                                      defaultLevel: r.text(3) ?? "active", createdAt: r.int(4), updatedAt: r.int(5)),
+                (ChatSummary(bot: Self.readBot(r, encryptedColumn: 10),
                              muted: r.int(6) != 0, pinned: r.int(7) != 0, last: nil, unread: Int(r.int(8))),
                  r.isNull(9) ? nil : r.int(9))
             }
@@ -663,6 +685,22 @@ public final class LocalStore: @unchecked Sendable {
         try locked {
             try run("INSERT INTO meta (key, value) VALUES ('cursor', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                     [String(c)])
+        }
+    }
+
+    /// Whether `name` may run now: true at most once per `interval` milliseconds, and the time is recorded when it
+    /// is. Kept in `meta`, so the app and the extension share the budget (the extension uses it to retry the
+    /// key refresh no more than every few minutes).
+    public func claimSlot(_ name: String, interval: Int64, now: Int64 = Int64(Date().timeIntervalSince1970 * 1000)) throws -> Bool {
+        try locked {
+            try transaction {
+                let key = "slot:" + name
+                let last = try query("SELECT value FROM meta WHERE key = ?", [key]) { $0.text(0) }.first.flatMap { $0 }.flatMap { Int64($0) }
+                if let last, now >= last, now - last < interval { return false }
+                try run("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                        [key, String(now)])
+                return true
+            }
         }
     }
 

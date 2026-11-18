@@ -103,13 +103,14 @@ public enum NotificationPlan {
     /// A file extension the system accepts for an image attachment, from the
     /// response's content type (or the url's extension as a fallback).
     public static func imageExtension(contentType: String?, url: URL) -> String? {
-        let known = ["image/jpeg": "jpg", "image/jpg": "jpg", "image/png": "png", "image/gif": "gif", "image/webp": "webp"]
+        // UNNotificationAttachment shows JPEG, PNG and GIF; WebP is not among them.
+        let known = ["image/jpeg": "jpg", "image/jpg": "jpg", "image/png": "png", "image/gif": "gif"]
         if let type = contentType?.split(separator: ";").first?.trimmingCharacters(in: .whitespaces).lowercased(),
            let ext = known[type] {
             return ext
         }
         let ext = url.pathExtension.lowercased()
-        return ["jpg", "jpeg", "png", "gif", "webp"].contains(ext) ? ext : nil
+        return ["jpg", "jpeg", "png", "gif"].contains(ext) ? ext : nil
     }
 }
 
@@ -124,15 +125,18 @@ public struct NotificationImage: Sendable {
         self.directory = directory
     }
 
-    /// The file's url, or nil when the image is not https, too big (over 5 MB),
-    /// not an image type, or does not arrive within 10 seconds.
-    public func download(_ s: String) async -> URL? {
+    /// The file's url, or nil when the image is not https, too big (over 5 MB:
+    /// the declared length is checked first and the transfer is cut off past
+    /// the cap), not a JPEG, PNG or GIF (what the system can attach), or does
+    /// not arrive within `timeout` seconds in all.
+    public func download(_ s: String, timeout: TimeInterval = NotificationPlan.imageTimeout) async -> URL? {
         guard let url = NotificationPlan.imageURL(s) else { return nil }
-        var req = URLRequest(url: url, timeoutInterval: NotificationPlan.imageTimeout)
+        var req = URLRequest(url: url, timeoutInterval: timeout)
         req.cachePolicy = .reloadIgnoringLocalCacheData
-        guard let (data, res) = try? await session.data(for: req), let http = res as? HTTPURLResponse, http.statusCode == 200,
-              data.count <= NotificationPlan.maxImageBytes,
-              let ext = NotificationPlan.imageExtension(contentType: http.value(forHTTPHeaderField: "Content-Type"), url: url)
+        guard let (data, http) = await CappedDownload.fetch(req, session: session, maxBytes: NotificationPlan.maxImageBytes, deadline: timeout),
+              // The bytes decide the type; the header or the url only has to agree that it is an image.
+              NotificationPlan.imageExtension(contentType: http.value(forHTTPHeaderField: "Content-Type"), url: url) != nil,
+              let ext = LocalAvatars.format(data), ["jpg", "png", "gif"].contains(ext)
         else { return nil }
         let file = directory.appendingPathComponent(UUID().uuidString + "." + ext)
         do {

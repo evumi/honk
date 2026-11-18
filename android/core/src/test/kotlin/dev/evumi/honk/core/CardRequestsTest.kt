@@ -119,6 +119,17 @@ class CardRequestsTest {
         assertEquals(504, e.code)
     }
 
+    @Test fun aHostThatIsGoneDoesNotCrashTheRequestThread() {
+        val cr = CardRequests(
+            query = { _, _ -> "7" },
+            answer = { _, _, _, _ -> throw java.util.concurrent.RejectedExecutionException("stopped") },
+            changed = { _, _ -> },
+            background = { it.run() },
+        )
+        cr.opened("c1", load)
+        cr.serve("c1", 1, "x") // does not throw
+    }
+
     @Test fun theFlagIsStoredAndEditsKeepIt() {
         val store = tempStore()
         store.apply(QueuedMessage(1, "b1", body = "a", allowQueries = true, date = 1))
@@ -141,6 +152,7 @@ class CardRequestsTest {
             c.createStatement().use {
                 it.execute("ALTER TABLE messages DROP COLUMN allow_queries")
                 it.execute("ALTER TABLE messages DROP COLUMN placeholder")
+                it.execute("ALTER TABLE bots DROP COLUMN encrypted")
                 it.execute("PRAGMA user_version = 3")
             }
         }

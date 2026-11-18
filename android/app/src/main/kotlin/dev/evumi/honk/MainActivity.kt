@@ -34,16 +34,25 @@ class MainActivity : ComponentActivity() {
 
     private var picked: CompletableDeferred<Uri?>? = null
     private val openDocument = registerForActivityResult(ActivityResultContracts.OpenDocument()) {
-        picked?.complete(it)
-        picked = null
+        val answer = synchronized(this) { picked.also { picked = null } }
+        answer?.complete(it)
     }
 
     /** Lets the user pick a file (honk.import): its Uri, or null when they cancel. Any thread. */
     suspend fun pickDocument(): Uri? {
         val answer = CompletableDeferred<Uri?>()
-        picked = answer
-        withContext(Dispatchers.Main) { openDocument.launch(arrayOf("*/*")) }
-        return answer.await()
+        // One picker at a time: a second call while one is open is answered as cancelled, so the first
+        // caller's result is never overwritten or left waiting.
+        synchronized(this) {
+            if (picked != null) return null
+            picked = answer
+        }
+        try {
+            withContext(Dispatchers.Main) { openDocument.launch(arrayOf("*/*")) }
+            return answer.await()
+        } finally {
+            synchronized(this) { if (picked === answer) picked = null }
+        }
     }
 
     override fun onCreate(state: Bundle?) {
@@ -134,6 +143,8 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        // A picker still open can no longer answer: cancel its waiting caller.
+        synchronized(this) { picked.also { picked = null } }?.complete(null)
         bridge.uninstall()
         nsh.destroy()
         super.onDestroy()

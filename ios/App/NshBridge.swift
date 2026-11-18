@@ -211,16 +211,18 @@ final class NshBridge {
         }
         handle("honk.bot.encryption.enable") { [service] args in
             let id: String = try CallArgs(args).require("botId")
-            let existing = service.botKeys.key(botID: id)
-            let key = existing ?? Seal.generateKey()
-            service.botKeys.save(key, botID: id)
-            do {
-                // The wrapped key lets the group's other devices unwrap it.
-                _ = try await service.api.updateBot(id: id, encrypted: true, keyWrapped: service.keyRing.wrapped(botID: id))
-            } catch {
-                if existing == nil { service.botKeys.remove(botID: id) }
-                throw error
+            let api = service.api
+            // The gateway's own view decides: a bot already encrypted there takes its key from the group
+            // (a phone paired a moment ago waits for it) instead of making a new one that replaces the group's.
+            guard let bot = try await api.listBots().first(where: { $0.id == id }) else {
+                throw Failure(reason: "找不到这个 Bot")
             }
+            // The wrapped key lets the group's other devices unwrap it; the key is kept once the gateway has it.
+            let key = try await service.keyRing.enable(bot: bot) { wrapped in
+                _ = try await api.updateBot(id: id, encrypted: true, keyWrapped: wrapped)
+            }
+            try service.store.setEncrypted(botID: id, true)
+            service.changed()
             return Seal.encode(key)
         }
         handle("honk.bot.encryption.disable") { [service] args in
@@ -228,19 +230,19 @@ final class NshBridge {
             // The gateway first: with its flag still on, plaintext sends stay refused.
             _ = try await service.api.updateBot(id: id, encrypted: false, keyWrapped: "")
             service.botKeys.remove(botID: id)
+            try service.store.setEncrypted(botID: id, false)
+            service.changed()
             return true
         }
         handle("honk.bot.encryption.resetKey") { [service] args in
             let id: String = try CallArgs(args).require("botId")
-            let old = service.botKeys.key(botID: id)
-            let key = Seal.generateKey()
-            service.botKeys.save(key, botID: id)
-            do {
-                _ = try await service.api.updateBot(id: id, encrypted: true, keyWrapped: service.keyRing.wrapped(botID: id))
-            } catch {
-                if let old { service.botKeys.save(old, botID: id) } else { service.botKeys.remove(botID: id) }
-                throw error
+            let api = service.api
+            // The old key stays until the gateway has the new one.
+            let key = try await service.keyRing.reset(botID: id) { wrapped in
+                _ = try await api.updateBot(id: id, encrypted: true, keyWrapped: wrapped)
             }
+            try service.store.setEncrypted(botID: id, true)
+            service.changed()
             return Seal.encode(key)
         }
         handle("honk.bot.setMuted") { [service] args in

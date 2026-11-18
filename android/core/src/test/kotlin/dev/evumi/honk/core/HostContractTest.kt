@@ -55,6 +55,7 @@ class HostContractTest {
     private fun bot(j: JsonObject) = Bot(
         j.getValue("id").jsonPrimitive.content, j.getValue("name").jsonPrimitive.content, j.getValue("avatar").jsonPrimitive.content,
         j.getValue("defaultLevel").jsonPrimitive.content, j.getValue("createdAt").jsonPrimitive.long,
+        encrypted = j.getValue("encrypted").jsonPrimitive.boolean,
     )
 
     private fun message(j: JsonObject): StoredMessage {

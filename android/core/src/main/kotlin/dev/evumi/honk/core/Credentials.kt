@@ -29,6 +29,8 @@ class DeviceRegistrar(
     private val registerKey: String? = null,
     /** The phone's name or model, which the device group's list shows. */
     private val deviceName: String? = null,
+    /** Called when the gateway no longer knows the device (401): the app drops the group key with the credentials. */
+    private val onForgotten: () -> Unit = {},
 ) {
     enum class Result { UNCHANGED, UPDATED, REGISTERED }
 
@@ -46,6 +48,7 @@ class DeviceRegistrar(
             } catch (e: ApiException) {
                 if (!e.isUnauthorized) throw e
                 credentials.clear()
+                onForgotten()
             }
         }
         val reg = ApiClient(gatewayUrl, null, transport).registerDevice(pushToken, registerKey = registerKey, name = deviceName)

@@ -247,16 +247,14 @@ class NshBridge(
         handle("honk.bot.encryption.key") { a -> service.botKeys.key(a.requireString("botId"))?.let(Seal::encode) }
         handle("honk.bot.encryption.enable") { a ->
             val id = a.requireString("botId")
-            val existing = service.botKeys.key(id)
-            val key = existing ?: Seal.generateKey()
-            service.botKeys.save(id, key)
-            try {
-                // The wrapped key lets the group's other devices unwrap it.
-                service.api.updateBot(id, encrypted = true, keyWrapped = service.keyRing.wrapped(id))
-            } catch (e: Exception) {
-                if (existing == null) service.botKeys.remove(id)
-                throw e
-            }
+            val api = service.api
+            // The gateway's own view decides: a bot already encrypted there takes its key from the group (a
+            // phone paired a moment ago waits for it) instead of making a new one that replaces the group's.
+            val bot = api.listBots().firstOrNull { it.id == id } ?: throw IllegalStateException("找不到这个 Bot")
+            // The wrapped key lets the group's other devices unwrap it; the key is kept once the gateway has it.
+            val key = service.keyRing.enable(bot) { wrapped -> api.updateBot(id, encrypted = true, keyWrapped = wrapped) }
+            service.store.setEncrypted(id, true)
+            service.changed()
             Seal.encode(key)
         }
         handle("honk.bot.encryption.disable") { a ->
@@ -264,19 +262,17 @@ class NshBridge(
             // The gateway first: with its flag still on, plaintext sends stay refused.
             service.api.updateBot(id, encrypted = false, keyWrapped = "")
             service.botKeys.remove(id)
+            service.store.setEncrypted(id, false)
+            service.changed()
             true
         }
         handle("honk.bot.encryption.resetKey") { a ->
             val id = a.requireString("botId")
-            val old = service.botKeys.key(id)
-            val key = Seal.generateKey()
-            service.botKeys.save(id, key)
-            try {
-                service.api.updateBot(id, encrypted = true, keyWrapped = service.keyRing.wrapped(id))
-            } catch (e: Exception) {
-                if (old != null) service.botKeys.save(id, old) else service.botKeys.remove(id)
-                throw e
-            }
+            val api = service.api
+            // The old key stays until the gateway has the new one.
+            val key = service.keyRing.reset(id) { wrapped -> api.updateBot(id, encrypted = true, keyWrapped = wrapped) }
+            service.store.setEncrypted(id, true)
+            service.changed()
             Seal.encode(key)
         }
         handle("honk.bot.setMuted") { a ->
