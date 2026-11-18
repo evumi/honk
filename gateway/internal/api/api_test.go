@@ -246,7 +246,9 @@ func TestBotAPIErrors(t *testing.T) {
 }
 
 func TestRateLimit(t *testing.T) {
-	e := setup(t) // burst 3
+	// Burst 3 refilling at 1/s: at setup's 100/s, a slow machine refills
+	// the bucket between requests and nothing is ever limited.
+	e := setupWith(t, Options{MessageTTL: time.Hour, SendRate: 1, SendBurst: 3})
 	_, token := e.register("ios")
 	var limited bool
 	for i := 0; i < 10; i++ {
@@ -475,6 +477,7 @@ func TestStripMarkdown(t *testing.T) {
 		"**粗** *斜* __粗__ _斜_":          "粗 斜 粗 斜",
 		"`a*b*c` 和 **x**":              "a*b*c 和 x",
 		"见 [文档](https://a.example/d)":  "见 文档",
+		"见 [文档](http://a.example/d)":   "见 [文档](http://a.example/d)",
 		"# 标题\n- 一\n* 二\n1. 三":         "标题\n• 一\n• 二\n1. 三",
 		"```\nx := a * b * c\n```\n结束": "x := a * b * c\n结束",
 		"snake_case_name 2 * 3 * 4":    "snake_case_name 2 * 3 * 4",

@@ -147,12 +147,17 @@ func TestPushRetryStopsWhenTokenChanged(t *testing.T) {
 func TestPushQueueFullDrops(t *testing.T) {
 	p := &scriptPusher{block: make(chan struct{})}
 	e, _, token, _ := retryEnv(t, Options{PushQueue: 1, PushWorkers: 1}, p)
+	// The sends wait for the blocked pusher, so they must finish before the
+	// test (and its server) ends, or a late one fails after the test returns.
+	var sends sync.WaitGroup
 	for i := 0; i < 4; i++ { // one running, one queued, the rest dropped
 		req := map[string]string{"body": "x"}
-		go e.do("POST", "/bot"+token+"/sendMessage", "", req)
+		sends.Add(1)
+		go func() { defer sends.Done(); e.do("POST", "/bot"+token+"/sendMessage", "", req) }()
 	}
 	waitFor(t, "a drop", func() bool { return e.s.m.pushDropped.Value("queue_full") >= 1 })
 	close(p.block)
+	sends.Wait()
 }
 
 func TestCloseDropsWaitingRetries(t *testing.T) {

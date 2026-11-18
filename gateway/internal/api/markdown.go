@@ -53,7 +53,15 @@ func stripInline(l string) string {
 }
 
 func stripMarks(s string) string {
-	s = mdLink.ReplaceAllString(s, "$1")
+	// Only https links are links in the app (markup.ts); anything else stays as
+	// written there, so the banner keeps it as written too.
+	s = mdLink.ReplaceAllStringFunc(s, func(m string) string {
+		p := mdLink.FindStringSubmatch(m)
+		if !strings.HasPrefix(strings.ToLower(p[2]), "https://") {
+			return m
+		}
+		return p[1]
+	})
 	s = mdBold.ReplaceAllString(s, "$1$2")
 	// Twice: a match consumes its neighbours, so "_a_ _b_" needs a second pass.
 	for i := 0; i < 2; i++ {
