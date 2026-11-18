@@ -32,6 +32,12 @@ class LocalStore(private val sql: Sql) {
                 sql.exec("PRAGMA user_version = 2")
             }
         }
+        if ((scalar("PRAGMA user_version") ?: 0) < 3) {
+            transaction {
+                MIGRATE_SEND_OPTIONS.forEach { sql.exec(it) }
+                sql.exec("PRAGMA user_version = 3")
+            }
+        }
     }
 
     // applying queued items
@@ -62,13 +68,13 @@ class LocalStore(private val sql: Sql) {
         }
         sql.run(
             """
-            INSERT INTO messages (id, bot_id, title, body, html, data, level, group_key, url, copy_text, icon, collapse_id, date, notif_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO messages (id, bot_id, title, body, html, data, level, group_key, url, copy_text, icon, open_mode, image, parse_mode, silent, collapse_id, date, notif_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET data = excluded.data, notif_id = COALESCE(messages.notif_id, excluded.notif_id)
             """.trimIndent(),
             listOf(
                 m.id, m.botId, m.title, m.body, m.html, m.data, m.level, m.group, m.url, m.copy, m.icon,
-                m.collapseId, m.date, notificationId,
+                m.open, m.image, m.parseMode, m.silent, m.collapseId, m.date, notificationId,
             ),
         )
         return ApplyResult(message = messageUnlocked(m.id), staleNotificationIds = stale)
@@ -335,13 +341,15 @@ class LocalStore(private val sql: Sql) {
             Bot(r.text(0).orEmpty(), r.text(1).orEmpty(), r.text(2).orEmpty(), r.text(3) ?: "active", r.long(4), r.long(5))
 
         private const val MESSAGE_COLS =
-            "id, bot_id, title, body, html, data, level, group_key, url, copy_text, icon, collapse_id, date, read"
+            "id, bot_id, title, body, html, data, level, group_key, url, copy_text, icon, open_mode, image, parse_mode, silent, collapse_id, date, read"
 
         private fun readMessage(r: Sql.Row) = StoredMessage(
             id = r.long(0), botId = r.text(1).orEmpty(), title = r.text(2).orEmpty(), body = r.text(3).orEmpty(),
             html = r.text(4).orEmpty(), data = r.text(5).orEmpty(), level = r.text(6).orEmpty(),
             group = r.text(7).orEmpty(), url = r.text(8).orEmpty(), copy = r.text(9).orEmpty(),
-            icon = r.text(10).orEmpty(), collapseId = r.text(11).orEmpty(), date = r.long(12), read = r.long(13) != 0L,
+            icon = r.text(10).orEmpty(), open = r.text(11).orEmpty(), image = r.text(12).orEmpty(),
+            parseMode = r.text(13).orEmpty(), silent = r.long(14) != 0L, collapseId = r.text(15).orEmpty(),
+            date = r.long(16), read = r.long(17) != 0L,
         )
 
         /** Version 1, the same tables as ios/HonkKit/Sources/HonkKit/LocalStore.swift. One statement per entry. */
@@ -380,6 +388,17 @@ class LocalStore(private val sql: Sql) {
             "CREATE INDEX messages_bot ON messages(bot_id, id)",
             "CREATE INDEX messages_collapse ON messages(bot_id, collapse_id) WHERE collapse_id <> ''",
             "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+        )
+
+        /**
+         * Version 3: the sendMessage options open, image, parse_mode and silent
+         * (the gateway's migrateSendOptions and LocalStore.swift have the same columns).
+         */
+        val MIGRATE_SEND_OPTIONS = listOf(
+            "ALTER TABLE messages ADD COLUMN open_mode TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE messages ADD COLUMN image TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE messages ADD COLUMN parse_mode TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE messages ADD COLUMN silent INTEGER NOT NULL DEFAULT 0",
         )
 
         /**

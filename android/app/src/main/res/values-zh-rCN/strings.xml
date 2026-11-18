@@ -4,4 +4,7 @@
     <string name="channel_other">其他</string>
     <string name="me">我</string>
     <string name="new_notification">新通知</string>
+    <string name="action_copy">复制</string>
+    <string name="action_open_link">打开链接</string>
+    <string name="action_mark_read">标为已读</string>
 </resources>

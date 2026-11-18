@@ -18,6 +18,7 @@ import dev.evumi.honk.core.Gateway
 import dev.evumi.honk.core.HttpTransport
 import dev.evumi.honk.core.LegacyBotIds
 import dev.evumi.honk.core.LocalStore
+import dev.evumi.honk.core.NotificationPlan
 import dev.evumi.honk.core.PushInfo
 import dev.evumi.honk.core.QueuedMessage
 import dev.evumi.honk.core.SyncEngine
@@ -291,8 +292,8 @@ class HonkService private constructor(context: Context) {
      * a notification it makes stale is removed. Blocking.
      */
     fun handlePush(info: PushInfo) {
-        when (info.kind) {
-            QueuedMessage.Kind.MESSAGE -> handleMessage(info)
+        when {
+            info.kind == QueuedMessage.Kind.MESSAGE && NotificationPlan.shouldNotify(info.silent) -> handleMessage(info)
             else -> handleSilent(info)
         }
     }
@@ -331,6 +332,7 @@ class HonkService private constructor(context: Context) {
             }
         }
         changed()
+        if (stored != null && !NotificationPlan.shouldNotify(stored.silent)) return
         if (foreground && focusedBotId == info.botId) {
             // The chat is open: the message appears there, no notification.
             notifier.cancel(store.markRead(info.botId))
@@ -356,6 +358,10 @@ class HonkService private constructor(context: Context) {
                 level = stored?.level?.takeIf { it.isNotEmpty() } ?: info.level,
                 date = stored?.date?.takeIf { it > 0 } ?: System.currentTimeMillis(),
                 muted = store.isMuted(info.botId) || incoming != null,
+                url = stored?.url.orEmpty(),
+                copy = stored?.copy.orEmpty(),
+                open = stored?.open.orEmpty(),
+                image = stored?.image.orEmpty(),
             ),
         )
     }

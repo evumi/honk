@@ -704,3 +704,27 @@ let serverBots = [Bot(id: "aZ3kQ9xT", name: "部署", createdAt: 100), Bot(id: "
         #expect(NotificationPlan.maxImageBytes == 5 * 1024 * 1024)
     }
 }
+
+@Suite struct MarkdownTextTests {
+    @Test func stripsTheMarks() {
+        let cases: [String: String] = [
+            "**粗** *斜* __粗__ _斜_": "粗 斜 粗 斜",
+            "`a*b*c` 和 **x**": "a*b*c 和 x",
+            "见 [文档](https://a.example/d)": "见 文档",
+            "# 标题\n- 一\n* 二\n1. 三": "标题\n• 一\n• 二\n1. 三",
+            "```\nx := a * b * c\n```\n结束": "x := a * b * c\n结束",
+            "snake_case_name 2 * 3 * 4": "snake_case_name 2 * 3 * 4",
+            "_a_ _b_": "a b",
+        ]
+        for (input, want) in cases { #expect(MarkdownText.strip(input) == want, "\(input)") }
+    }
+
+    @Test func markdownBannerOfAMessageWithoutPushText() {
+        var m = QueuedMessage(id: 1, botID: "b", body: "**128 个测试通过**", parseMode: "Markdown")
+        let stored = StoredMessage(id: 1, botID: "b", title: "", body: m.body, html: "", data: "", level: "", group: "", url: "",
+                                   copy: "", icon: "", open: "", image: "", parseMode: "Markdown", silent: false, collapseID: "", date: 1, read: false)
+        let t = BannerText.choose(message: stored, botName: "CI", pushTitle: "", pushSubtitle: "", pushBody: "新通知", fallback: "新通知")
+        #expect(t.body == "128 个测试通过")
+        m.parseMode = ""
+    }
+}

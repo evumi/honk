@@ -19,7 +19,9 @@ object Banner {
             return BannerText(name, push.title, push.body.ifEmpty { fallback })
         }
         val title = message.title.ifEmpty { push.title }
-        val body = listOf(message.body, push.body).firstOrNull { it.isNotEmpty() } ?: fallback
+        // A Markdown body shows without its marks, as the gateway strips them in a push with text.
+        val text = if (message.parseMode == "Markdown") MarkdownText.strip(message.body) else message.body
+        val body = listOf(text, push.body).firstOrNull { it.isNotEmpty() } ?: fallback
         return BannerText(name, title, body)
     }
 
