@@ -61,3 +61,8 @@ export function curlExample(gateway: string, token: string): string {
   const base = gateway.endsWith("/") ? gateway : gateway + "/";
   return `curl ${base}bot${token}/sendMessage \\\n  -d title="${tr("部署成功")}" \\\n  -d body="${tr("evumi / sluice 已上线")}"`;
 }
+
+/** A count as a badge shows it: past 99 it reads "99+". */
+export function badgeText(n: number): string {
+  return n > 99 ? "99+" : String(n);
+}

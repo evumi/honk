@@ -20,6 +20,7 @@ export function ChatPage(props: { botId: string }) {
   let loadingOlder = false;
   let reachedStart = false;
   let list: ListRef | undefined;
+  let loadedOnce = false;
   // Scrolled up away from the newest messages, and how many arrived since.
   const away = signal(false);
   const fresh = signal(0);
@@ -36,8 +37,21 @@ export function ChatPage(props: { botId: string }) {
       const at = next.findIndex((m) => m.id === lastBefore);
       if (at >= 0) fresh.set(fresh() + next.length - 1 - at);
     }
+    const first = !loadedOnce;
+    loadedOnce = true;
     messages.set(reuse(messages(), next, (m) => String(m.id)));
-    if (!away()) measureEnd();
+    if (first) {
+      // The list opened empty (messages load after it mounts), so its
+      // initialScrollAtEnd had nothing to scroll to: land on the newest now.
+      requestAnimationFrame(() => {
+        list?.scrollToEnd({ animated: false });
+        measureEnd();
+      });
+    } else if (!away()) {
+      // New messages while reading the newest: follow them smoothly.
+      requestAnimationFrame(() => list?.scrollToEnd({ animated: true }));
+      measureEnd();
+    }
     reachedStart = latest.length < 50;
     // Only when something is unread: marking read announces a change, which
     // reloads this page, which would mark read again.
@@ -107,6 +121,7 @@ export function ChatPage(props: { botId: string }) {
           keyExtractor={(r) => String(r.m.id)}
           estimatedItemSize={150}
           initialScrollAtEnd
+          maintainVisibleContentPosition={{ autoscrollToBottomThreshold: 120 }}
           ref={(r: ListRef) => (list = r)}
           onScrollEnd={() => void checkPosition()}
           onLoadMoreAtStart={() => void loadOlder()}
