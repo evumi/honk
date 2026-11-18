@@ -74,6 +74,12 @@ type Options struct {
 	// RelayGoneLimit is how many dead tokens in an hour, when they are also
 	// over half of that relay's pushes, slow it down. Default 100.
 	RelayGoneLimit int
+	// QueryTimeout is how long a widget query waits for the bot's answer.
+	// Default 15 s (Telegram's limit).
+	QueryTimeout time.Duration
+	// WebhookAllowPrivate lets bots set webhooks on loopback, private and
+	// link-local addresses (HONK_WEBHOOK_ALLOW_PRIVATE); off, they are refused.
+	WebhookAllowPrivate bool
 }
 
 // limiter is a token bucket with the time it was last used, so idle ones can be dropped.
@@ -97,6 +103,11 @@ type Server struct {
 	rs relayState
 	pq pushQueue
 	m  serverMetrics
+
+	queries sync.WaitGroup // webhook deliveries in flight
+
+	hub      *queryHub
+	whClient *http.Client // webhook deliveries
 }
 
 // New returns a Server.
@@ -140,7 +151,8 @@ func New(st *store.Store, p push.Pusher, log *slog.Logger, opts Options) *Server
 	if opts.RelayGoneLimit <= 0 {
 		opts.RelayGoneLimit = 100
 	}
-	s := &Server{store: st, pusher: p, log: log, opts: opts, limiters: map[string]*limiter{}, registrars: map[string]*limiter{}, claimers: map[string]*limiter{}}
+	s := &Server{store: st, pusher: p, log: log, opts: opts, limiters: map[string]*limiter{}, registrars: map[string]*limiter{}, claimers: map[string]*limiter{},
+		hub: newQueryHub(), whClient: newWebhookClient(opts.WebhookAllowPrivate, nil)}
 	s.rs = relayState{relays: map[string]*relayEntry{}, tokens: map[string]*limiter{}, byIP: map[string]*limiter{}}
 	s.initMetrics()
 	s.startPushQueue()
@@ -202,6 +214,7 @@ func (s *Server) Handler() http.Handler {
 			r.Get("/messages/{id}", s.getMessage)
 			r.Get("/sync", s.sync)
 			r.Post("/ack", s.ack)
+			r.Post("/queries", s.postQuery)
 		})
 	})
 
@@ -331,6 +344,7 @@ func (s *Server) forgetBot(botID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.limiters, botID)
+	s.hub.clear(botID)
 }
 
 // PruneLimiters drops limiters unused for longer than idle; a bucket that

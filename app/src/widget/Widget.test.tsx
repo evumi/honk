@@ -83,6 +83,8 @@ function scriptedHost(clicks: string[]) {
         const load = JSON.parse((d as { load: string }).load);
         // The host gets the card filled with its data, scripts included.
         if (load.tree[0].children[0].text !== "0" || load.tree[3].tag !== "script") throw new Error("bad load");
+        // And which message it is, and whether its request() may reach the bot.
+        if (typeof load.messageId !== "number" || typeof load.allowQueries !== "boolean") throw new Error("bad load ids");
         return JSON.stringify({ tree: tree("count 0"), prevented: false, stopped: null, logs: [] });
       },
       "honk.card.click": (d: unknown) => {

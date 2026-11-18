@@ -37,6 +37,9 @@ type Config struct {
 	RelayRate           float64 // HONK_RELAY_RATE: pushes per second per relayed gateway, default 10
 	RelayBurst          int     // HONK_RELAY_BURST, default 100
 	RelayTokenPerMinute int     // HONK_RELAY_TOKEN_PER_MINUTE: pushes per push token, default 60
+	// WebhookAllowPrivate (HONK_WEBHOOK_ALLOW_PRIVATE=true) lets bots set
+	// webhooks on loopback, private and link-local addresses. Default false.
+	WebhookAllowPrivate bool
 
 	APNs APNs
 	FCM  FCM
@@ -162,6 +165,11 @@ func Load() (Config, error) {
 	if v := os.Getenv("HONK_PUSH_WORKERS"); v != "" {
 		if c.PushWorkers, err = strconv.Atoi(v); err != nil || c.PushWorkers <= 0 {
 			return c, fmt.Errorf("HONK_PUSH_WORKERS: want a positive integer, got %q", v)
+		}
+	}
+	if v := os.Getenv("HONK_WEBHOOK_ALLOW_PRIVATE"); v != "" {
+		if c.WebhookAllowPrivate, err = strconv.ParseBool(v); err != nil {
+			return c, fmt.Errorf("HONK_WEBHOOK_ALLOW_PRIVATE: %w", err)
 		}
 	}
 	if v := os.Getenv("HONK_APNS_SANDBOX"); v != "" {

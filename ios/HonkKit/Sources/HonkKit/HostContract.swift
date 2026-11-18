@@ -199,7 +199,7 @@ public enum HostJSON {
     public static func message(_ m: StoredMessage) -> [String: Any] {
         ["id": m.id, "botId": m.botID, "title": m.title, "body": m.body, "html": m.html, "data": m.data,
          "level": m.level, "group": m.group, "url": m.url, "copy": m.copy, "icon": m.icon, "open": m.open, "image": m.image, "parseMode": m.parseMode,
-         "silent": m.silent, "collapseId": m.collapseID,
+         "silent": m.silent, "collapseId": m.collapseID, "allowQueries": m.allowQueries,
          "date": m.date, "read": m.read]
     }
 

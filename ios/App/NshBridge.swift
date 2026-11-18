@@ -44,20 +44,35 @@ final class NshBridge {
             Task { @MainActor in self?.app.send("honk.card.changed", HostJSON.cardChangedEvent(key: key, result: result)) }
         }
         self.cards = cards
+        // A card's request(): the host sends it to the message's bot itself and gives the card the
+        // answer; the app sees neither (the result it gets has no `request`).
+        let requests = CardRequests(
+            query: { [service] messageID, data in
+                let api = await MainActor.run { service.api }
+                return try await api.cardQuery(messageID: messageID, data: data)
+            },
+            answer: { key, seq, ok, data in await cards.answer(key: key, seq: seq, ok: ok, data: data) },
+            changed: { [weak self] key, result in
+                Task { @MainActor in self?.app.send("honk.card.changed", HostJSON.cardChangedEvent(key: key, result: result)) }
+            })
         handle("honk.card.open") { args in
             let c = try HostArgs.CardCall(CallArgs(args), payload: "load")
+            requests.opened(key: c.key, load: c.payload)
             return await cards.open(key: c.key, load: c.payload)
         }
         handle("honk.card.click") { args in
             let c = try HostArgs.CardCall(CallArgs(args), payload: "path")
-            return await cards.click(key: c.key, path: c.payload)
+            let result = await cards.click(key: c.key, path: c.payload)
+            return requests.filter(key: c.key, result: result)
         }
         handle("honk.card.set") { args in
             let c = try HostArgs.CardCall(CallArgs(args), payload: "state")
             return await cards.set(key: c.key, state: c.payload)
         }
         handle("honk.card.close") { args in
-            await cards.close(key: try HostArgs.CardCall(CallArgs(args), payload: nil).key)
+            let key = try HostArgs.CardCall(CallArgs(args), payload: nil).key
+            requests.closed(key: key)
+            await cards.close(key: key)
             return true
         }
 

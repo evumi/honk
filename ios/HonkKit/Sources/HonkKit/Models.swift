@@ -91,12 +91,15 @@ public struct QueuedMessage: Codable, Equatable, Sendable {
     public var silent: Bool
     /// The sender's replaceable id (`id` in the bot API).
     public var collapseID: String
+    /// The sender let the card's `request()` reach the bot (`allow_queries`).
+    public var allowQueries: Bool
     /// Unix milliseconds.
     public var date: Int64
 
     enum CodingKeys: String, CodingKey {
         case kind, title, body, html, data, level, group, url, copy, icon, date, open, image, silent
         case parseMode = "parse_mode"
+        case allowQueries = "allow_queries"
         case id = "message_id"
         case botID = "bot_id"
         case targetID = "target_id"
@@ -106,7 +109,7 @@ public struct QueuedMessage: Codable, Equatable, Sendable {
     public init(id: Int64, botID: String, kind: Kind = .message, targetID: Int64 = 0, title: String = "", body: String = "",
                 html: String = "", data: String = "", level: String = "", group: String = "", url: String = "",
                 copy: String = "", icon: String = "", open: String = "", image: String = "", parseMode: String = "",
-                silent: Bool = false, collapseID: String = "", date: Int64 = 0) {
+                silent: Bool = false, collapseID: String = "", allowQueries: Bool = false, date: Int64 = 0) {
         self.id = id
         self.botID = botID
         self.kind = kind
@@ -125,6 +128,7 @@ public struct QueuedMessage: Codable, Equatable, Sendable {
         self.parseMode = parseMode
         self.silent = silent
         self.collapseID = collapseID
+        self.allowQueries = allowQueries
         self.date = date
     }
 
@@ -149,6 +153,7 @@ public struct QueuedMessage: Codable, Equatable, Sendable {
         parseMode = try c.decodeIfPresent(String.self, forKey: .parseMode) ?? ""
         silent = try c.decodeIfPresent(Bool.self, forKey: .silent) ?? false
         collapseID = try c.decodeIfPresent(String.self, forKey: .collapseID) ?? ""
+        allowQueries = try c.decodeIfPresent(Bool.self, forKey: .allowQueries) ?? false
         date = try c.decodeIfPresent(Int64.self, forKey: .date) ?? 0
     }
 }

@@ -410,6 +410,32 @@ final class MockGateway: URLProtocol {
         #expect(info.features == ["relay"] && info.push == APIClient.PushRoutes(ios: "direct", android: "relay"))
     }
 
+    @Test func queryPostsTheMessageAndDataAndReturnsTheAnswer() async throws {
+        MockGateway.requests = []
+        MockGateway.handler = { req in
+            req.httpMethod == "POST" && req.url!.path == "/v1/queries"
+                ? (200, #"{"ok":true,"result":{"data":"7"}}"#)
+                : (404, #"{"ok":false,"error_code":404,"description":"Not Found"}"#)
+        }
+        let api = APIClient(baseURL: URL(string: "https://gw.test/")!, secret: "s3cret", session: MockGateway.session())
+        #expect(try await api.query(messageID: 42, data: "plus") == "7")
+        let req = try #require(MockGateway.requests.first)
+        #expect(req.value(forHTTPHeaderField: "Authorization") == "Bearer s3cret")
+        let sent = req.httpBody ?? req.httpBodyStream.map { s -> Data in
+            s.open(); defer { s.close() }
+            var out = Data(); var buf = [UInt8](repeating: 0, count: 1024)
+            while s.hasBytesAvailable { let n = s.read(&buf, maxLength: buf.count); if n <= 0 { break }; out.append(buf, count: n) }
+            return out
+        }
+        let bytes = try #require(sent)
+        let body = try #require(JSONSerialization.jsonObject(with: bytes) as? [String: Any])
+        #expect((body["message_id"] as? NSNumber)?.int64Value == 42 && body["data"] as? String == "plus")
+
+        MockGateway.handler = { _ in (504, #"{"ok":false,"error_code":504,"description":"Gateway Timeout"}"#) }
+        let error = await #expect(throws: APIError.self) { try await api.query(messageID: 42, data: "x") }
+        #expect(error == .gateway(code: 504, description: "Gateway Timeout"))
+    }
+
     @Test func gatewayError() async throws {
         MockGateway.handler = { _ in (401, #"{"ok":false,"error_code":401,"description":"Unauthorized"}"#) }
         let api = APIClient(baseURL: URL(string: "https://gw.test/")!, secret: "bad", session: MockGateway.session())

@@ -4,7 +4,7 @@
     "bot": { "id": "aZ3kQ9xT", "name": "Berth 部署", "avatar": "preset:box:#1c1c1e", "defaultLevel": "active", "createdAt": 1700000000000 },
     "message": {
       "id": 7, "botId": "aZ3kQ9xT", "title": "部署成功", "body": "sluice 已上线", "html": "<p>{{status}}</p>", "data": "{\"status\":\"ok\"}",
-      "level": "active", "group": "prod", "url": "https://example.com", "copy": "dep_1", "icon": "", "open": "url", "image": "https://example.com/i.png", "parseMode": "Markdown", "silent": false, "collapseId": "dep", "date": 1700000001000, "read": false
+      "level": "active", "group": "prod", "url": "https://example.com", "copy": "dep_1", "icon": "", "open": "url", "image": "https://example.com/i.png", "parseMode": "Markdown", "silent": false, "collapseId": "dep", "allowQueries": false, "date": 1700000001000, "read": false
     }
   },
   "calls": {
@@ -40,7 +40,7 @@
               "muted": false, "pinned": true, "unread": 2,
               "last": {
                 "id": 7, "botId": "aZ3kQ9xT", "title": "部署成功", "body": "sluice 已上线", "html": "<p>{{status}}</p>", "data": "{\"status\":\"ok\"}",
-                "level": "active", "group": "prod", "url": "https://example.com", "copy": "dep_1", "icon": "", "open": "url", "image": "https://example.com/i.png", "parseMode": "Markdown", "silent": false, "collapseId": "dep", "date": 1700000001000, "read": false
+                "level": "active", "group": "prod", "url": "https://example.com", "copy": "dep_1", "icon": "", "open": "url", "image": "https://example.com/i.png", "parseMode": "Markdown", "silent": false, "collapseId": "dep", "allowQueries": false, "date": 1700000001000, "read": false
               }
             },
             {
@@ -59,7 +59,7 @@
           "result": [
             {
               "id": 7, "botId": "aZ3kQ9xT", "title": "部署成功", "body": "sluice 已上线", "html": "<p>{{status}}</p>", "data": "{\"status\":\"ok\"}",
-              "level": "active", "group": "prod", "url": "https://example.com", "copy": "dep_1", "icon": "", "open": "url", "image": "https://example.com/i.png", "parseMode": "Markdown", "silent": false, "collapseId": "dep", "date": 1700000001000, "read": false
+              "level": "active", "group": "prod", "url": "https://example.com", "copy": "dep_1", "icon": "", "open": "url", "image": "https://example.com/i.png", "parseMode": "Markdown", "silent": false, "collapseId": "dep", "allowQueries": false, "date": 1700000001000, "read": false
             }
           ]
         },
@@ -75,7 +75,7 @@
           "result": [
             {
               "id": 7, "botId": "aZ3kQ9xT", "title": "部署成功", "body": "sluice 已上线", "html": "<p>{{status}}</p>", "data": "{\"status\":\"ok\"}",
-              "level": "active", "group": "prod", "url": "https://example.com", "copy": "dep_1", "icon": "", "open": "url", "image": "https://example.com/i.png", "parseMode": "Markdown", "silent": false, "collapseId": "dep", "date": 1700000001000, "read": false
+              "level": "active", "group": "prod", "url": "https://example.com", "copy": "dep_1", "icon": "", "open": "url", "image": "https://example.com/i.png", "parseMode": "Markdown", "silent": false, "collapseId": "dep", "allowQueries": false, "date": 1700000001000, "read": false
             }
           ]
         },
@@ -188,7 +188,7 @@
     "honk.incoming.listen": { "samples": [{ "args": null, "result": true }] },
     "honk.card.open": {
       "demo": false,
-      "samples": [{ "args": { "key": "c1", "load": "{\"html\":\"<p>x</p>\",\"data\":\"{}\"}" }, "result": "{\"tree\":null,\"prevented\":false,\"stopped\":false,\"logs\":[]}" }]
+      "samples": [{ "args": { "key": "c1", "load": "{\"html\":\"<p>x</p>\",\"data\":\"{}\",\"messageId\":7,\"allowQueries\":true}" }, "result": "{\"tree\":null,\"prevented\":false,\"stopped\":false,\"logs\":[]}" }]
     },
     "honk.card.click": {
       "demo": false,

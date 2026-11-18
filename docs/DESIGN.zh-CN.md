@@ -64,8 +64,8 @@ Honk 是一个以 bot 为渠道的推送通知服务：每个 bot 是一个独�
 - `devices`：`id`（UUIDv7）、`secret_hash`、`platform`（ios / android）、`push_token`、`push_ok`（APNs/FCM 报告 token 失效后置 0）；v4 加 `owner_id`、`name`（机型名）、`seen_at`（最近一次请求，最多每小时写一次）、`acked_up_to`（这台设备的 ack 水位）
 - `owners`（v4）：设备组，`id`（UUIDv7，不透明）、`created_at`。bot、队列和设备都属于一个组；授权只看 `owner_id`
 - `links`（v4）：配对数据，`link_hash`（`link_id` 的 sha256）、`owner_id`、`bundle`（网关不能解开）、`created_at`、`expires_at`
-- `bots`：`id`（自增整数，只在库内使用）、`public_id`（对外的 bot id，v2 加入）、`device_id`（v1 的列，v4 之后只表示创建它的设备，不再用来授权）、`owner_id`（v4）、`token_hash`、`name`、`avatar`、`default_level`
-- `messages`：队列（v4 起按 `owner_id` 查，`device_id` 不再写入；`acked_at` 不再用）。`kind` 是 message / edit / delete；edit 和 delete 用 `target_id` 或 `collapse_id` 指向原消息。发送选项：`open_mode`（`url` 或空）、`image`、`parse_mode`（`Markdown` 或空）、`silent`（0 / 1），v5 加入，JSON 里分别叫 `open`、`image`、`parse_mode`、`silent`，空值不输出；`expires_at` 由 `ttl` 参数决定（不填用 `HONK_MESSAGE_TTL`）
+- `bots`：`id`（自增整数，只在库内使用）、`public_id`（对外的 bot id，v2 加入）、`device_id`（v1 的列，v4 之后只表示创建它的设备，不再用来授权）、`owner_id`（v4）、`token_hash`、`name`、`avatar`、`default_level`、`webhook_url`、`webhook_secret`（v6 加入：`setWebhook` 设的地址和密钥，空表示没有）
+- `messages`：队列（v4 起按 `owner_id` 查，`device_id` 不再写入；`acked_at` 不再用）。`kind` 是 message / edit / delete；edit 和 delete 用 `target_id` 或 `collapse_id` 指向原消息。发送选项：`open_mode`（`url` 或空）、`image`、`parse_mode`（`Markdown` 或空）、`silent`（0 / 1），v5 加入，JSON 里分别叫 `open`、`image`、`parse_mode`、`silent`，空值不输出；`allow_queries`（v6 加入）表示这条消息的卡片可以 `request()`；`expires_at` 由 `ttl` 参数决定（不填用 `HONK_MESSAGE_TTL`）
 - `relays`（v3）：登记过的自建网关，`id`、`key_hash`、`created_at`、`last_used_at`（每分钟最多写一次）、`blocked`；只有开了 `HONK_RELAY_SERVE` 的网关用它
 - `meta`（v3）：这个网关自己的键值设置；中继客户端把 `relay_url`、`relay_id`、`relay_key` 存在这里
 
@@ -83,10 +83,14 @@ v4 迁移：建 `owners`、`links`；给 `devices`、`bots`、`messages` 加 `ow
 
 | 接口 | 调用方 | 说明 |
 | --- | --- | --- |
-| `/bot<token>/sendMessage` | 发送方 | `body` 必填；`title`、`html`、`data`、`level`、`group`、`id`、`url`、`copy`、`icon`、`open`、`image`、`ttl`、`silent`、`parse_mode` 可选；GET 查询串、表单、JSON 都行 |
+| `/bot<token>/sendMessage` | 发送方 | `body` 必填；`title`、`html`、`data`、`level`、`group`、`id`、`url`、`copy`、`icon`、`open`、`image`、`ttl`、`silent`、`parse_mode`、`allow_queries` 可选；GET 查询串、表单、JSON 都行 |
 | `/bot<token>/editMessageData` | 发送方 | `message_id` 或 `id` + `data`，卡片原地更新，不弹通知 |
 | `/bot<token>/deleteMessage` | 发送方 | `message_id` 或 `id` |
 | `/bot<token>/getMe` | 发送方 | 测试 token |
+| `/bot<token>/setWebhook`、`deleteWebhook`、`getWebhookInfo` | 发送方 | 卡片回调的 webhook：`url`（只能 https，空表示删除）+ 可选 `secret_token`；见下面「卡片回调」 |
+| `/bot<token>/getUpdates` | 发送方 | `offset`、`limit`（1–100）、`timeout`（0–50 秒，长轮询）；设了 webhook 时 409 |
+| `/bot<token>/answerWidgetQuery` | 发送方 | `widget_query_id` + `data`（≤ 1024 字节），15 秒内 |
+| `POST /v1/queries` | App | `{message_id, data}`（data 1–64 字节）：卡片的 `request()`，挂住最多 15 秒等 bot 回答，返回 `{data}`；消息不允许查询 403，限流 429，bot 没回答 504 |
 | `GET /v1/info` | App | `{name:"honk", version, api, features, push}`，切换网关前用来确认地址是 Honk 网关；`api` 2 表示 bot id 是字符串；`features` 是能力列表（支持设备组和配对含 `"link"`，开了 `HONK_RELAY_SERVE` 含 `"relay"`，旧网关没有这个字段）；`push: {ios, android}` 是每个平台的推送方式 `direct` / `relay` / `off`（旧网关没有）；设了 `HONK_REGISTER_KEY` 时多一个 `register_key_required: true` |
 | `POST /v1/relay/gateways`、`POST /v1/relay/push` | 自建网关 | 推送中继，只在 `HONK_RELAY_SERVE=true` 时存在，见下一节 |
 | `POST /v1/devices` | App | 注册，返回 `device_secret`（只返回这一次）；设了 `HONK_REGISTER_KEY` 时必须带相同的 `register_key`，否则 401 |
@@ -106,6 +110,19 @@ v4 迁移：建 `owners`、`links`；给 `devices`、`bots`、`messages` 加 `ow
 - **模拟器身份**：push token 以 `simulator-` 开头的设备照常注册和排队，但不发推送（见第 5 节「模拟器开发」）。
 - **清理**：每小时删除过期的消息、设备组里每台设备都已 ack 且创建超过 `HONK_ACKED_KEEP`（1 天）的消息，以及按 `HONK_DEVICE_GC` 回收的废弃设备（见下面「设备组」）。
 - **注册口令**：`HONK_REGISTER_KEY` 不为空时，`POST /v1/devices` 必须带相同的 `register_key`（常量时间比较，先过 IP 限流）。App 的网关页有可选的「注册口令」输入框；iOS 存在 Keychain（`RegisterKeyStore`），Android 存在加密的 SharedPreferences，注册时作为 `register_key` 发出。只改口令（网关地址不变）不清本机数据，设备还没注册就立刻重试注册。
+
+### 卡片回调（`internal/api/queries.go`）
+
+卡片里的 `TelegramWidget.request(data)` 接到 bot，走的是网关；nsh App 不参与（见第 6 节的宿主流程）。
+
+1. 宿主 `POST /v1/queries {message_id, data}`（设备鉴权）。消息必须属于这台设备、是 `message` 且 `allow_queries` 为真，否则 404 / 403。限流按「设备 + bot」每秒 1 次、突发 5 次，超出 429。每个 bot 最多同时 50 个未答的 query。
+2. 网关生成 query id，作为更新 `{"update_id":N,"widget_query":{"id","message_id","data"}}` 交给 bot：设了 webhook 就 POST 过去（JSON，头 `X-Honk-Bot-Api-Secret-Token`），否则放进这个 bot 的内存队列等 `getUpdates` 取走。然后把 HTTP 请求挂住，最多 15 秒（`QueryTimeout`）。字段名对照过 Telegram Bot API 的 `WidgetQuery`（`id`、`message_id`、`data`；Telegram 还有 `from`、`chat`、`type` 等，Honk 没有用户和聊天的概念，不给）和 `answerWidgetQuery`（`widget_query_id`、可选 `data`，0–1024 字节）。
+3. bot 调 `answerWidgetQuery`，网关把 `data` 作为第 1 步的响应 `{data}` 返回。query 已超时、已回答过或属于别的 bot 都返回 400，不区分，避免泄露别的 bot 的 query id。答案只回给发起请求的那台设备。
+4. 超时返回 504，webhook 投递失败（网络错误、非 2xx）立刻返回 502，宿主分别映射为 `TIMEOUT` 和 `REQUEST_FAILED`。
+
+webhook 和 `getUpdates` 互斥（同 Telegram）：设了 webhook 后 `getUpdates` 返回 409；`setWebhook` 会清掉队列里还没取走的更新。更新号取启动时的毫秒时间并递增，重启后也不会回退。待取更新和未答的 query 只在内存里，15 秒后丢弃，重启即丢。`getUpdates` 的长轮询（≤ 50 秒）和挂住的 `/v1/queries` 请求都会延长连接的读写截止时间，不受服务器的 30 秒 `ReadTimeout` / `WriteTimeout` 限制。
+
+**SSRF 防护**：webhook 只允许 https；设置时解析主机名，任何一个地址落在回环、内网（10/8、172.16/12、192.168/16、fc00::/7）、链路本地（169.254/16、fe80::/10，含云厂商的元数据地址）、CGNAT、组播、未指定或保留段就拒绝；投递用的 HTTP 客户端在连接时再检查一次实际要连的 IP（防 DNS 重绑定），不走代理、不跟随重定向、5 秒超时。`HONK_WEBHOOK_ALLOW_PRIVATE=true` 关掉地址检查（自建网关的 bot 跑在内网时用），仍然只允许 https。
 
 ### 推送队列与重试
 
@@ -430,16 +447,15 @@ Telegram 的 widget 一般用 class 加 `<style>` 写，所以 Honk 也按样式
 
 | 调用 | 参数 | 返回 |
 | --- | --- | --- |
-| `honk.card.open` | `{key, load}`：`load` 是 `{tree, data, theme, language, active, allowQueries}` | 结果 |
-| `honk.card.click` | `{key, path}`：从根开始的子节点下标，如 `[0,2]` | 结果 |
+| `honk.card.open` | `{key, load}`：`load` 是 `{tree, data, theme, language, active, allowQueries, messageId}`（`messageId` 只给宿主，用来把 `request()` 发给这条消息的 bot） | 结果 |
+| `honk.card.click` | `{key, path}`：从根开始的子节点下标，如 `[0,2]` | 结果（宿主已把 `request` 取走，见下） |
 | `honk.card.set` | `{key, state}`：`{theme}` 或 `{active}` | 结果 |
-| `honk.card.answer` | `{key, seq, ok, data}`：对结果里 `request` 的回答；`ok` 为真时 `data` 是 bot 的答案（≤ 1024 字节，超出或不是 UTF-8 则请求以 `BAD_ANSWER` 失败），否则 `data` 是错误码（`A–Z` 和 `_`，≤ 32 字符，如 `NETWORK`，其他值变成 `REQUEST_FAILED`） | 结果 |
 | `honk.card.close` | `{key}` | `true` |
 | 事件 `honk.card.changed` | `{key, result}` | 定时器或 Promise 改了卡片 |
 
 结果是 `{tree, prevented, open?, copy?, request?, stopped, logs}`：`tree` 只在变化时给（写入相同的文字、属性或 `innerHTML` 不算变化），App 收到和屏幕上相同的树也不重画；`open` / `copy` 由 App 用已有的 `openUrl` 和剪贴板执行；`prevented` 为假时，再执行被点元素自己的链接。有点击处理函数的元素在树里带 `on: true`，App 只让这些元素可点。
 
-`request`（`{seq, data}`，只出现在 click 的结果里）表示卡片在这次点击里调了 `TelegramWidget.request(data)`：`data` 是 1–64 字节的 UTF-8，`seq` 是卡片内递增的正整数（C 一侧像对待所有返回值一样校验）。宿主把它发给 bot，拿到答案后调 `honk.card.answer`（C：`honk_card_answer(card, seq, ok, data, len)`），卡片的 Promise 随之兑现或拒绝，返回的结果和 tick 一样（树的变化、日志，没有 `open` / `copy` / `request`）。只有 load 里带 `allowQueries: true`（消息的 `allow_queries`）时才会发出请求，否则 `request()` 以 `NOT_ALLOWED` 拒绝。`WidgetRequestError.code`：`NOT_ALLOWED`（没开 `allowQueries`、不是在点击处理函数里同步调用、同一次点击里的第二次）、`INVALID_DATA`（不是 1–64 字节的字符串）、`TOO_MANY_REQUESTS`（已有 4 个未答的）、`TIMEOUT`（15 秒没人回答，由 tick 驱动，所以宿主要照常按 `honk_card_next` 安排 tick）、宿主给的错误码（`BAD_ANSWER`、`REQUEST_FAILED` 等）。未知或已答过的 `seq` 被忽略。
+`request`（`{seq, data}`，只出现在 click 的结果里）表示卡片在这次点击里调了 `TelegramWidget.request(data)`：`data` 是 1–64 字节的 UTF-8，`seq` 是卡片内递增的正整数（C 一侧像对待所有返回值一样校验）。宿主（两端的 `NshBridge`，逻辑在 HonkKit 和 `:core` 的 `CardRequests`）自己处理它，nsh App 既看不到请求也看不到答案：click 的结果传给 App 之前，`CardRequests.filter` 把 `request` 取出来，后台调 `POST /v1/queries`（超时 20 秒，比网关的 15 秒等待略长），拿到答案后调 `CardHost.answer`（C：`honk_card_answer(card, seq, ok, data, len)`）；卡片的 Promise 随之兑现或拒绝，返回的结果和 tick 一样（树的变化、日志，没有 `open` / `copy` / `request`），宿主把它当作 `honk.card.changed` 事件发给 App（没有变化、日志为空的结果不发）。`ok` 为真时 `data` 是 bot 的答案（≤ 1024 字节，超出或不是 UTF-8 则请求以 `BAD_ANSWER` 失败），否则 `data` 是错误码（`A–Z` 和 `_`，≤ 32 字符，其他值变成 `REQUEST_FAILED`）。宿主给的错误码：`TIMEOUT`（网关 504 或本机请求超时）、`NOT_ALLOWED`（401 / 403 / 404：消息不允许查询、已不在网关上，或 load 里没有 `allowQueries` / `messageId`）、`RATE_LIMITED`（429，同一设备对同一个 bot 每秒超过 1 次，突发 5 次）、`NETWORK`（连不上网关）、`REQUEST_FAILED`（其他，如 webhook 投递失败的 502）。只有 load 里带 `allowQueries: true`（消息的 `allow_queries`）时才会发出请求，否则 `request()` 以 `NOT_ALLOWED` 拒绝。`WidgetRequestError.code`：`NOT_ALLOWED`（没开 `allowQueries`、不是在点击处理函数里同步调用、同一次点击里的第二次）、`INVALID_DATA`（不是 1–64 字节的字符串）、`TOO_MANY_REQUESTS`（已有 4 个未答的）、`TIMEOUT`（15 秒没人回答，由 tick 驱动，所以宿主要照常按 `honk_card_next` 安排 tick）、宿主给的错误码（`BAD_ANSWER`、`REQUEST_FAILED` 等）。未知或已答过的 `seq` 被忽略。
 
 限制，和 Telegram 对比：
 
@@ -457,7 +473,7 @@ Telegram 的 widget 一般用 class 加 `<style>` 写，所以 Honk 也按样式
 
 脚本在宿主的后台线程上跑，卡死也不会卡住界面。“停止”：卡片保留最后一次画出的样子，不再响应；因为超时停止的卡片还会把最后的树交出来。没被捕获的异常只写日志（`logs`，App 打到控制台），卡片继续运行。
 
-和 Telegram 不同的地方：`request()` 只在消息允许查询（`allow_queries`）时发出，错误码见上；只有 click 事件；`getBoundingClientRect` 返回全 0；没有 canvas；`HapticFeedback` 什么也不做；`publicData`、`viewer`、`wallet` 都是 null。`editMessageData` 改了数据时，会话里这张卡片按新数据重建，脚本重新运行；滚出屏幕再回来时也会重建。
+和 Telegram 不同的地方：`request()` 只在消息允许查询（`allow_queries`）时发出，由宿主送到 bot（见上），错误码见上；只有 click 事件；`getBoundingClientRect` 返回全 0；没有 canvas；`HapticFeedback` 什么也不做；`publicData`、`viewer`、`wallet` 都是 null。`editMessageData` 改了数据时，会话里这张卡片按新数据重建，脚本重新运行；滚出屏幕再回来时也会重建。
 
 兼容：网关保留内联的普通 `<script>`（去掉属性），删掉带 `src`、`type` 不是 JavaScript、在 SVG 里，或文本里有 `<!--`、`<script`、`</script` 的脚本（后几种在 HTML 规范和 App 的解析器里切分不同，可能把脚本后面的内容当成没清理过的标记）。旧版 App 的渲染器本来就跳过 `<script>`；没有宿主（`nsh run` 演示）或宿主调用失败时，新版 App 也显示静态卡片。所以卡片在不跑脚本时也要能看：关键信息写在 HTML 里，脚本只做增强。
 
@@ -513,7 +529,8 @@ cd android && make setup && ./gradlew assembleDebug   # 下载 nsh AAR 并编译
 - [ ] Android 预设头像现在画的是 bot 名称首字，和 App 内的图标不一致；可以给 Android 加一套对应的矢量图标
 - [ ] 设备组配对：网关、HonkKit 和 `:core`（含共用的 HKDF / AES-GCM 向量）都有测试，两端 App 的接线（`ios/App`、`android/app`）只在 CI 里编译；没有二维码（nsh 0.5 无二维码接口）；`keys` / `group_key` 字段已预留，等第 7 期的密钥存储接上
 - [x] 卡片 profile 2：JS（宿主里的 quickjs-ng）、`TelegramWidget` 兼容接口
-- [ ] 卡片按钮回调：沙箱一侧已就绪（`request()`、`honk_card_answer`），网关的 `answerWidgetQuery`、webhook / 长轮询和宿主接线随同一个版本；`publicData` / 共享卡片
+- [x] 卡片按钮回调：`request()` → 宿主 → `POST /v1/queries` → webhook / 长轮询 → `answerWidgetQuery`，网关和 HonkKit / `:core` 有测试；两端 `NshBridge` 的接线只在 CI 里编译，没在真机上跑过
+- [ ] `publicData` / 共享卡片
 - [ ] 卡片脚本在真机上的耗时和内存还没测过；pointer 事件、canvas 没有
 - [ ] 推送内容端到端加密（参考 Bark 的 ciphertext），消息在网关上只存密文
 - **nsh 还是 0.5.x**：推送和扩展全部用原生写，nsh 只负责 App 内界面，把升级的影响面控制在 UI 层。

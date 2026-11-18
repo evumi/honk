@@ -43,6 +43,8 @@ export interface Message {
   /** Sent with `silent`: stored and counted, no notification. */
   silent: boolean;
   collapseId: string;
+  /** The sender let the card's `request()` reach the bot (`allow_queries`). */
+  allowQueries: boolean;
   /** Unix milliseconds. */
   date: number;
   read: boolean;
@@ -137,7 +139,9 @@ export function call<T>(name: string, args?: unknown): Promise<T> {
 
 /**
  * Card scripts (profile 2), run by the host in a QuickJS runtime per card
- * (native/card). Strings are JSON: `load` is honk_card_open's argument, and
+ * (native/card). Strings are JSON: `load` is honk_card_open's argument plus
+ * `messageId` (which the host reads, to send the card's request() to the
+ * message's bot; the nsh app never sees a request or its answer), and
  * every call answers with a result {tree, prevented, open?, copy?, stopped,
  * logs}. A card's later changes (timers, promises) come as the event
  * honk.card.changed {key, result}. Without a host there are none: the demo

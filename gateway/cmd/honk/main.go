@@ -108,6 +108,7 @@ func run(log *slog.Logger) error {
 		PushIOS: cfg.PushRoute("ios"), PushAndroid: cfg.PushRoute("android"),
 		RelayServe: cfg.RelayServe, RelayRate: cfg.RelayRate, RelayBurst: cfg.RelayBurst, RelayTokenPerMinute: cfg.RelayTokenPerMinute,
 		RelayAPNs: direct.APNs, RelayFCM: direct.FCM,
+		WebhookAllowPrivate: cfg.WebhookAllowPrivate,
 	})
 	httpSrv := &http.Server{
 		Addr:              cfg.Addr,

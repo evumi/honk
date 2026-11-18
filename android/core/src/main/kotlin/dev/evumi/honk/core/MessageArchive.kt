@@ -37,6 +37,7 @@ object MessageArchive {
                 "title" to m.title, "url" to m.url,
             )) if (v.isNotEmpty()) fields[k] = JsonPrimitive(v)
             if (m.silent) fields["silent"] = JsonPrimitive(true)
+            if (m.allowQueries) fields["allow_queries"] = JsonPrimitive(true)
             append(JsonObject(fields).toString()).append('\n')
         }
     }
