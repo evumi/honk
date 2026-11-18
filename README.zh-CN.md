@@ -93,7 +93,7 @@ APNs 和 FCM 只接受带已发布 App 凭据签名的推送，自建网关手�
 协议（沿用 Telegram 的 `{"ok":…}` 格式）：
 
 - `POST /v1/relay/gateways`：不需要账号，登记一个网关，返回一次 `relay_id` 和 `relay_key`，网关存进自己的 `meta` 表。按客户端 IP 限流，规则同设备注册。
-- `POST /v1/relay/push`：`Authorization: Bearer <relay_key>`，JSON 字段 `platform`、`token`、`kind`、`msg_id`、`target_id`、`bot_id`、`level`、`collapse_key`（`full` 时再加 `bot_name`、`title`、`body`、`group`）。请求体最大 8 KB。
+- `POST /v1/relay/push`：`Authorization: Bearer <relay_key>`，JSON 字段 `platform`、`token`、`kind`、`msg_id`、`target_id`、`bot_id`、`level`、`collapse_key`，有的话还有 `silent`（静默消息）和 `ttl`（推送为离线设备保留的秒数）（`full` 时再加 `bot_name`、`title`、`body`、`group`）。请求体最大 8 KB。
 - 响应：200 已发出；410 token 失效（网关照直连处理，标记失效）；429 带 `parameters.retry_after`（由推送队列重试）；401 key 未知或被封（不重试；key 未知时网关重新登记，一小时最多一次，被封则不会）；503 中继没有这个平台的凭据（不重试）；5xx 和网络错误会重试。
 
 提供中继：在配好自己凭据的网关上设 `HONK_RELAY_SERVE=true`。中继只用直连凭据发送，从不再转给别的中继。每个自建网关和每个 push token 都有限流；一小时内发往失效 token 的推送超过 100 条且占一半以上的网关会被降速并记日志，用 `UPDATE relays SET blocked = 1 WHERE id = '…'` 可以封禁。`/v1/info` 的 `features` 含 `"relay"`；所有网关都用 `push: {"ios","android"}`（`direct`、`relay` 或 `off`）报告推送方式，App 网关页测试连接时会显示。
@@ -117,6 +117,13 @@ APNs 和 FCM 只接受带已发布 App 凭据签名的推送，自建网关手�
 | `copy` | | 长按菜单里「复制」用的文字 |
 | `icon` | | 这条消息的头像，必须是 https；不填用 bot 头像 |
 | `dry_run` | | `true` 时只校验：不入队、不推送，返回 `{"dry_run":true,"html":清理后的卡片,"input_size","raw_size","compressed_size","removed":[…]}`，即清理后卡片的大小（上限 32768 和 4096）和白名单删掉的内容（如 `"onclick on <div>"`、`"<iframe>"`）。计入限流 |
+| `open` | | `chat`（默认）或 `url`：`url` 表示点通知直接打开消息的 `url`，不进会话（要同时给 `url`） |
+| `image` | | https 图片，最多 2048 字符：附在通知上，会话气泡里也显示。设备自己下载（≤ 5 MB，10 秒超时） |
+| `ttl` | | 秒，60 到 `HONK_MESSAGE_TTL`：消息在队列里保留多久，同时写进 APNs 的 `apns-expiration` 和 FCM 的 `ttl` |
+| `silent` | | `true`：不弹通知，也不进通知中心；只进会话、未读数和角标，走静默推送 |
+| `parse_mode` | | `Markdown`：正文按 Markdown 渲染（`**粗体**`、`*斜体*`、`` `行内代码` ``、代码块、`[文字](https://…)` 链接、`-` 和 `1.` 列表）；横幅显示去掉标记的纯文本 |
+
+没带 `parse_mode` 时，正文里的 `https://` 链接可以点。通知上有 `copy` 时带「复制」，有 `url` 时带「打开链接」，总有「标为已读」。
 
 ```bash
 curl https://honk.example.com/bot$TOKEN/sendMessage \

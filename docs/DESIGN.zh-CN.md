@@ -51,7 +51,7 @@ Honk 是一个以 bot 为渠道的推送通知服务：每个 bot 是一个独�
 
 为什么推送里不带卡片：卡片压缩后最多 4KB，和 APNs、FCM 的 payload 上限一样大，但 base64 会多出约 33%，再加上标题正文就超了。所以推送只负责唤醒和横幅，内容由设备来拉。
 
-修改（`editMessageData`）和删除（`deleteMessage`）走静默推送：iOS 是 `content-available` 后台推送，Android 是 NORMAL 优先级的 data message。系统不保证静默推送一定送达，所以 App 打开时的 `/sync` 是兜底。
+修改（`editMessageData`）和删除（`deleteMessage`）走静默推送：iOS 是 `content-available` 后台推送，Android 是 NORMAL 优先级的 data message。`silent=true` 的新消息走同一条路径（见第 7 节）。系统不保证静默推送一定送达，所以 App 打开时的 `/sync` 是兜底。
 
 **后台刷新**：App 不在前台时也会同步，作为推送丢失的第二道兜底。iOS：`BGAppRefreshTask`（`ios/App/BackgroundRefresh.swift`；`project.yml` 里 `UIBackgroundModes` 加了 `fetch`，`BGTaskSchedulerPermittedIdentifiers` 是 `<bundle id>.refresh`），进入后台时和每次任务运行时请求下一次（最早 6 小时后，实际时间由系统定）；Android：WorkManager 唯一周期任务 `honk-sync`（`SyncWorker`，6 小时，要求有网络，`HonkApp.onCreate` 里 KEEP 方式登记）。两端都只跑一遍和「立即同步」一样的 `refresh()`：存下队列里的消息、应用修改和删除、撤掉因此过时的通知、更新角标；都**不发本地通知**（iOS 本来就不允许；Android 的补发按 tag 去重那一步没做）。
 
@@ -63,7 +63,7 @@ Honk 是一个以 bot 为渠道的推送通知服务：每个 bot 是一个独�
 
 - `devices`：`id`（UUIDv7）、`secret_hash`、`platform`（ios / android）、`push_token`、`push_ok`（APNs/FCM 报告 token 失效后置 0）
 - `bots`：`id`（自增整数，只在库内使用）、`public_id`（对外的 bot id，v2 加入）、`device_id`、`token_hash`、`name`、`avatar`、`default_level`
-- `messages`：队列。`kind` 是 message / edit / delete；edit 和 delete 用 `target_id` 或 `collapse_id` 指向原消息
+- `messages`：队列。`kind` 是 message / edit / delete；edit 和 delete 用 `target_id` 或 `collapse_id` 指向原消息。发送选项：`open_mode`（`url` 或空）、`image`、`parse_mode`（`Markdown` 或空）、`silent`（0 / 1），v5 加入，JSON 里分别叫 `open`、`image`、`parse_mode`、`silent`，空值不输出；`expires_at` 由 `ttl` 参数决定（不填用 `HONK_MESSAGE_TTL`）
 - `relays`（v3）：登记过的自建网关，`id`、`key_hash`、`created_at`、`last_used_at`（每分钟最多写一次）、`blocked`；只有开了 `HONK_RELAY_SERVE` 的网关用它
 - `meta`（v3）：这个网关自己的键值设置；中继客户端把 `relay_url`、`relay_id`、`relay_key` 存在这里
 
@@ -71,7 +71,7 @@ bot id 是 8 位随机 base62 字符、以字母开头（如 `aZ3kQ9xT`），生
 
 bot token 形如 `<bot id>:<32 位随机串>`；token 和 device secret 都只存 sha256。查 token 时按整串的哈希查，所以 v2 迁移前发出的 `<整数 id>:<secret>` 旧 token 继续有效，直到重置。
 
-迁移：`schema.sql` 是 v1；之后的版本在 `store.go` 的 `migrate` 里按 `PRAGMA user_version` 逐步执行，每步一个事务。v2 给 bots 加 `public_id` 列、为已有 bot 补上短 id、建唯一索引。App 解码 bot id 时也接受数字（旧网关），所以要先发 App 再升级网关。`/v1/info` 的 `api` 从 1 升到 2。`/v1/bots/:id` 仍接受 v2 之前的整数 id，但只认本设备自己的 bot（按库内主键查），这样改名还在 pending 的 bot 也能删除、修改。
+迁移：`schema.sql` 是 v1；之后的版本在 `store.go` 的 `migrate` 里按 `PRAGMA user_version` 逐步执行，每步一个事务。v2 给 bots 加 `public_id` 列、为已有 bot 补上短 id、建唯一索引。App 解码 bot id 时也接受数字（旧网关），所以要先发 App 再升级网关。v5（`migrateSendOptions`；v3、v4 是中继表和设备组）给 messages 加 `open_mode`、`image`、`parse_mode`、`silent`；两个 LocalStore 也各有一步 v3（`migrateSendOptions` / `MIGRATE_SEND_OPTIONS`），给本地 messages 加同名的四列，旧行取默认值，旧 App 不认识新字段，照常忽略。`/v1/info` 的 `api` 从 1 升到 2。`/v1/bots/:id` 仍接受 v2 之前的整数 id，但只认本设备自己的 bot（按库内主键查），这样改名还在 pending 的 bot 也能删除、修改。
 
 ### 接口
 
@@ -79,7 +79,7 @@ bot token 形如 `<bot id>:<32 位随机串>`；token 和 device secret 都只�
 
 | 接口 | 调用方 | 说明 |
 | --- | --- | --- |
-| `/bot<token>/sendMessage` | 发送方 | `body` 必填；`title`、`html`、`data`、`level`、`group`、`id`、`url`、`copy`、`icon` 可选；GET 查询串、表单、JSON 都行 |
+| `/bot<token>/sendMessage` | 发送方 | `body` 必填；`title`、`html`、`data`、`level`、`group`、`id`、`url`、`copy`、`icon`、`open`、`image`、`ttl`、`silent`、`parse_mode` 可选；GET 查询串、表单、JSON 都行 |
 | `/bot<token>/editMessageData` | 发送方 | `message_id` 或 `id` + `data`，卡片原地更新，不弹通知 |
 | `/bot<token>/deleteMessage` | 发送方 | `message_id` 或 `id` |
 | `/bot<token>/getMe` | 发送方 | 测试 token |
@@ -94,7 +94,8 @@ bot token 形如 `<bot id>:<32 位随机串>`；token 和 device secret 都只�
 ### 校验与限制
 
 - **卡片**（`internal/widget`）：原文 ≤ 32KB，zlib 9 压缩后 ≤ 4KB，`data` ≤ 1KB，脚本也算在里面。按白名单清理：保留内联的普通 `<script>`（profile 2，见第 6 节「卡片脚本」）；删掉其他脚本、`on*` 属性、表单控件、外部资源；链接只允许 `https://`、`#id`、`{{key}}`；CSS 里禁止 `@import`、`expression()`、非 data: 的 `url()` 和反斜杠转义。
-- **字段长度**：`title` ≤ 256 字，`body` ≤ 4096 字，`id` ≤ 128 字节，`icon` 必须是 https。
+- **字段长度**：`title` ≤ 256 字，`body` ≤ 4096 字，`id` ≤ 128 字节，`icon` 和 `image` 必须是 https。
+- **发送选项**：`open` 只能是 `chat` 或 `url`，`url` 要同时给 `url`；`parse_mode` 只认 `Markdown`（不分大小写）；`silent` 是 `true` / `false` / `1` / `0`；`ttl` 是 60 到 `HONK_MESSAGE_TTL` 之间的整数秒。校验不过一律 400。Markdown 正文的横幅文字由网关去掉标记（`internal/api/markdown.go` 的 `StripMarkdown`），和 App 的渲染子集（`app/src/markup.ts`）保持一致。
 - **限流**：每个 bot 每秒 5 条，突发 20 条（可配）。
 - **模拟器身份**：push token 以 `simulator-` 开头的设备照常注册和排队，但不发推送（见第 5 节「模拟器开发」）。
 - **清理**：每小时删除过期和 ack 超过 1 天的消息。
@@ -428,6 +429,18 @@ Telegram 的 widget 一般用 class 加 `<style>` 写，所以 Honk 也按样式
 | `id` | `apns-collapse-id: b<bot>:<id>`（超过 64 字节时取哈希；经中继时一律是哈希） | `collapse_key`；data 里的 `id`，App 用它做通知 tag |
 | 无内容的推送（`HONK_PUSH_CONTENT=none`） | `alert` 只有 `loc-key: "New notification"`；没有 bot 名称、标题、正文、group、`id` | data 里没有 `bot_name`、`title`、`body`、`group`、`id` |
 | edit / delete | `content-available: 1` 后台推送 | priority NORMAL 的 data message |
+| `silent` | 和 edit / delete 一样的 `content-available: 1` 后台推送（`kind` 仍是 `message`，没有 `alert`，NSE 不运行），App 在 `didReceiveRemoteNotification` 里 `apply` 这条消息，不发通知，计入角标 | NORMAL 优先级 data message，没有 `title` / `body`，带 `silent: 1`；App 拉到消息后只入库，不发通知 |
+| `ttl` | `apns-expiration` = 现在 + ttl（不填 24 小时） | `android.ttl`（秒；不填 86400s）；两者都不超过 FCM 的上限 28 天 |
+| `image`、`open`、`parse_mode` | 不进推送，设备拉到消息后再用（Markdown 消息的 `alert.body` 是去掉标记的文本） | 同左（`body` 是去掉标记的文本） |
+
+### 通知动作和附图
+
+动作由消息的字段决定（纯函数在 HonkKit 的 `NotificationPlan.swift` 和 `:core` 的 `NotificationPlan.kt`，两边同样的测试）：`copy` 非空时有「复制」，`url` 是 http(s) 时有「打开链接」，总有「标为已读」。
+
+- iOS：启动时注册 4 个 category（`honk.msg`、`honk.msg.copy`、`honk.msg.url`、`honk.msg.copy.url`），NSE 按消息设 `categoryIdentifier`；`AppDelegate` 处理动作（复制到剪贴板、打开链接、标这个 bot 已读）。`open=url` 时点通知本体打开 `url`，否则进会话。NSE 下载 `image`（只收 https，≤ 5 MB，10 秒超时，JPEG / PNG / GIF / WebP）到临时文件，作为 `UNNotificationAttachment`。`threadIdentifier` 是 `bot-<id>`，有 `group` 时是 `bot-<id>:<group>`。
+- Android：`Notifier` 给通知加 `NotificationCompat.Action`；「复制」和「标为已读」走清单里注册的 `NotificationActionReceiver`（用 `goAsync` 在后台线程里读库），「打开链接」和 `open=url` 的点击是直接的 `ACTION_VIEW` activity intent（Android 12 起不允许 receiver 里再起 activity）。有 `image` 时用 `BigPictureStyle`（头像放在 large icon），下载 ≤ 5 MB、10 秒超时，缩到 1024 像素以内；没有图时仍是 MessagingStyle。
+- `silent` 的消息两端都入库、计入未读和角标，不发通知（`NotificationPlan.shouldNotify`）。
+- App 里：气泡顶部显示 `image`；`parse_mode=Markdown` 的正文由 `app/src/markup.ts` 解析（粗体 `**` / `__`、斜体 `*` / `_`、行内代码、代码块、`[文字](url)` 链接、`-` `*` `+` 和 `1.` 列表、`#` 标题画成粗体），链接只认 http(s)；没有 `parse_mode` 时正文里的 `https://` 链接自动识别成可点（句末标点不算在链接里）。
 
 ## 8. 本地开发
 
