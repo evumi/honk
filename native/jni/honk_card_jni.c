@@ -54,6 +54,15 @@ JNIEXPORT jbyteArray JNICALL Java_dev_evumi_honk_core_CardNative_tick(JNIEnv *en
     return result(env, honk_card_tick(CARD(h)));
 }
 
+JNIEXPORT jbyteArray JNICALL Java_dev_evumi_honk_core_CardNative_answer(JNIEnv *env, jclass cls, jlong h, jint seq, jboolean ok, jbyteArray data) {
+    jsize n = data ? (*env)->GetArrayLength(env, data) : 0;
+    char *d = bytes(env, data);
+    if (data && !d) return NULL;
+    jbyteArray a = result(env, honk_card_answer(CARD(h), (int)seq, ok ? 1 : 0, d, (size_t)n));
+    free(d);
+    return a;
+}
+
 JNIEXPORT jbyteArray JNICALL Java_dev_evumi_honk_core_CardNative_set(JNIEnv *env, jclass cls, jlong h, jbyteArray state) {
     char *s = bytes(env, state);
     if (!s) return NULL;

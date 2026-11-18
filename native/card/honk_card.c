@@ -18,9 +18,11 @@
 #define MAX_TREE_BYTES (512 * 1024)
 #define MAX_LOGS 20
 #define MAX_LINK 256
+#define MAX_REQUEST 64
+#define MAX_ANSWER 1024
 
-enum { FN_LOAD, FN_SCRIPT, FN_READY, FN_CLICK, FN_TICK, FN_SET, FN_TREE, FN_EFFECTS, FN_COUNT };
-static const char *const FN_NAMES[FN_COUNT] = {"load", "script", "ready", "click", "tick", "set", "tree", "effects"};
+enum { FN_LOAD, FN_SCRIPT, FN_READY, FN_CLICK, FN_TICK, FN_ANSWER, FN_SET, FN_TREE, FN_EFFECTS, FN_COUNT };
+static const char *const FN_NAMES[FN_COUNT] = {"load", "script", "ready", "click", "tick", "answer", "set", "tree", "effects"};
 
 struct HonkCard {
     JSRuntime *rt;
@@ -339,6 +341,24 @@ static bool safe_copy(const char *s, size_t n) {
     return units >= 1 && units <= 256;
 }
 
+/** Well-formed UTF-8 (no overlongs, surrogates or code points past U+10FFFF). */
+static bool valid_utf8(const char *s, size_t n) {
+    const unsigned char *p = (const unsigned char *)s;
+    for (size_t i = 0; i < n;) {
+        unsigned char ch = p[i];
+        size_t len = ch < 0x80 ? 1 : (ch >= 0xc2 && ch <= 0xdf) ? 2 : (ch >= 0xe0 && ch <= 0xef) ? 3 : (ch >= 0xf0 && ch <= 0xf4) ? 4 : 0;
+        if (!len || i + len > n) return false;
+        for (size_t k = 1; k < len; k++)
+            if ((p[i + k] & 0xc0) != 0x80) return false;
+        if (ch == 0xe0 && p[i + 1] < 0xa0) return false;
+        if (ch == 0xed && p[i + 1] > 0x9f) return false;
+        if (ch == 0xf0 && p[i + 1] < 0x90) return false;
+        if (ch == 0xf4 && p[i + 1] > 0x8f) return false;
+        i += len;
+    }
+    return true;
+}
+
 /**
  * The result of a call: the tree when it changed, the effects runtime.js
  * recorded, checked here. `tap`: the call was a real tap, so one link and one
@@ -350,6 +370,8 @@ static char *finish(HonkCard *c, bool tap, int prevented) {
     char *tree = NULL;
     size_t tree_len = 0;
     char *open = NULL, *copy = NULL;
+    double req_seq = 0;
+    char *req_data = NULL;
 
     if (!c->stopped) {
         // Effects first: they also say when the next timer is due.
@@ -382,6 +404,27 @@ static char *finish(HonkCard *c, bool tap, int prevented) {
                     copy = NULL;
                 }
                 JS_FreeValue(ctx, v);
+            }
+            if (tap) {
+                JSValue rq = own(ctx, o, "request");
+                if (JS_IsObject(rq)) {
+                    JSValue sv = own(ctx, rq, "seq");
+                    JSValue dv = own(ctx, rq, "data");
+                    size_t n = 0;
+                    double sq = 0;
+                    char *d = string_of(ctx, dv, &n);
+                    if (d && n >= 1 && n <= MAX_REQUEST && valid_utf8(d, n) && JS_IsNumber(sv) && JS_ToFloat64(ctx, &sq, sv) == 0 &&
+                        sq >= 1 && sq <= 2147483647.0 && sq == (double)(long)sq) {
+                        req_seq = sq;
+                        req_data = d;
+                    } else if (d) {
+                        add_log(c, "request() takes a string of 1 to 64 bytes");
+                        free(d);
+                    }
+                    JS_FreeValue(ctx, sv);
+                    JS_FreeValue(ctx, dv);
+                }
+                JS_FreeValue(ctx, rq);
             }
             JSValue logs = own(ctx, o, "logs");
             if (JS_IsArray(logs)) {
@@ -444,6 +487,15 @@ static char *finish(HonkCard *c, bool tap, int prevented) {
         buf_str(&b, ",\"copy\":");
         buf_json_string(&b, copy, strlen(copy));
     }
+    if (req_data) {
+        char num[32];
+        snprintf(num, sizeof num, "%ld", (long)req_seq);
+        buf_str(&b, ",\"request\":{\"seq\":");
+        buf_str(&b, num);
+        buf_str(&b, ",\"data\":");
+        buf_json_string(&b, req_data, strlen(req_data));
+        buf_str(&b, "}");
+    }
     buf_str(&b, ",\"stopped\":");
     if (c->stopped) buf_json_string(&b, c->stopped, strlen(c->stopped));
     else buf_str(&b, "null");
@@ -458,6 +510,7 @@ static char *finish(HonkCard *c, bool tap, int prevented) {
     free(tree);
     free(open);
     free(copy);
+    free(req_data);
     if (b.failed) {
         free(b.buf);
         return strdup("{\"tree\":null,\"prevented\":false,\"stopped\":\"memory\",\"logs\":[]}");
@@ -543,6 +596,36 @@ char *honk_card_tick(HonkCard *c) {
 char *honk_card_set(HonkCard *c, const char *state_json) {
     if (c->stopped) return stopped_result(c);
     call_void(c, FN_SET, state_json);
+    return finish(c, false, 0);
+}
+
+char *honk_card_answer(HonkCard *c, int seq, int ok, const char *data, size_t len) {
+    if (c->stopped) return stopped_result(c);
+    Buf b = {0};
+    char num[32];
+    snprintf(num, sizeof num, "%d", seq);
+    buf_str(&b, "{\"seq\":");
+    buf_str(&b, num);
+    if (!data) len = 0;
+    bool good = valid_utf8(data ? data : "", len);
+    if (ok && good && len <= MAX_ANSWER) {
+        buf_str(&b, ",\"ok\":true,\"data\":");
+        buf_json_string(&b, data ? data : "", len);
+    } else if (ok) {
+        // Too big or not UTF-8: the request fails instead of the card seeing it.
+        buf_str(&b, ",\"ok\":false,\"data\":\"BAD_ANSWER\"");
+    } else {
+        bool code = good && len <= 32;
+        buf_str(&b, ",\"ok\":false,\"data\":");
+        buf_json_string(&b, code ? data : "", code ? len : 0);
+    }
+    buf_str(&b, "}");
+    if (b.failed) {
+        free(b.buf);
+        return stopped_result(c);
+    }
+    call_void(c, FN_ANSWER, b.buf);
+    free(b.buf);
     return finish(c, false, 0);
 }
 

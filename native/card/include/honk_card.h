@@ -14,6 +14,8 @@
 //    "prevented": bool,         click: a handler called preventDefault()
 //    "open": "https://…",       click: a link to open (once per tap, https, ≤ 256 characters)
 //    "copy": "…",               click: text to copy (once per tap, 1–256 characters)
+//    "request": {"seq": n, "data": "…"},  click: the card called TelegramWidget.request(data) (1–64 bytes);
+//                                the host forwards it and later calls honk_card_answer with the same seq
 //    "stopped": "time" | "memory" | "output" | "error" | null,
 //    "logs": ["…"]}
 // A stopped card keeps its last tree; later calls only return {"stopped": …}.
@@ -22,6 +24,8 @@
 
 #ifndef HONK_CARD_H
 #define HONK_CARD_H
+
+#include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -46,7 +50,7 @@ HonkCardLimits honk_card_default_limits(void);
 /**
  * Starts a card. `load_json` is {"tree": [nodes], "data": "<the message's data>",
  * "theme": {"--tg-theme-…": "#…", "--tg-color-scheme": "light" | "dark"},
- * "language": "en", "active": true}; nodes are
+ * "language": "en", "active": true, "allowQueries": false}; nodes are
  * {"type": "element", "tag", "attrs": {…}, "children": [...]} or {"type": "text", "text"}.
  * Runs the inline scripts, then DOMContentLoaded and load.
  * Returns the card (NULL only when no runtime could be made) and sets *result.
@@ -58,6 +62,17 @@ char *honk_card_click(HonkCard *card, const char *path_json);
 
 /** Runs the timers that are due. */
 char *honk_card_tick(HonkCard *card);
+
+/**
+ * The answer to a request (the `seq` of a result's "request"): ok != 0 resolves the card's
+ * promise with `data` (UTF-8, `len` bytes, at most 1024, else the request fails with code
+ * BAD_ANSWER); ok == 0 rejects it with a WidgetRequestError whose code is `data` (1–32 chars
+ * of A–Z and _, e.g. "NETWORK"; anything else gives REQUEST_FAILED). An unknown seq (answered,
+ * timed out, never asked) is ignored. Runs under the limits of a tick and returns a normal
+ * result (tree changes, logs). Requests time out inside the card after 15 s (code TIMEOUT),
+ * driven by ticks. At most 4 requests are in flight.
+ */
+char *honk_card_answer(HonkCard *card, int seq, int ok, const char *data, size_t len);
 
 /** {"theme": {…}} and/or {"active": bool}: fires themeChanged, activated or deactivated. */
 char *honk_card_set(HonkCard *card, const char *state_json);
