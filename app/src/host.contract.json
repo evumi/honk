@@ -75,7 +75,7 @@
           "result": [
             {
               "id": 7, "botId": "aZ3kQ9xT", "title": "部署成功", "body": "sluice 已上线", "html": "<p>{{status}}</p>", "data": "{\"status\":\"ok\"}",
-              "level": "active", "group": "prod", "url": "https://example.com", "copy": "dep_1", "icon": "", "open": "url", "image": "https://example.com/i.png", "parseMode": "Markdown", "silent": false, "collapseId": "dep", "date": 1700000001000, "read": false
+              "level": "active", "group": "prod", "url": "https://example.com", "copy": "dep_1", "icon": "", "open": "url", "image": "https://example.com/i.png", "parseMode": "Markdown", "silent": false, "collapseId": "dep", "allowQueries": false, "date": 1700000001000, "read": false
             }
           ]
         },

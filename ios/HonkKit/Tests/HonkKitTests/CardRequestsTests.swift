@@ -126,15 +126,15 @@ private func requests(_ log: Log, reply: @escaping @Sendable (Int64, String) asy
         #expect(try store.messages(botID: "bot1").count == 2)
     }
 
-    @Test func aV2FileGetsTheColumn() throws {
+    @Test func aV3FileGetsTheColumn() throws {
         let path = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".sqlite").path
         let first = try LocalStore(path: path)
         try first.replaceBots([Bot(id: "bot1", name: "n")])
         try first.apply(QueuedMessage(id: 1, botID: "bot1", body: "old", date: 1))
-        // Make it look like v2 again.
+        // Make it look like v3 again.
         var db: OpaquePointer?
         #expect(sqlite3_open(path, &db) == SQLITE_OK)
-        #expect(sqlite3_exec(db, "ALTER TABLE messages DROP COLUMN allow_queries; PRAGMA user_version = 2;", nil, nil, nil) == SQLITE_OK)
+        #expect(sqlite3_exec(db, "ALTER TABLE messages DROP COLUMN allow_queries; PRAGMA user_version = 3;", nil, nil, nil) == SQLITE_OK)
         sqlite3_close(db)
         let store = try LocalStore(path: path)
         #expect(try store.message(id: 1)?.allowQueries == false)
