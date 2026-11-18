@@ -668,10 +668,40 @@ test("search lists matching messages under the chats and opens the chat on one",
   await app.waitFor("id:chat");
   await app.waitUntil(() => app.host.calls().some((c) => c.name === "honk.messages"));
   expect(app.host.calls().find((c) => c.name === "honk.messages")?.data).toEqual({ botId: "aZ3kQ9xT", around: 7, limit: 50 });
-  // Not marked read: the newest messages have not been seen.
-  expect(app.host.calls().some((c) => c.name === "honk.markRead")).toBe(false);
+  // The window holds an unread message: opening the chat marks it read, once.
+  await app.waitUntil(() => app.host.calls().some((c) => c.name === "honk.markRead"));
+  await app.wait(200);
+  expect(app.host.calls().filter((c) => c.name === "honk.markRead").length).toBe(1);
   // The way back to the newest messages is there.
   await app.waitFor("id:jump-latest");
+});
+
+test("a search hit window with nothing unread does not mark read", async () => {
+  const hit = { id: 7, botId: "aZ3kQ9xT", title: "部署成功", body: "sub2api 已上线", html: "", data: "", level: "active", group: "", url: "", copy: "", icon: "", collapseId: "", date: Date.now(), read: true };
+  const app = await open("./App.tsx", { locale: "zh-Hans-CN", host: host({ "honk.search": [hit], "honk.messages": [hit] }) });
+  await app.waitFor("text:Berth 部署");
+  await app.type("id:search", "部署");
+  await app.waitFor("id:hit-7");
+  await app.press("id:hit-7");
+  await app.waitFor("id:chat");
+  await app.waitUntil(() => app.host.calls().some((c) => c.name === "honk.messages"));
+  await app.wait(200);
+  expect(app.host.calls().some((c) => c.name === "honk.markRead")).toBe(false);
+});
+
+test("search results refresh when the store changes", async () => {
+  const hit = { id: 7, botId: "aZ3kQ9xT", title: "部署成功", body: "sub2api 已上线", html: "", data: "", level: "active", group: "", url: "", copy: "", icon: "", collapseId: "", date: Date.now(), read: true };
+  const app = await open("./App.tsx", { locale: "zh-Hans-CN", host: host({ "honk.search": [hit] }) });
+  await app.waitFor("text:Berth 部署");
+  await app.type("id:search", "部署");
+  await app.waitFor("id:hit-7");
+  const searches = () => app.host.calls().filter((c) => c.name === "honk.search").length;
+  const before = searches();
+  // Leaving a chat reloads the store.
+  await app.press("id:hit-7");
+  await app.waitFor("id:chat");
+  await app.press("id:back");
+  await app.waitUntil(() => searches() > before);
 });
 
 test("a search with no message hits shows no messages group", async () => {

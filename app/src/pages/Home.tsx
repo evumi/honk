@@ -6,7 +6,7 @@ import { lastSeen, listTime } from "../format";
 import { createDissolve, Dissolve } from "../fx/Dissolve";
 import { api, type Chat, type Message, type Retention } from "../host";
 import { chooseRetention, exportMessages, importMessages, retentionLabel } from "../archive";
-import { chats, devices, loadDevices, loadStatus, nav, reload, status } from "../store";
+import { chats, devices, loadDevices, loadStatus, nav, reload, status, version } from "../store";
 import { palette, type Palette } from "../theme";
 import { lang, langChoice, setLangChoice, tr, type LangChoice } from "../i18n";
 
@@ -107,6 +107,8 @@ function ChatsTab(props: { p: Palette }) {
   let findingMore = false;
   effect(() => {
     const q = query().trim();
+    // A store change (a message arrived or was deleted) re-runs the current search.
+    version();
     const seq = ++searchSeq;
     moreToFind = false;
     if (!q) {
