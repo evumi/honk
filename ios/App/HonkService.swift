@@ -79,6 +79,16 @@ final class HonkService {
             registration = .registered
             pushMode = c.pushToken.hasPrefix(Self.simulatorTokenPrefix) ? .simulator : .apns
         }
+        pruneExpired()
+    }
+
+    /// Deletes the messages older than the retention period the user chose in Settings (default: keep forever).
+    /// At start and on every refresh. Returns whether anything went.
+    @discardableResult
+    func pruneExpired() -> Bool {
+        guard let ids = try? store.pruneExpired() else { return false }
+        removeNotifications(ids)
+        return !ids.isEmpty
     }
 
     var api: APIClient { APIClient(baseURL: config.gatewayURL, secret: credentials.load()?.secret) }
@@ -368,6 +378,7 @@ final class HonkService {
         syncing = true
         defer { syncing = false }
         do {
+            pruneExpired()
             let api = self.api
             let bots = try await api.listBots()
             // Bots still stored by integer id move to their short id; one whose
@@ -378,6 +389,7 @@ final class HonkService {
             try store.replaceBots(bots, keeping: renamed.pending)
             let out = try await SyncEngine(api: api, store: store).run()
             removeNotifications(out.staleNotificationIDs)
+            pruneExpired()
             LocalAvatars(appGroup: config.appGroup).prune(keeping: Set(bots.map(\.avatar)))
         } catch let e as APIError where e.isUnauthorized {
             // The gateway forgot this device (another device of the group removed it,

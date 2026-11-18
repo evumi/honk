@@ -290,10 +290,26 @@ class HonkService private constructor(context: Context) {
 
     // sync
 
+    /**
+     * Deletes the messages older than the retention period the user chose in Settings (default: keep forever).
+     * At start and on every refresh. Blocking. Returns whether anything went.
+     */
+    fun pruneExpired(): Boolean {
+        val ids = try {
+            store.pruneExpired()
+        } catch (e: Exception) {
+            Log.w(TAG, "prune failed", e)
+            return false
+        }
+        notifier.cancel(ids)
+        return ids.isNotEmpty()
+    }
+
     /** Fetches the bot list and anything queued, then refreshes the UI. Blocking. */
     fun refresh() {
         if (!isRegistered || !syncing.compareAndSet(false, true)) return
         try {
+            pruneExpired()
             val client = api
             val bots = client.listBots()
             // Bots still stored by integer id move to their short id; one whose
@@ -304,6 +320,7 @@ class HonkService private constructor(context: Context) {
             notifier.syncChannels(store.chats().map { it.bot })
             val out = SyncEngine(api, store).run()
             notifier.cancel(out.staleNotificationIds)
+            pruneExpired()
             Notifier.localAvatars(context).prune(store.chats().map { it.bot.avatar }.toSet())
         } catch (e: ApiException) {
             Log.w(TAG, "refresh failed", e)

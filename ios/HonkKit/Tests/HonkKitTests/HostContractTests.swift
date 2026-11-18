@@ -76,6 +76,10 @@ private func chat(_ j: JSON) -> ChatSummary {
         #expect(try HostArgs.Messages(a) == HostArgs.Messages(CallArgs(["botId": "aZ3kQ9xT", "before": "8", "limit": 20])))
         let m = try HostArgs.Messages(a)
         #expect(m.botID == "aZ3kQ9xT" && m.before == 8 && m.limit == 20)
+        #expect(try HostArgs.Messages(CallArgs(["botId": "b", "around": 7])).around == 7)
+        #expect(try HostArgs.Search(CallArgs(["query": "q", "before": 3])) == HostArgs.Search(CallArgs(["query": "q", "before": 3])))
+        #expect(try HostArgs.RetentionSet(CallArgs(["days": 0])).days == 0)
+        #expect(HostArgs.Export(CallArgs(nil)).botID == nil && HostArgs.Export(CallArgs(["botId": "b"])).botID == "b")
         let d = try HostArgs.Messages(CallArgs(["botId": "b"]))
         #expect(d.before == nil && d.limit == 50)
         let c = try HostArgs.BotCreate(CallArgs(["name": "n"]))
@@ -111,6 +115,20 @@ private func chat(_ j: JSON) -> ChatSummary {
         for s in try results("honk.messages") {
             let list = s["result"] as! [JSON]
             #expect(try canon(list.map { HostJSON.message(message($0)) }) == canon(list))
+        }
+        for s in try results("honk.search") {
+            let list = s["result"] as! [JSON]
+            #expect(try canon(list.map { HostJSON.message(message($0)) }) == canon(list))
+        }
+        for s in try results("honk.export") {
+            let r = s["result"] as! JSON
+            #expect(try canon(HostJSON.exportResult(count: (r["count"] as! NSNumber).intValue, shared: r["shared"] as! Bool)) == canon(r))
+        }
+        for s in try results("honk.import") {
+            guard let r = s["result"] as? JSON else { continue }
+            func n(_ k: String) -> Int { (r[k] as! NSNumber).intValue }
+            let summary = LocalStore.ImportSummary(imported: n("imported"), existing: n("existing"), unknownBot: n("unknownBot"))
+            #expect(try canon(HostJSON.importResult(summary, invalid: n("invalid"))) == canon(r))
         }
         for s in try results("honk.bot.create") {
             let r = s["result"] as! JSON

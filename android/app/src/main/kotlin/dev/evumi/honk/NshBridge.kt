@@ -7,6 +7,7 @@ import android.os.Build
 import android.provider.Settings
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.lifecycle.lifecycleScope
 import com.longbridge.nsh.NshHostReply
 import com.longbridge.nsh.NshView
@@ -16,10 +17,12 @@ import dev.evumi.honk.core.Gateway
 import dev.evumi.honk.core.HostArgs
 import dev.evumi.honk.core.HostJson
 import dev.evumi.honk.core.LocalAvatars
+import dev.evumi.honk.core.MessageArchive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import java.io.File
 import java.util.Base64
 
 /**
@@ -28,8 +31,8 @@ import java.util.Base64
  * app/src/host.ts and the iOS side ios/App/NshBridge.swift; keep the three in
  * step.
  *
- * Calls: honk.status, honk.chats, honk.messages, honk.markRead, honk.focus,
- * honk.refresh, honk.bot.create, honk.bot.update, honk.bot.token,
+ * Calls: honk.status, honk.chats, honk.messages, honk.search, honk.markRead, honk.focus,
+ * honk.refresh, honk.retention.get, honk.retention.set, honk.export, honk.import, honk.bot.create, honk.bot.update, honk.bot.token,
  * honk.bot.resetToken, honk.bot.delete, honk.bot.setMuted, honk.bot.setPinned,
  * honk.message.delete, honk.chat.clear, honk.device.delete, honk.devices.list, honk.devices.remove,
  * honk.link.create, honk.link.claim, honk.notifications.open, honk.avatar.save, honk.avatar.image,
@@ -79,7 +82,67 @@ class NshBridge(
         }
         handle("honk.chats") { service.store.chats().map(HostJson::chat) }
         handle("honk.messages") { a ->
-            HostArgs.Messages(a).let { service.store.messages(it.botId, it.before, it.limit) }.map(HostJson::message)
+            HostArgs.Messages(a).let {
+                // `around`: a window around that message (a search result opened in its chat).
+                if (it.around != null) service.store.messagesAround(it.botId, it.around, it.limit)
+                else service.store.messages(it.botId, it.before, it.limit)
+            }.map(HostJson::message)
+        }
+        handle("honk.search") { a -> HostArgs.Search(a).let { service.store.search(it.query, it.before) }.map(HostJson::message) }
+
+        // retention, export and import
+
+        handle("honk.retention.get") { service.store.retentionDays }
+        handle("honk.retention.set") { a ->
+            service.store.retentionDays = HostArgs.RetentionSet(a).days
+            service.pruneExpired()
+            service.changed()
+            service.store.retentionDays
+        }
+        handle("honk.export") { a ->
+            // One chat, or every chat when `botId` is missing: written to the cache and offered in the share sheet.
+            val botId = HostArgs.Export(a).botId
+            val messages = service.store.exportMessages(botId)
+            if (messages.isEmpty()) {
+                HostJson.exportResult(0, false)
+            } else {
+                val name = MessageArchive.fileName(botId?.let { service.store.bot(it)?.name })
+                val dir = File(activity.cacheDir, "exports").apply { deleteRecursively(); mkdirs() }
+                val file = File(dir, name).apply { writeText(MessageArchive.encode(messages)) }
+                val uri = FileProvider.getUriForFile(activity, "${activity.packageName}.exports", file)
+                val send = Intent(Intent.ACTION_SEND)
+                    .setType("text/plain")
+                    .putExtra(Intent.EXTRA_STREAM, uri)
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                withContext(Dispatchers.Main) {
+                    activity.startActivity(Intent.createChooser(send, activity.getString(R.string.export_messages)))
+                }
+                // The share sheet gives no result: it is on screen, which is all the app can know.
+                HostJson.exportResult(messages.size, true)
+            }
+        }
+        handle("honk.import") {
+            // Picks a file and adds its messages; null when the user cancels.
+            val uri = activity.pickDocument()
+            if (uri == null) {
+                null
+            } else {
+                val bytes = activity.contentResolver.openInputStream(uri)?.use { input ->
+                    val out = java.io.ByteArrayOutputStream()
+                    val buf = ByteArray(64 * 1024)
+                    while (true) {
+                        val n = input.read(buf)
+                        if (n < 0) break
+                        out.write(buf, 0, n)
+                        if (out.size() > MAX_IMPORT_BYTES) throw IllegalArgumentException("the file is larger than 64 MB")
+                    }
+                    out.toByteArray()
+                } ?: throw IllegalArgumentException("cannot read the file")
+                val archive = MessageArchive.decode(String(bytes, Charsets.UTF_8))
+                val r = service.store.importMessages(archive.messages)
+                service.changed()
+                HostJson.importResult(r, archive.invalid)
+            }
         }
         handle("honk.markRead") { a ->
             service.markRead(a.requireString("botId"))
@@ -277,3 +340,5 @@ class NshBridge(
         else -> v
     }
 }
+
+private const val MAX_IMPORT_BYTES = 64 * 1024 * 1024

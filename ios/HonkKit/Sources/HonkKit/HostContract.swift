@@ -59,11 +59,42 @@ public enum HostArgs {
         public let botID: String
         public let before: Int64?
         public let limit: Int
+        /// A window around that message instead of the newest page (a search result opened in its chat).
+        public let around: Int64?
 
         public init(_ a: CallArgs) throws {
             botID = try a.require("botId")
             before = a.int("before")
             limit = a.int("limit").map { Int($0) } ?? 50
+            around = a.int("around")
+        }
+    }
+
+    public struct Search: Equatable {
+        public let query: String
+        public let before: Int64?
+
+        public init(_ a: CallArgs) throws {
+            query = try a.require("query")
+            before = a.int("before")
+        }
+    }
+
+    public struct RetentionSet: Equatable {
+        /// 0 keeps messages forever.
+        public let days: Int
+
+        public init(_ a: CallArgs) throws {
+            days = Int(try a.require("days") as Int64)
+        }
+    }
+
+    public struct Export: Equatable {
+        /// One chat; `nil`: every chat.
+        public let botID: String?
+
+        public init(_ a: CallArgs) {
+            botID = a.string("botId")
         }
     }
 
@@ -129,6 +160,10 @@ public enum HostArgs {
         case "honk.link.claim":
             let _: String = try a.require("code")
         case "honk.messages": _ = try Messages(a)
+        case "honk.search": _ = try Search(a)
+        case "honk.retention.get", "honk.import": break
+        case "honk.retention.set": _ = try RetentionSet(a)
+        case "honk.export": _ = Export(a) // no botId: every chat
         case "honk.markRead", "honk.bot.token", "honk.bot.resetToken", "honk.bot.delete", "honk.chat.clear":
             let _: String = try a.require("botId")
         case "honk.focus": break // a missing botId means no chat is open
@@ -213,6 +248,16 @@ public enum HostJSON {
     /// `honk.link.create`: the code in groups of four, and when it stops working (Unix milliseconds).
     public static func linkCreated(code: String, expiresAt: Int64) -> [String: Any] {
         ["code": code, "expiresAt": expiresAt]
+    }
+
+    /// `honk.export`: how many messages went into the file, and whether the share sheet was used.
+    public static func exportResult(count: Int, shared: Bool) -> [String: Any] {
+        ["count": count, "shared": shared]
+    }
+
+    /// `honk.import`.
+    public static func importResult(_ r: LocalStore.ImportSummary, invalid: Int) -> [String: Any] {
+        ["imported": r.imported, "existing": r.existing, "unknownBot": r.unknownBot, "invalid": invalid]
     }
 
     public static func botCreated(_ b: Bot, token: String) -> [String: Any] {

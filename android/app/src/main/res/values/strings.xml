@@ -9,4 +9,5 @@
     <string name="action_copy">Copy</string>
     <string name="action_open_link">Open link</string>
     <string name="action_mark_read">Mark as read</string>
+    <string name="export_messages">Export messages</string>
 </resources>

@@ -2,6 +2,8 @@
 
 Six 6.9" iPhone screenshots (1320×2868) per language; App Store Connect scales them for the other iPhone sizes.
 
+**iPad screenshots are now needed.** The app runs on iPad (`TARGETED_DEVICE_FAMILY` is `1,2` in `ios/project.yml`), so App Store Connect asks for 13" iPad screenshots (2064×2752 portrait) too and scales them for the smaller iPads. They are not generated yet, and `scripts/brand/` captures iPhone screens only. The app keeps its content at most 600 points wide and centred, so an iPad screenshot shows that column on the page background.
+
 | File | English | 中文 |
 | --- | --- | --- |
 | `01-channels.png` | Every service gets its own channel. | 每个服务，一个频道 |

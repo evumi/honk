@@ -7,8 +7,8 @@ import UIKit
 /// receives (`host.on("honk.…")`). The TSX side of this contract is
 /// app/src/host.ts; keep the two in step.
 ///
-/// Calls: honk.status, honk.chats, honk.messages, honk.markRead, honk.focus,
-/// honk.refresh, honk.bot.create, honk.bot.update, honk.bot.token,
+/// Calls: honk.status, honk.chats, honk.messages, honk.search, honk.markRead, honk.focus,
+/// honk.refresh, honk.retention.get, honk.retention.set, honk.export, honk.import, honk.bot.create, honk.bot.update, honk.bot.token,
 /// honk.bot.resetToken, honk.bot.delete, honk.bot.setMuted, honk.bot.setPinned,
 /// honk.message.delete, honk.chat.clear, honk.device.delete, honk.devices.list, honk.devices.remove,
 /// honk.link.create, honk.link.claim, honk.notifications.open, honk.avatar.save, honk.avatar.image,
@@ -71,7 +71,46 @@ final class NshBridge {
         }
         handle("honk.messages") { [service] args in
             let m = try HostArgs.Messages(CallArgs(args))
+            // `around`: a window around that message (a search result opened in its chat).
+            if let around = m.around {
+                return try service.store.messages(botID: m.botID, around: around, limit: m.limit).map(HostJSON.message)
+            }
             return try service.store.messages(botID: m.botID, before: m.before, limit: m.limit).map(HostJSON.message)
+        }
+        handle("honk.search") { [service] args in
+            let s = try HostArgs.Search(CallArgs(args))
+            return try service.store.search(s.query, before: s.before).map(HostJSON.message)
+        }
+
+        // MARK: retention, export and import
+
+        handle("honk.retention.get") { [service] _ in service.store.retentionDays }
+        handle("honk.retention.set") { [service] args in
+            try service.store.setRetentionDays(try HostArgs.RetentionSet(CallArgs(args)).days)
+            service.pruneExpired()
+            service.changed()
+            return service.store.retentionDays
+        }
+        handle("honk.export") { [service] args in
+            // One chat, or every chat when `botId` is missing. Resolves once the share sheet is gone.
+            let botID = HostArgs.Export(CallArgs(args)).botID
+            let messages = try service.store.exportMessages(botID: botID)
+            guard !messages.isEmpty else { return HostJSON.exportResult(count: 0, shared: false) }
+            let name = MessageArchive.fileName(botName: try botID.flatMap { try service.store.bot(id: $0)?.name })
+            let shared = try await FileExchange.share(try MessageArchive.encode(messages), name: name)
+            return HostJSON.exportResult(count: messages.count, shared: shared)
+        }
+        handle("honk.import") { [service] _ in
+            // Picks a file and adds its messages; `null` when the user cancels.
+            guard let data = try await FileExchange.pickFile() else { return NSNull() }
+            // Off the main thread: a large archive takes a moment to read.
+            let store = service.store
+            let (r, invalid) = try await Task.detached {
+                let archive = MessageArchive.decode(data)
+                return (try store.importMessages(archive.messages), archive.invalid)
+            }.value
+            service.changed()
+            return HostJSON.importResult(r, invalid: invalid)
         }
         handle("honk.markRead") { [service] args in
             service.markRead(botID: try CallArgs(args).require("botId"))
