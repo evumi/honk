@@ -31,7 +31,10 @@ test("parses inline styles", () => {
 });
 
 test("maps CSS to nsh styles", () => {
-  const ctx = { data: {}, vars: { "--tg-theme-hint-color": "#6d6d72" }, p: palette() };
+  const ctx = {
+    data: {}, vars: { "--tg-theme-hint-color": "#6d6d72" }, p: palette(), sheet: { rules: [], index: new Map() },
+    env: { parentOf: () => undefined, attr: (e: ElementNode, n: string) => e.attrs[n] }, scheme: "light" as const, computed: new Map(),
+  };
   const { box, text } = _internal.mapStyle(
     parseStyle("display:flex;padding:4px 12px;border:1px solid #ddd;border-radius:999px;color:var(--tg-theme-hint-color);font-weight:bold"),
     ctx,

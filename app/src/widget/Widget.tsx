@@ -1,11 +1,14 @@
 import type { JSX } from "nsh";
-// Renders a message card (profile v1: static HTML and inline CSS) with nsh
-// views. Block elements become Views, runs of inline content one Text with
-// nested spans. `{{key}}` placeholders come from the message's data.
+// Renders a message card with nsh views. Block elements become Views, runs of
+// inline content one Text with nested spans. `{{key}}` placeholders come from
+// the message's data. Styles come from the card's <style> rules (css.ts)
+// and its style attributes. Scripts are not run.
 import { Image, openUrl, Text, View } from "nsh";
 import type { Palette } from "../theme";
 import { widgetVars } from "../theme";
-import { countNodes, fill, parse, parseData, parseStyle, type ElementNode, type WidgetNode } from "./parse";
+import { countNodes, fill, parse, parseData, type ElementNode, type WidgetNode } from "./parse";
+import { cascade, parseDecls, parseSheet, styleText, type Scheme, type Sheet } from "./css";
+import type { TreeEnv } from "./selector";
 
 const MAX_NODES = 2000;
 
@@ -20,14 +23,52 @@ type Style = Record<string, unknown>;
 
 interface Ctx {
   data: Record<string, unknown>;
+  /** CSS custom properties in scope: the theme's, then those the card sets on :root and on ancestors. */
   vars: Record<string, string>;
   p: Palette;
+  /** The card's <style> rules, and how to match them. */
+  sheet: Sheet;
+  env: TreeEnv;
+  scheme: Scheme;
+  /** Styles worked out in this render, by element. */
+  computed: Map<ElementNode, Computed>;
+}
+
+interface Computed {
+  css: ReturnType<typeof mapStyle>;
+  /** The context for the element's children: its custom properties added. */
+  ctx: Ctx;
+}
+
+/** An element's style: its <style> rules and style attribute, cascaded, mapped to nsh styles. */
+function computed(el: ElementNode, ctx: Ctx): Computed {
+  const hit = ctx.computed.get(el);
+  if (hit) return hit;
+  const decls = cascade(el, ctx.sheet, ctx.env, ctx.scheme, parseDecls(f(el.attrs.style ?? "", ctx)));
+  let inner = ctx;
+  for (const [k, v] of Object.entries(decls)) {
+    if (!k.startsWith("--")) continue;
+    if (inner === ctx) inner = { ...ctx, vars: { ...ctx.vars } };
+    inner.vars[k] = resolveVars(v, inner);
+  }
+  const r = { css: mapStyle(decls, inner), ctx: inner };
+  ctx.computed.set(el, r);
+  return r;
+}
+
+/** `{{key}}` from the data. */
+function f(s: string, ctx: Ctx): string {
+  return fill(s, ctx.data);
 }
 
 // MARK: CSS values
 
 function resolveVars(v: string, ctx: Ctx): string {
-  return v.replace(/var\(\s*(--[\w-]+)\s*(?:,\s*([^)]*))?\)/g, (_, name: string, fallback?: string) => ctx.vars[name] ?? fallback?.trim() ?? "");
+  let out = v.replace(/var\(\s*(--[\w-]+)\s*(?:,\s*([^)]*))?\)/g, (_, name: string, fallback?: string) => ctx.vars[name] ?? fallback?.trim() ?? "");
+  if (out.includes("light-dark(")) {
+    out = out.replace(/light-dark\(\s*((?:[^,()]|\([^()]*\))+?)\s*,\s*((?:[^,()]|\([^()]*\))+?)\s*\)/g, (_, light: string, dark: string) => (ctx.scheme === "dark" ? dark : light));
+  }
+  return out;
 }
 
 function length(v: string): number | string | undefined {
@@ -193,7 +234,7 @@ function isBlock(el: ElementNode, display?: string): boolean {
 }
 
 function link(el: ElementNode, ctx: Ctx): string | null {
-  const href = fill(el.attrs.href ?? el.attrs["data-url"] ?? "", ctx.data).trim();
+  const href = f(el.attrs.href ?? el.attrs["data-url"] ?? "", ctx).trim();
   return href.startsWith("https://") ? href : null;
 }
 
@@ -201,17 +242,26 @@ function open(url: string) {
   openUrl(url).catch(() => {});
 }
 
+function pressHandler(href: string | null): (() => void) | undefined {
+  return href ? () => open(href) : undefined;
+}
+
+function hidden(n: WidgetNode): boolean {
+  return n.type === "element" && "hidden" in n.attrs;
+}
+
 function renderInline(node: WidgetNode, ctx: Ctx, inherited: Style): JSX.Element | null {
-  if (node.type === "text") return node.text ? fill(node.text, ctx.data).replace(/\s+/g, " ") : null;
-  if (SKIP.has(node.tag)) return null;
+  if (node.type === "text") return node.text ? f(node.text, ctx).replace(/\s+/g, " ") : null;
+  if (SKIP.has(node.tag) || hidden(node)) return null;
   if (node.tag === "br") return "\n";
   const own = tagStyle(node.tag, ctx.p);
-  const css = mapStyle(parseStyle(fill(node.attrs.style ?? "", ctx.data)), ctx);
+  const { css, ctx: inner } = computed(node, ctx);
+  if (css.display === "none") return null;
   const style = { ...own.text, ...css.text };
   const href = node.tag === "a" ? link(node, ctx) : null;
   return (
-    <Text style={style as never} onPress={href ? () => open(href) : undefined}>
-      {node.children.map((c) => renderInline(c, ctx, { ...inherited, ...style }))}
+    <Text style={style as never} onPress={pressHandler(href)}>
+      {node.children.map((c) => renderInline(c, inner, { ...inherited, ...style }))}
     </Text>
   );
 }
@@ -239,8 +289,9 @@ function renderChildren(children: WidgetNode[], ctx: Ctx, text: Style, listTag?:
     run = [];
   };
   for (const c of children) {
-    if (c.type === "element" && SKIP.has(c.tag)) continue;
-    const css = c.type === "element" ? mapStyle(parseStyle(fill(c.attrs.style ?? "", ctx.data)), ctx) : null;
+    if (c.type === "element" && (SKIP.has(c.tag) || hidden(c))) continue;
+    const css = c.type === "element" ? computed(c, ctx).css : null;
+    if (css?.display === "none") continue;
     const boxy = css != null && BOX_KEYS.some((k) => k in css.box);
     if (c.type === "element" && (flex || boxy || isBlock(c, css?.display))) {
       flush();
@@ -256,7 +307,7 @@ function renderChildren(children: WidgetNode[], ctx: Ctx, text: Style, listTag?:
 
 function renderBlock(el: ElementNode, ctx: Ctx, inherited: Style, listTag?: string, index = 1, inFlex = false): JSX.Element {
   const own = tagStyle(el.tag, ctx.p);
-  const css = mapStyle(parseStyle(fill(el.attrs.style ?? "", ctx.data)), ctx);
+  const { css, ctx: inner } = computed(el, ctx);
   const text = { ...inherited, ...own.text, ...css.text };
   const box: Style = { ...own.box, ...css.box };
   // Inline boxes (inline-flex, inline-block, a styled span) take their content's width.
@@ -271,9 +322,10 @@ function renderBlock(el: ElementNode, ctx: Ctx, inherited: Style, listTag?: stri
   }
   if (el.tag === "hr") return <View style={box as never} />;
   const href = el.tag === "a" || el.tag === "button" ? link(el, ctx) : null;
+  const press = pressHandler(href);
   const isFlex = css.display === "flex" || css.display === "inline-flex";
   if (isFlex && box.alignItems === undefined) box.alignItems = "stretch";
-  const children = renderChildren(el.children, ctx, text, el.tag === "ul" || el.tag === "ol" ? el.tag : undefined, isFlex);
+  const children = renderChildren(el.children, inner, text, el.tag === "ul" || el.tag === "ol" ? el.tag : undefined, isFlex);
   if (el.tag === "li") {
     const marker = listTag === "ol" ? `${index}.` : "•";
     return (
@@ -284,7 +336,7 @@ function renderBlock(el: ElementNode, ctx: Ctx, inherited: Style, listTag?: stri
     );
   }
   return (
-    <View style={box as never} onPress={href ? () => open(href) : undefined} activeStyle={href ? { opacity: 0.7 } : undefined}>
+    <View style={box as never} onPress={press} activeStyle={press ? { opacity: 0.7 } : undefined}>
       {children}
     </View>
   );
@@ -304,12 +356,75 @@ function parseCached(html: string): WidgetNode[] {
   return nodes;
 }
 
+/** The card's root (what :root, html and body name) over a static tree, with each node's parent. */
+const trees = new WeakMap<WidgetNode[], { root: ElementNode; parents: WeakMap<WidgetNode, ElementNode> }>();
+function treeOf(nodes: WidgetNode[]) {
+  let t = trees.get(nodes);
+  if (!t) {
+    const root: ElementNode = { type: "element", tag: "#root", attrs: {}, children: nodes };
+    const parents = new WeakMap<WidgetNode, ElementNode>();
+    const walk = (el: ElementNode) => {
+      for (const c of el.children) {
+        parents.set(c, el);
+        if (c.type === "element") walk(c);
+      }
+    };
+    walk(root);
+    t = { root, parents };
+    trees.set(nodes, t);
+  }
+  return t;
+}
+
+/** Draws a card from its root: :root rules give the base text style, the outer box and custom properties. */
+function renderCard(root: ElementNode, ctx: Ctx, base: Style): JSX.Element {
+  const decls = cascade(root, ctx.sheet, ctx.env, ctx.scheme, []);
+  let inner = ctx;
+  for (const [k, v] of Object.entries(decls)) {
+    // The theme's variables are fixed on the root, as in Telegram.
+    if (!k.startsWith("--") || k.startsWith("--tg-")) continue;
+    if (inner === ctx) inner = { ...ctx, vars: { ...ctx.vars } };
+    inner.vars[k] = resolveVars(v, inner);
+  }
+  const css = mapStyle(decls, inner);
+  return <View style={css.box as never}>{renderChildren(root.children, inner, { ...base, ...css.text })}</View>;
+}
+
+function schemeOf(vars: Record<string, string>): Scheme {
+  return vars["--tg-color-scheme"] === "dark" ? "dark" : "light";
+}
+
+/** A card's context: `{{key}}` filled as it renders. */
+function staticCtx(nodes: WidgetNode[], data: Record<string, unknown>, palette: Palette): { ctx: Ctx; root: ElementNode } {
+  const { root, parents } = treeOf(nodes);
+  const vars = widgetVars(palette);
+  // Matching reads id and class many times per element: fill each once per draw.
+  const filled = new Map<ElementNode, Record<string, string>>();
+  const env: TreeEnv = {
+    parentOf: (n) => parents.get(n),
+    attr: (el, name) => {
+      const raw = el.attrs[name];
+      if (raw === undefined || !raw.includes("{{")) return raw;
+      let byName = filled.get(el);
+      if (!byName) filled.set(el, (byName = {}));
+      return (byName[name] ??= fill(raw, data));
+    },
+  };
+  const sheet = parseSheet(styleText(nodes, (s) => fill(s, data)));
+  return { ctx: { data, vars, p: palette, sheet, env, scheme: schemeOf(vars), computed: new Map() }, root };
+}
+
 export function Widget(props: { html: string; data: string; palette: Palette }): JSX.Element {
   const nodes = parseCached(props.html);
   if (nodes.length === 0 || countNodes(nodes) > MAX_NODES) return <View />;
-  const ctx: Ctx = { data: parseData(props.data), vars: widgetVars(props.palette), p: props.palette };
+  const data = parseData(props.data);
   const base: Style = { color: props.palette.text, fontSize: 15, lineHeight: 21 };
-  return <View>{renderChildren(nodes, ctx, base)}</View>;
+  // Read the palette inside the view, so the card is drawn again when the appearance changes.
+  const draw = () => {
+    const { ctx, root } = staticCtx(nodes, data, props.palette);
+    return renderCard(root, ctx, { ...base, color: props.palette.text });
+  };
+  return <View>{draw()}</View>;
 }
 
 // Exposed for tests.

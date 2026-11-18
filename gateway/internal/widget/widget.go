@@ -5,7 +5,9 @@
 // v1: static HTML and CSS only. Scripts and inline event handlers are removed;
 // the client fills {{key}} placeholders from the message's data. The client
 // applies its own CSS whitelist when it renders, so the server only removes
-// what could reach the network or run code.
+// what could reach the network or run code. <style> blocks stay as they are
+// when they load nothing; the app applies their rules (up to 400, as
+// Telegram does).
 package widget
 
 import (

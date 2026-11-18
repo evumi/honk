@@ -64,6 +64,8 @@ Gateways before short bot ids (database schema v1) gave bots integer ids, so the
 
 Card HTML (profile v1) keeps whitelisted elements: text and structure, tables, `details`, `button`, `a`, `style`, `img` with `data:` images, and inline SVG. It removes scripts, `on*` handlers, form controls, external resources (links other than `https://`, `#id` or `{{key}}`) and CSS that loads anything (`@import`, `expression()`, `url()` other than `data:` images). The client applies its own CSS whitelist when rendering.
 
+Cards can be styled as Telegram widgets are, with `<style>` blocks as well as `style=""`: type, `.class`, `#id` and attribute selectors, compounds (`div.card`), descendant, child (`>`) and sibling (`+`, `~`) combinators, `:first-child` / `:last-child` / `:nth-child()`, `:root` (also `html` and `body`), and several selectors per rule, with the usual specificity and order; inline style wins unless a rule is `!important`. Custom properties (`--x` on `:root` or any element, read with `var()`), the theme's `--tg-theme-*` variables, `light-dark()` and `@media (prefers-color-scheme: dark)` follow the app's appearance; `display: none` hides an element. `{{key}}` works inside `<style>` and in `class`. The first 400 rules apply; other media queries, `@keyframes`, pseudo-elements and `:hover` are ignored. Scripts are removed; the app does not run JavaScript yet.
+
 ## App API
 
 Everything except device registration needs `Authorization: Bearer <device_secret>`.

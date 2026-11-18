@@ -37,7 +37,7 @@ Monorepo. `gateway/` is the Go module `github.com/evumi/honk/gateway`; `app/` is
 - `cd app && nsh check App.tsx && nsh test`. With no host (`nsh run App.tsx` on a desktop) the app uses `src/demo.ts`.
 - The host contract is `app/src/host.ts` on one side and `ios/App/NshBridge.swift` and `android/app/src/main/kotlin/dev/evumi/honk/NshBridge.kt` on the other; change all three together.
 - Read the generated declarations in `app/.nsh/types` (created by `nsh init`/`nsh check`) for the nsh API; `calc(env(...))` is not valid for `top`/`bottom`, use `safeArea()`.
-- `app/src/widget` renders cards (profile v1). Keep its limits in step with `gateway/internal/widget`.
+- `app/src/widget` renders cards (profile v1). `<style>` rules are applied by `css.ts` (cascade, `@media (prefers-color-scheme)`, custom properties, 400 rules) with selectors from `selector.ts`. Keep its limits and CSS checks (`sanitize.ts`) in step with `gateway/internal/widget`.
 - UI strings are written in Chinese and wrapped in `tr("…")` (`app/src/i18n.ts`); add the English to its `EN` table in the same change. The language follows `locale()`: Chinese for `zh*`, English otherwise. Tests pin `locale: "zh-Hans-CN"`.
 - Pages hide the system header (`NavPage headerVisible={false}`) and draw their own: `TopBar` (floating glass back button, title pill, avatar or text action, over a blurred top edge) and `FormBody` (scrolling content, a footer button pinned above the home indicator and the keyboard) in `app/src/components.tsx`. Floating controls use `glass(p)`; icons are `Icon` with `UI_ICONS` (24-unit stroke paths), never text glyphs. The design canvas is the reference for layout.
 - App Store images: `public/appstore/README.md` (regenerate with `scripts/brand/`).

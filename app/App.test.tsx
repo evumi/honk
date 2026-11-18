@@ -308,6 +308,26 @@ test("pulling the chat list refreshes and the spinner stops", async () => {
 });
 
 
+test("opening a long chat lands on the newest message", async () => {
+  const base = { botId: "aZ3kQ9xT", title: "", html: "", data: "", level: "active", group: "", url: "", copy: "", icon: "", collapseId: "", read: true };
+  // Newest first, as the host answers.
+  const many = Array.from({ length: 40 }, (_, i) => ({ ...base, id: 40 - i, body: `第 ${40 - i} 条`, date: Date.now() - i * 60000 }));
+  // Answer late, as the device's host does: the list mounts empty first.
+  const late = (d: unknown) => new Promise((r) => setTimeout(() => r((d as { before?: number }).before ? [] : many), 300));
+  const app = await open("./App.tsx", { locale: "zh-Hans-CN", height: 700, host: host({ "honk.messages": late }) });
+  await app.press("id:chat-aZ3kQ9xT");
+  await app.waitFor("text:第 40 条");
+  expect(app.count("text:第 1 条")).toBe(0);
+});
+
+test("unread counts past 99 read 99+", async () => {
+  const h = host();
+  const chats = h.handlers["honk.chats"] as { unread: number }[];
+  chats[0].unread = 250;
+  const app = await open("./App.tsx", { locale: "zh-Hans-CN", host: h });
+  await app.waitFor("text:99+");
+});
+
 test("a message while the app is open shows the in-app banner, which opens the chat", async () => {
   const app = await open("./App.tsx", { locale: "zh-Hans-CN", host: host() });
   await app.waitFor("id:chat-aZ3kQ9xT");
