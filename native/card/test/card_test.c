@@ -340,6 +340,48 @@ static void test_request_data_limits(void) {
     honk_card_close(c);
 }
 
+static void test_request_edge_cases(void) {
+    char *r;
+    // U+0000 is refused in JS (INVALID_DATA), never truncated and sent.
+    HonkCard *c = open_queries(1,
+        "\"var p = document.getElementById('out');"
+        "var b = document.createElement('button'); document.body.appendChild(b);"
+        "b.addEventListener('click', function () {"
+        "  TelegramWidget.request('ab\\u0000cd').catch(function (e) { p.dataset.nul = e.code }) });\"",
+        &r);
+    honk_card_free_string(r);
+    r = honk_card_click(c, "[2]");
+    CHECK(has(r, "\"data-nul\":\"INVALID_DATA\"") && !has(r, "\"request\""), "NUL in request data: %s", r);
+    honk_card_free_string(r);
+    honk_card_close(c);
+
+    // A lone surrogate passes the JS length check but is not UTF-8: the C side refuses it, and the
+    // promise rejects at once instead of waiting for TIMEOUT.
+    c = open_queries(1,
+        "\"var p = document.getElementById('out');"
+        "var b = document.createElement('button'); document.body.appendChild(b);"
+        "b.addEventListener('click', function () {"
+        "  TelegramWidget.request('a\\ud800').then(function () { p.dataset.r = 'ok' }, function (e) { p.dataset.r = e.code }) });\"",
+        &r);
+    honk_card_free_string(r);
+    r = honk_card_click(c, "[2]");
+    CHECK(!has(r, "\"request\"") && has(r, "\"data-r\":\"INVALID_DATA\"") && has(r, "\"stopped\":null"), "C-side refusal left pending: %s", r);
+    honk_card_free_string(r);
+    honk_card_close(c);
+
+    // A task that stops the card (page too large) sends no request.
+    c = open_queries(1,
+        "\"var b = document.createElement('button'); document.body.appendChild(b);"
+        "b.addEventListener('click', function () {"
+        "  TelegramWidget.request('ping'); document.body.textContent = 'x'.repeat(600000) });\"",
+        &r);
+    honk_card_free_string(r);
+    r = honk_card_click(c, "[2]");
+    CHECK(has(r, "\"stopped\":\"output\"") && !has(r, "\"request\""), "request sent by a stopped card: %.300s", r);
+    honk_card_free_string(r);
+    honk_card_close(c);
+}
+
 static void test_request_not_allowed(void) {
     char *r;
     HonkCard *c = open_queries(0,
@@ -485,6 +527,7 @@ int main(void) {
     test_bad_scripts_and_theme_events();
     test_request_basics();
     test_request_data_limits();
+    test_request_edge_cases();
     test_request_not_allowed();
     test_request_in_flight_and_failures();
     test_request_timeout();

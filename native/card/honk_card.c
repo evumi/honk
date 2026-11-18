@@ -372,6 +372,9 @@ static char *finish(HonkCard *c, bool tap, int prevented) {
     char *open = NULL, *copy = NULL;
     double req_seq = 0;
     char *req_data = NULL;
+    size_t req_len = 0;
+    // A request this side refuses: its promise is rejected at once instead of waiting for TIMEOUT.
+    double reject_seq = 0;
 
     if (!c->stopped) {
         // Effects first: they also say when the next timer is due.
@@ -417,9 +420,12 @@ static char *finish(HonkCard *c, bool tap, int prevented) {
                         sq >= 1 && sq <= 2147483647.0 && sq == (double)(long)sq) {
                         req_seq = sq;
                         req_data = d;
-                    } else if (d) {
+                        req_len = n;
+                    } else {
                         add_log(c, "request() takes a string of 1 to 64 bytes");
                         free(d);
+                        if (JS_IsNumber(sv) && JS_ToFloat64(ctx, &sq, sv) == 0 && sq >= 1 && sq <= 2147483647.0 && sq == (double)(long)sq)
+                            reject_seq = sq;
                     }
                     JS_FreeValue(ctx, sv);
                     JS_FreeValue(ctx, dv);
@@ -449,6 +455,11 @@ static char *finish(HonkCard *c, bool tap, int prevented) {
             if (wait > c->next) c->next = wait;
         }
         c->next_at = now_ms();
+    }
+    if (reject_seq > 0 && !c->stopped) {
+        char arg[96];
+        snprintf(arg, sizeof arg, "{\"seq\":%ld,\"ok\":false,\"data\":\"INVALID_DATA\"}", (long)reject_seq);
+        call_void(c, FN_ANSWER, arg);
     }
     // A card stopped for running too long keeps what it drew: read its tree once more.
     bool read_tree = !c->stopped || (strcmp(c->stopped, "time") == 0 && !c->tree_read_after_stop);
@@ -487,13 +498,14 @@ static char *finish(HonkCard *c, bool tap, int prevented) {
         buf_str(&b, ",\"copy\":");
         buf_json_string(&b, copy, strlen(copy));
     }
-    if (req_data) {
+    // A card stopped by this very task (an oversized page, say) sends nothing.
+    if (req_data && !c->stopped) {
         char num[32];
         snprintf(num, sizeof num, "%ld", (long)req_seq);
         buf_str(&b, ",\"request\":{\"seq\":");
         buf_str(&b, num);
         buf_str(&b, ",\"data\":");
-        buf_json_string(&b, req_data, strlen(req_data));
+        buf_json_string(&b, req_data, req_len);
         buf_str(&b, "}");
     }
     buf_str(&b, ",\"stopped\":");
