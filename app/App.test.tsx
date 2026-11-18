@@ -12,6 +12,7 @@ function host(overrides: Record<string, unknown> = {}) {
   return {
     handlers: {
       "honk.status": { registered: true, gatewayURL: "https://gw.test/", notifications: "authorized" },
+      "honk.incoming.listen": true,
       "honk.chats": [{ bot, muted: false, pinned: false, unread: 1, last: card }],
       "honk.messages": [card],
       "honk.markRead": true,
@@ -326,3 +327,84 @@ test("unread counts past 99 read 99+", async () => {
   const app = await open("./App.tsx", { locale: "zh-Hans-CN", host: h });
   await app.waitFor("text:99+");
 });
+
+test("a message while the app is open shows the in-app banner, which opens the chat", async () => {
+  const app = await open("./App.tsx", { locale: "zh-Hans-CN", host: host() });
+  await app.waitFor("id:chat-aZ3kQ9xT");
+  await app.host.send("honk.incoming", { botId: "aZ3kQ9xT", messageId: 7 });
+  await app.waitFor("id:in-app-banner");
+  expect(app.texts()).toContain("现在");
+  // The same message again (re-presented, updated in place) is not counted twice.
+  await app.host.send("honk.incoming", { botId: "aZ3kQ9xT", messageId: 7 });
+  await app.wait(300);
+  expect(app.count("text:2 条新消息")).toBe(0);
+  await app.press("id:in-app-banner");
+  await app.waitFor("text:在 Berth 中查看");
+});
+
+test("no in-app banner for a muted bot or the chat on screen", async () => {
+  const muted = host();
+  (muted.handlers["honk.chats"] as { muted: boolean }[])[0].muted = true;
+  const a = await open("./App.tsx", { locale: "zh-Hans-CN", host: muted });
+  await a.waitFor("id:chat-aZ3kQ9xT");
+  await a.host.send("honk.incoming", { botId: "aZ3kQ9xT", messageId: 7 });
+  await a.wait(500);
+  expect(a.count("id:in-app-banner")).toBe(0);
+
+  const b = await open("./App.tsx", { locale: "zh-Hans-CN", host: host() });
+  await b.press("id:chat-aZ3kQ9xT");
+  await b.waitFor("text:在 Berth 中查看");
+  await b.host.send("honk.incoming", { botId: "aZ3kQ9xT", messageId: 7 });
+  await b.wait(500);
+  expect(b.count("id:in-app-banner")).toBe(0);
+});
+
+test("the in-app banner leaves by itself", async () => {
+  const app = await open("./App.tsx", { locale: "zh-Hans-CN", host: host(), clock: {} });
+  await app.waitFor("id:chat-aZ3kQ9xT");
+  await app.host.send("honk.incoming", { botId: "aZ3kQ9xT", messageId: 7 });
+  await app.waitFor("id:in-app-banner");
+  await app.wait(4500);
+  expect(app.count("id:in-app-banner")).toBe(0);
+});
+
+// Two bots, each with its newest message.
+function twoBots() {
+  const h = host();
+  const chats = h.handlers["honk.chats"] as { bot: { id: string; name: string }; last: { id: number; botId: string; title: string } }[];
+  const other = JSON.parse(JSON.stringify(chats[0]));
+  other.bot.id = "cR8pL2wQ";
+  other.bot.name = "服务器告警";
+  other.last = { ...other.last, id: 8, botId: "cR8pL2wQ", title: "CPU 92%" };
+  chats.push(other);
+  return h;
+}
+
+test("tells the host it shows its own banners", async () => {
+  const app = await open("./App.tsx", { locale: "zh-Hans-CN", host: host() });
+  await app.waitUntil(() => app.host.calls().some((c) => c.name === "honk.incoming.listen"));
+});
+
+test("another bot's message replaces the banner; swipe up dismisses it", async () => {
+  const app = await open("./App.tsx", { locale: "zh-Hans-CN", host: twoBots() });
+  await app.waitFor("id:chat-aZ3kQ9xT");
+  await app.host.send("honk.incoming", { botId: "aZ3kQ9xT", messageId: 7 });
+  await app.waitFor("id:in-app-banner");
+  await app.host.send("honk.incoming", { botId: "cR8pL2wQ", messageId: 8 });
+  await app.waitUntil(() => app.texts().some((t) => t.startsWith("CPU 92%　")));
+  await app.drag("id:in-app-banner", { y: -80 });
+  await app.waitUntil(() => app.count("id:in-app-banner") === 0);
+});
+
+test("a banner right after the last one left still shows", async () => {
+  const app = await open("./App.tsx", { locale: "zh-Hans-CN", host: twoBots(), clock: {} });
+  await app.waitFor("id:chat-aZ3kQ9xT");
+  await app.host.send("honk.incoming", { botId: "aZ3kQ9xT", messageId: 7 });
+  await app.waitFor("id:in-app-banner");
+  await app.clock!.runFor(4050); // timed out: sliding out now
+  await app.host.send("honk.incoming", { botId: "cR8pL2wQ", messageId: 8 });
+  await app.clock!.runFor(600);
+  expect(app.count("id:in-app-banner")).toBe(1);
+  expect(app.texts().some((t) => t.includes("CPU 92%"))).toBe(true);
+});
+

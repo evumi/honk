@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>设置</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+a{color:inherit;text-decoration:none}
+.cap{margin:22px 32px 6px;font-size:13px;color:#6d6d72}
+.foot{margin:6px 32px 0;font-size:13px;line-height:18px;color:#6d6d72}
+.sec{margin:0 16px;background:#fff;border-radius:12px;overflow:hidden}
+.it{display:flex;align-items:center;gap:12px;min-height:46px;padding:0 16px;font-size:16px;color:#000;border:none;background:#fff;width:100%;box-sizing:border-box;font-family:inherit;text-align:left}
+.it + .it{border-top:0.5px solid #e5e5ea}
+.lab{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.val{color:#6d6d72;font-size:16px}
+.chev{flex:none}
+.ok{display:inline-flex;align-items:center;gap:6px}
+.dot{width:8px;height:8px;border-radius:50%;background:#1a9e6e}
+</style>
+</helmet>
+<div style="width:390px;height:844px;box-sizing:border-box;background:#f2f2f7;font-family:-apple-system,'PingFang SC','Helvetica Neue',sans-serif;position:relative;overflow:hidden">
+  <div style="padding:56px 16px 4px">
+    <h1 style="margin:0;height:44px;display:flex;align-items:center;justify-content:center;font-size:17px;font-weight:600;color:#000">设置</h1>
+  </div>
+
+  <p class="cap">推送</p>
+  <div class="sec">
+    <button type="button" class="it"><span class="lab">系统通知</span><span class="val">已开启</span><svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#c7c7cc" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
+    <div class="it"><span class="lab">设备注册</span><span class="val ok"><span class="dot"></span>已注册</span></div>
+  </div>
+  <p class="foot">通知被关闭时，消息仍会在打开 App 时同步过来。</p>
+
+  <p class="cap">网关</p>
+  <div class="sec">
+    <button type="button" class="it"><span class="lab">honk.example.com</span><span class="val">更改</span><svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#c7c7cc" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
+    <button type="button" class="it" style="color:#0a6ed1">立即同步</button>
+  </div>
+
+  <p class="cap">通用</p>
+  <div class="sec">
+    <button type="button" class="it"><span class="lab">语言</span><span class="val">跟随系统</span><svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#c7c7cc" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
+  </div>
+  <p class="foot">跟随系统时，中文系统显示中文，其他语言显示英文。</p>
+
+  <p style="position:absolute;left:0;right:0;bottom:118px;margin:0;text-align:center;font-size:13px;color:#6d6d72">Honk 1.0 (12)</p>
+
+  <nav aria-label="主导航" style="position:absolute;left:24px;right:24px;bottom:28px;height:64px;border-radius:32px;background:rgba(255,255,255,0.72);border:0.5px solid rgba(0,0,0,0.08);box-shadow:0 4px 24px rgba(0,0,0,0.12);display:flex;align-items:center;justify-content:space-around">
+    <a href="Main.dc.html" style="display:flex;flex-direction:column;align-items:center;gap:2px;color:#3a3a3c;font-size:11px;font-weight:500;position:relative;padding:0 24px">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#3a3a3c" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5c-5 0-9 3.4-9 7.6 0 2.3 1.2 4.4 3.1 5.8L5.5 20.5l4.1-2.1c.8.2 1.6.3 2.4.3 5 0 9-3.4 9-7.6S17 3.5 12 3.5z"/></svg>
+      通知
+    </a>
+    <a href="Settings.dc.html" aria-current="page" style="display:flex;flex-direction:column;align-items:center;gap:2px;color:#0a6ed1;font-size:11px;font-weight:600;padding:0 24px">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#0a6ed1" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+      设置
+    </a>
+  </nav>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>
