@@ -104,15 +104,65 @@ public struct APIClient: Sendable {
     }
 
     /// `registerKey`: what a gateway with HONK_REGISTER_KEY set wants to see; sent only when not empty.
-    public func registerDevice(platform: String = "ios", pushToken: String, registerKey: String? = nil) async throws -> Registration {
+    /// `name`: what the device group's list shows (the phone's name or model).
+    public func registerDevice(platform: String = "ios", pushToken: String, registerKey: String? = nil, name: String? = nil) async throws -> Registration {
         var body = ["platform": platform, "push_token": pushToken]
+        if let name, !name.isEmpty { body["name"] = name }
         if let registerKey, !registerKey.isEmpty { body["register_key"] = registerKey }
         return try await request("POST", "v1/devices", body: body, auth: false)
     }
 
-    /// Deletes this device on the gateway with its bots and queued messages (`DELETE /v1/devices/me`).
-    public func deleteDevice() async throws {
-        let _: Bool = try await request("DELETE", "v1/devices/me")
+    /// Removes this device from its group (`DELETE /v1/devices/me`); when it is the
+    /// last one the group's bots and queued messages go too. With `all`, the
+    /// whole group goes: every device, bot and queued message.
+    public func deleteDevice(all: Bool = false) async throws {
+        let _: Bool = try await request("DELETE", all ? "v1/devices/me?all=true" : "v1/devices/me")
+    }
+
+    /// A device of the group, as `GET /v1/devices` lists it.
+    public struct GroupDevice: Decodable, Equatable, Sendable {
+        public let id: String
+        public let name: String
+        public let platform: String
+        /// Unix milliseconds of its last request (written at most hourly).
+        public let seenAt: Int64
+        public let current: Bool
+        enum CodingKeys: String, CodingKey {
+            case id, name, platform, current
+            case seenAt = "seen_at"
+        }
+
+        public init(id: String, name: String, platform: String, seenAt: Int64, current: Bool) {
+            self.id = id
+            self.name = name
+            self.platform = platform
+            self.seenAt = seenAt
+            self.current = current
+        }
+    }
+
+    public func listDevices() async throws -> [GroupDevice] {
+        try await request("GET", "v1/devices")
+    }
+
+    /// Removes another device of the group (`DELETE /v1/devices/<id>`).
+    public func removeDevice(id: String) async throws {
+        let _: Bool = try await request("DELETE", "v1/devices/\(id)")
+    }
+
+    /// Stores the sealed bundle under `linkID` for 10 minutes; returns the seconds it lives.
+    public func createLink(linkID: String, bundle: String) async throws -> Int {
+        struct Created: Decodable { let expiresIn: Int
+            enum CodingKeys: String, CodingKey { case expiresIn = "expires_in" } }
+        let c: Created = try await request("POST", "v1/links", body: ["link_id": linkID, "bundle": bundle])
+        return c.expiresIn
+    }
+
+    /// Joins this device's group to the one that made the link; returns the sealed bundle.
+    public func claimLink(linkID: String) async throws -> String {
+        struct Claimed: Decodable { let bundle: String }
+        let c: Claimed = try await request("POST", "v1/links/claim", body: ["link_id": linkID])
+        return c.bundle
     }
 
     @discardableResult

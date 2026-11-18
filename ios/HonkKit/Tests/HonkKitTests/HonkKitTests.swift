@@ -318,6 +318,32 @@ final class MockGateway: URLProtocol {
         await #expect(throws: APIError.notRegistered) { try await anonymous.deleteDevice() }
     }
 
+    @Test func deviceGroupCalls() async throws {
+        MockGateway.requests = []
+        MockGateway.handler = { req in
+            switch (req.httpMethod!, req.url!.path) {
+            case ("GET", "/v1/devices"):
+                return (200, #"{"ok":true,"result":[{"id":"d1","name":"iPhone","platform":"ios","seen_at":5,"created_at":1,"push_ok":true,"current":true},{"id":"d2","name":"","platform":"android","seen_at":0,"created_at":2,"push_ok":true,"current":false}]}"#)
+            case ("DELETE", "/v1/devices/d2"), ("DELETE", "/v1/devices/me"): return (200, #"{"ok":true,"result":true}"#)
+            case ("POST", "/v1/links"): return (200, #"{"ok":true,"result":{"expires_in":600}}"#)
+            case ("POST", "/v1/links/claim"): return (200, #"{"ok":true,"result":{"bundle":"YnVuZGxl"}}"#)
+            default: return (404, #"{"ok":false,"error_code":404,"description":"Not Found"}"#)
+            }
+        }
+        let api = APIClient(baseURL: URL(string: "https://gw.test/")!, secret: "s", session: MockGateway.session())
+        let list = try await api.listDevices()
+        #expect(list == [.init(id: "d1", name: "iPhone", platform: "ios", seenAt: 5, current: true),
+                         .init(id: "d2", name: "", platform: "android", seenAt: 0, current: false)])
+        try await api.removeDevice(id: "d2")
+        try await api.deleteDevice()
+        try await api.deleteDevice(all: true)
+        #expect(try await api.createLink(linkID: "l", bundle: "b") == 600)
+        #expect(try await api.claimLink(linkID: "l") == "YnVuZGxl")
+        let paths = MockGateway.requests.map { "\($0.httpMethod!) \($0.url!.path)\($0.url!.query.map { "?" + $0 } ?? "")" }
+        #expect(paths == ["GET /v1/devices", "DELETE /v1/devices/d2", "DELETE /v1/devices/me", "DELETE /v1/devices/me?all=true",
+                          "POST /v1/links", "POST /v1/links/claim"])
+    }
+
     @Test func infoSaysWhetherARegisterKeyIsRequired() async throws {
         let api = APIClient(baseURL: URL(string: "https://gw.test/")!, secret: nil, session: MockGateway.session())
         MockGateway.handler = { _ in (200, #"{"ok":true,"result":{"name":"honk","version":"1","api":2,"register_key_required":true}}"#) }

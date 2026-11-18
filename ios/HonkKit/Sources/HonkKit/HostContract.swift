@@ -122,8 +122,12 @@ public enum HostArgs {
         let a = CallArgs(args)
         switch name {
         case "honk.status", "honk.chats", "honk.refresh", "honk.register.retry", "honk.notifications.open",
-             "honk.incoming.listen", "honk.gateway.get", "honk.device.delete":
+             "honk.incoming.listen", "honk.gateway.get", "honk.device.delete", "honk.devices.list", "honk.link.create":
             break
+        case "honk.devices.remove":
+            let _: String = try a.require("deviceId")
+        case "honk.link.claim":
+            let _: String = try a.require("code")
         case "honk.messages": _ = try Messages(a)
         case "honk.markRead", "honk.bot.token", "honk.bot.resetToken", "honk.bot.delete", "honk.chat.clear":
             let _: String = try a.require("botId")
@@ -198,6 +202,16 @@ public enum HostJSON {
 
     public static func gatewaySet(url: String, registered: Bool) -> [String: Any] {
         ["url": url, "registered": registered]
+    }
+
+    /// An entry of `honk.devices.list`. `seenAt` is Unix milliseconds.
+    public static func device(_ d: APIClient.GroupDevice) -> [String: Any] {
+        ["id": d.id, "name": d.name, "platform": d.platform, "seenAt": d.seenAt, "current": d.current]
+    }
+
+    /// `honk.link.create`: the code in groups of four, and when it stops working (Unix milliseconds).
+    public static func linkCreated(code: String, expiresAt: Int64) -> [String: Any] {
+        ["code": code, "expiresAt": expiresAt]
     }
 
     public static func botCreated(_ b: Bot, token: String) -> [String: Any] {

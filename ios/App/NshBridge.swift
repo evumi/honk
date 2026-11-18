@@ -10,7 +10,8 @@ import UIKit
 /// Calls: honk.status, honk.chats, honk.messages, honk.markRead, honk.focus,
 /// honk.refresh, honk.bot.create, honk.bot.update, honk.bot.token,
 /// honk.bot.resetToken, honk.bot.delete, honk.bot.setMuted, honk.bot.setPinned,
-/// honk.message.delete, honk.chat.clear, honk.device.delete, honk.notifications.open, honk.avatar.save, honk.avatar.image,
+/// honk.message.delete, honk.chat.clear, honk.device.delete, honk.devices.list, honk.devices.remove,
+/// honk.link.create, honk.link.claim, honk.notifications.open, honk.avatar.save, honk.avatar.image,
 /// honk.gateway.get, honk.gateway.test, honk.gateway.set, honk.register.retry,
 /// honk.card.open, honk.card.click, honk.card.set, honk.card.close.
 /// Events: honk.changed (the store changed), honk.open { botId } (open a chat),
@@ -188,6 +189,21 @@ final class NshBridge {
         }
         handle("honk.device.delete") { [service] _ in
             try await service.deleteDeviceData()
+            return true
+        }
+        handle("honk.devices.list") { [service] _ in
+            try await service.listDevices().map(HostJSON.device)
+        }
+        handle("honk.devices.remove") { [service] args in
+            try await service.removeDevice(id: try CallArgs(args).require("deviceId"))
+            return true
+        }
+        handle("honk.link.create") { [service] _ in
+            let c = try await service.createLink()
+            return HostJSON.linkCreated(code: c.code, expiresAt: c.expiresAt)
+        }
+        handle("honk.link.claim") { [service] args in
+            try await service.claimLink(code: try CallArgs(args).require("code"))
             return true
         }
         handle("honk.notifications.open") { _ in

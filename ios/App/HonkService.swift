@@ -2,6 +2,12 @@ import HonkKit
 import UIKit
 import UserNotifications
 
+/// A failure whose reason the app shows as it is.
+struct Failure: Error, LocalizedError {
+    let reason: String
+    var errorDescription: String? { reason }
+}
+
 /// The app's single owner of credentials, the local store and the gateway client.
 @MainActor
 final class HonkService {
@@ -113,7 +119,7 @@ final class HonkService {
                     return
                 }
             }
-            let reg = try await APIClient(baseURL: config.gatewayURL, secret: nil).registerDevice(pushToken: pushToken, registerKey: registerKeys.load())
+            let reg = try await APIClient(baseURL: config.gatewayURL, secret: nil).registerDevice(pushToken: pushToken, registerKey: registerKeys.load(), name: UIDevice.current.name)
             try credentials.save(Credentials(deviceID: reg.device.id, secret: reg.deviceSecret, pushToken: pushToken))
             setRegistration(.registered)
             await refresh()
@@ -283,16 +289,28 @@ final class HonkService {
         }
     }
 
-    /// Deletes the device on the gateway (its bots and queued messages go with
-    /// it), then clears the phone: account data as when switching gateway, plus
-    /// the avatars and every delivered notification. When the gateway cannot be
-    /// reached nothing local is touched and this throws. It does not register
-    /// again: that happens when a bot is created next (`honk.bot.create`) or
-    /// the app starts again (the push token arrives).
+    /// Deletes everything: on the gateway this device's whole group (every
+    /// device, the bots and the queued messages), then the phone: account data
+    /// as when switching gateway, plus the avatars and every delivered
+    /// notification. When the gateway cannot be reached nothing local is
+    /// touched and this throws. It does not register again: that happens when
+    /// a bot is created next (`honk.bot.create`) or the app starts again (the
+    /// push token arrives).
     func deleteDeviceData() async throws {
+        try await leave(all: true)
+    }
+
+    /// Takes this phone out of its device group: the gateway forgets this device
+    /// (the group's bots stay for the others; with no other device it is the
+    /// same as deleting everything), then the phone is cleared as above.
+    func leaveGroup() async throws {
+        try await leave(all: false)
+    }
+
+    private func leave(all: Bool) async throws {
         if credentials.load() != nil {
             do {
-                try await api.deleteDevice()
+                try await api.deleteDevice(all: all)
             } catch let e as APIError where e.isUnauthorized {
                 // The gateway had forgotten this device already.
             } catch {
@@ -304,6 +322,42 @@ final class HonkService {
         images.removeAll()
         UNUserNotificationCenter.current().removeAllDeliveredNotifications()
         setRegistration(.notRegistered)
+    }
+
+    // MARK: device group
+
+    /// The devices of this phone's group; none when it is not registered.
+    func listDevices() async throws -> [APIClient.GroupDevice] {
+        guard isRegistered else { return [] }
+        return try await api.listDevices()
+    }
+
+    /// Removes a device from the group. This phone's own id leaves the group.
+    func removeDevice(id: String) async throws {
+        if let own = credentials.load()?.deviceID, own == id {
+            try await leaveGroup()
+        } else {
+            try await api.removeDevice(id: id)
+        }
+        changed()
+    }
+
+    /// A pairing code for another phone, with this phone's bot tokens sealed in it.
+    func createLink() async throws -> DeviceLinking.Created {
+        try await DeviceLinking.create(api: api, store: store, tokens: botTokens)
+    }
+
+    /// Joins the group that made `code`: stores the tokens it holds, then
+    /// refreshes (the merged bot list and queue). The gateway merges this
+    /// phone's own bots into that group.
+    func claimLink(code: String) async throws {
+        if !isRegistered { await retryRegistration() }
+        do {
+            try await DeviceLinking.claim(code, api: api, store: store, tokens: botTokens)
+        } catch let e as APIError {
+            throw Failure(reason: Self.describe(e))
+        }
+        await refresh()
     }
 
     // MARK: sync
@@ -325,6 +379,15 @@ final class HonkService {
             let out = try await SyncEngine(api: api, store: store).run()
             removeNotifications(out.staleNotificationIDs)
             LocalAvatars(appGroup: config.appGroup).prune(keeping: Set(bots.map(\.avatar)))
+        } catch let e as APIError where e.isUnauthorized {
+            // The gateway forgot this device (another device of the group removed it,
+            // or its data was deleted): register again, as a device of its own.
+            NSLog("honk: the gateway no longer knows this device; registering again")
+            credentials.clear()
+            setRegistration(.waitingForPushToken)
+            if let token = UserDefaults.standard.string(forKey: Self.lastPushTokenKey) {
+                Task { await register(pushToken: token) }
+            }
         } catch {
             NSLog("honk: refresh failed: \(error)")
         }

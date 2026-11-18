@@ -147,6 +147,22 @@ private func chat(_ j: JSON) -> ChatSummary {
         }
     }
 
+    @Test func deviceGroupResultsEncodeAsTheSamples() throws {
+        let all = Dictionary(uniqueKeysWithValues: try calls().map { ($0.name, $0.spec) })
+        for s in samples(try #require(all["honk.devices.list"])) {
+            let list = s["result"] as! [JSON]
+            let out = list.map {
+                HostJSON.device(APIClient.GroupDevice(id: $0["id"] as! String, name: $0["name"] as! String, platform: $0["platform"] as! String,
+                                                      seenAt: ($0["seenAt"] as! NSNumber).int64Value, current: $0["current"] as! Bool))
+            }
+            #expect(try canon(out) == canon(list))
+        }
+        for s in samples(try #require(all["honk.link.create"])) {
+            let r = s["result"] as! JSON
+            #expect(try canon(HostJSON.linkCreated(code: r["code"] as! String, expiresAt: (r["expiresAt"] as! NSNumber).int64Value)) == canon(r))
+        }
+    }
+
     @Test func eventsEncodeAsTheSamples() throws {
         let events = try #require(try contract()["events"] as? JSON)
         #expect(Set(events.keys) == ["honk.changed", "honk.open", "honk.incoming", "honk.card.changed"])
