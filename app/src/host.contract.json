@@ -4,7 +4,7 @@
     "bot": { "id": "aZ3kQ9xT", "name": "Berth 部署", "avatar": "preset:box:#1c1c1e", "defaultLevel": "active", "createdAt": 1700000000000 },
     "message": {
       "id": 7, "botId": "aZ3kQ9xT", "title": "部署成功", "body": "sluice 已上线", "html": "<p>{{status}}</p>", "data": "{\"status\":\"ok\"}",
-      "level": "active", "group": "prod", "url": "https://example.com", "copy": "dep_1", "icon": "", "collapseId": "dep", "date": 1700000001000, "read": false
+      "level": "active", "group": "prod", "url": "https://example.com", "copy": "dep_1", "icon": "", "open": "url", "image": "https://example.com/i.png", "parseMode": "Markdown", "silent": false, "collapseId": "dep", "date": 1700000001000, "read": false
     }
   },
   "calls": {
@@ -40,7 +40,7 @@
               "muted": false, "pinned": true, "unread": 2,
               "last": {
                 "id": 7, "botId": "aZ3kQ9xT", "title": "部署成功", "body": "sluice 已上线", "html": "<p>{{status}}</p>", "data": "{\"status\":\"ok\"}",
-                "level": "active", "group": "prod", "url": "https://example.com", "copy": "dep_1", "icon": "", "collapseId": "dep", "date": 1700000001000, "read": false
+                "level": "active", "group": "prod", "url": "https://example.com", "copy": "dep_1", "icon": "", "open": "url", "image": "https://example.com/i.png", "parseMode": "Markdown", "silent": false, "collapseId": "dep", "date": 1700000001000, "read": false
               }
             },
             {
@@ -59,7 +59,7 @@
           "result": [
             {
               "id": 7, "botId": "aZ3kQ9xT", "title": "部署成功", "body": "sluice 已上线", "html": "<p>{{status}}</p>", "data": "{\"status\":\"ok\"}",
-              "level": "active", "group": "prod", "url": "https://example.com", "copy": "dep_1", "icon": "", "collapseId": "dep", "date": 1700000001000, "read": false
+              "level": "active", "group": "prod", "url": "https://example.com", "copy": "dep_1", "icon": "", "open": "url", "image": "https://example.com/i.png", "parseMode": "Markdown", "silent": false, "collapseId": "dep", "date": 1700000001000, "read": false
             }
           ]
         },

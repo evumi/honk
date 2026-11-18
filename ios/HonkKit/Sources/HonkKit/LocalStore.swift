@@ -14,6 +14,10 @@ public struct StoredMessage: Codable, Equatable, Sendable {
     public var url: String
     public var copy: String
     public var icon: String
+    public var open: String
+    public var image: String
+    public var parseMode: String
+    public var silent: Bool
     public var collapseID: String
     public var date: Int64
     public var read: Bool
@@ -75,6 +79,7 @@ public final class LocalStore: @unchecked Sendable {
     private func migrate() throws {
         try migrateV1()
         try migrateV2()
+        try migrateSendOptions()
     }
 
     private func migrateV1() throws {
@@ -170,6 +175,22 @@ public final class LocalStore: @unchecked Sendable {
         }
     }
 
+    /// v3: the sendMessage options open, image, parse_mode and silent (the
+    /// gateway's migrateSendOptions has the same columns).
+    private func migrateSendOptions() throws {
+        guard try scalar("PRAGMA user_version") ?? 0 < 3 else { return }
+        try transaction {
+            guard try scalar("PRAGMA user_version") ?? 0 < 3 else { return }
+            try exec("""
+            ALTER TABLE messages ADD COLUMN open_mode TEXT NOT NULL DEFAULT '';
+            ALTER TABLE messages ADD COLUMN image TEXT NOT NULL DEFAULT '';
+            ALTER TABLE messages ADD COLUMN parse_mode TEXT NOT NULL DEFAULT '';
+            ALTER TABLE messages ADD COLUMN silent INTEGER NOT NULL DEFAULT 0;
+            PRAGMA user_version = 3;
+            """)
+        }
+    }
+
     // MARK: applying queued items
 
     /// Applies an item from the gateway. Safe to call twice with the same item
@@ -199,11 +220,11 @@ public final class LocalStore: @unchecked Sendable {
             }
         }
         try run("""
-            INSERT INTO messages (id, bot_id, title, body, html, data, level, group_key, url, copy_text, icon, collapse_id, date, notif_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO messages (id, bot_id, title, body, html, data, level, group_key, url, copy_text, icon, open_mode, image, parse_mode, silent, collapse_id, date, notif_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET data = excluded.data, notif_id = COALESCE(messages.notif_id, excluded.notif_id)
-            """, [m.id, m.botID, m.title, m.body, m.html, m.data, m.level, m.group, m.url, m.copy, m.icon, m.collapseID,
-                  m.date, notificationID])
+            """, [m.id, m.botID, m.title, m.body, m.html, m.data, m.level, m.group, m.url, m.copy, m.icon, m.open, m.image, m.parseMode,
+                  m.silent ? 1 : 0, m.collapseID, m.date, notificationID])
         result.message = try message(id: m.id)
         return result
     }
@@ -352,13 +373,13 @@ public final class LocalStore: @unchecked Sendable {
 
     // MARK: reading
 
-    private static let messageCols = "id, bot_id, title, body, html, data, level, group_key, url, copy_text, icon, collapse_id, date, read"
+    private static let messageCols = "id, bot_id, title, body, html, data, level, group_key, url, copy_text, icon, open_mode, image, parse_mode, silent, collapse_id, date, read"
 
     private static func readMessage(_ r: Row) -> StoredMessage {
         StoredMessage(id: r.int(0), botID: r.text(1) ?? "", title: r.text(2) ?? "", body: r.text(3) ?? "", html: r.text(4) ?? "",
                       data: r.text(5) ?? "", level: r.text(6) ?? "", group: r.text(7) ?? "", url: r.text(8) ?? "",
-                      copy: r.text(9) ?? "", icon: r.text(10) ?? "", collapseID: r.text(11) ?? "", date: r.int(12),
-                      read: r.int(13) != 0)
+                      copy: r.text(9) ?? "", icon: r.text(10) ?? "", open: r.text(11) ?? "", image: r.text(12) ?? "", parseMode: r.text(13) ?? "",
+                      silent: r.int(14) != 0, collapseID: r.text(15) ?? "", date: r.int(16), read: r.int(17) != 0)
     }
 
     public func message(id: Int64) throws -> StoredMessage? {

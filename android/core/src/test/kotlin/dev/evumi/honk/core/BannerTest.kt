@@ -6,7 +6,7 @@ import org.junit.Test
 // The same cases as BannerTextTests in ios/HonkKit/Tests/HonkKitTests/HonkKitTests.swift.
 class BannerTest {
     private fun message(title: String = "", body: String = "") =
-        StoredMessage(1, "b", title, body, "", "", "", "", "", "", "", "", 1, false)
+        StoredMessage(1, "b", title, body, "", "", "", "", "", "", "", "", "", "", false, "", 1, false)
 
     private fun push(botName: String = "", title: String = "", body: String = "", collapseId: String = "") =
         PushInfo(QueuedMessage.Kind.MESSAGE, 1, "b", botName = botName, title = title, body = body, collapseId = collapseId)

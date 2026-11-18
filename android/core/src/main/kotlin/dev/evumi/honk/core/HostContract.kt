@@ -99,6 +99,7 @@ object HostJson {
     fun message(m: StoredMessage): Map<String, Any?> = mapOf(
         "id" to m.id, "botId" to m.botId, "title" to m.title, "body" to m.body, "html" to m.html, "data" to m.data,
         "level" to m.level, "group" to m.group, "url" to m.url, "copy" to m.copy, "icon" to m.icon,
+        "open" to m.open, "image" to m.image, "parseMode" to m.parseMode, "silent" to m.silent,
         "collapseId" to m.collapseId, "date" to m.date, "read" to m.read,
     )
 

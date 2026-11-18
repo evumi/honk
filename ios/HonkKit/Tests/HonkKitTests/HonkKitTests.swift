@@ -143,6 +143,60 @@ func tempStore() throws -> LocalStore {
         #expect(try store.messages(botID: "123").count == 1)
     }
 
+    @Test func sendOptionsAreStoredAndApplyIsIdempotent() throws {
+        let store = try tempStore()
+        let m = QueuedMessage(id: 30, botID: "bot1", body: "**x**", url: "https://a.example/b", open: "url",
+                              image: "https://a.example/i.png", parseMode: "Markdown", silent: true, date: 9)
+        let first = try store.apply(m, notificationID: "n30")
+        try store.apply(m)
+        let got = try #require(try store.message(id: 30))
+        #expect(first.message == got)
+        #expect(got.open == "url" && got.image == "https://a.example/i.png" && got.parseMode == "Markdown" && got.silent)
+        // A silent message still counts as unread (badge and chat list).
+        #expect(try store.unreadTotal() == 1)
+        #expect(try store.chats().first { $0.bot.id == "bot1" }?.last?.silent == true)
+        let plain = try #require(try store.apply(QueuedMessage(id: 31, botID: "bot1", body: "p", date: 10)).message)
+        #expect(plain.open == "" && plain.image == "" && plain.parseMode == "" && !plain.silent)
+    }
+
+    @Test func decodesSendOptionsFromTheGateway() throws {
+        let json = #"{"message_id":5,"bot_id":"aZ3kQ9xT","kind":"message","body":"b","open":"url","image":"https://a/i.png","parse_mode":"Markdown","silent":true,"date":1}"#
+        let m = try JSONDecoder().decode(QueuedMessage.self, from: Data(json.utf8))
+        #expect(m.open == "url" && m.image == "https://a/i.png" && m.parseMode == "Markdown" && m.silent)
+        let old = try JSONDecoder().decode(QueuedMessage.self, from: Data(#"{"message_id":6,"bot_id":"aZ3kQ9xT","kind":"message"}"#.utf8))
+        #expect(old.open == "" && !old.silent)
+    }
+
+    @Test func migratesV2ToSendOptions() throws {
+        // A v2 file: short bot ids, no send options.
+        let path = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".sqlite").path
+        var db: OpaquePointer?
+        #expect(sqlite3_open(path, &db) == SQLITE_OK)
+        let v2 = """
+        CREATE TABLE bots (id TEXT PRIMARY KEY, name TEXT NOT NULL, avatar TEXT NOT NULL DEFAULT '',
+          default_level TEXT NOT NULL DEFAULT 'active', muted INTEGER NOT NULL DEFAULT 0, pinned INTEGER NOT NULL DEFAULT 0,
+          created_at INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL DEFAULT 0);
+        CREATE TABLE messages (id INTEGER PRIMARY KEY, bot_id TEXT NOT NULL, title TEXT NOT NULL DEFAULT '',
+          body TEXT NOT NULL DEFAULT '', html TEXT NOT NULL DEFAULT '', data TEXT NOT NULL DEFAULT '',
+          level TEXT NOT NULL DEFAULT '', group_key TEXT NOT NULL DEFAULT '', url TEXT NOT NULL DEFAULT '',
+          copy_text TEXT NOT NULL DEFAULT '', icon TEXT NOT NULL DEFAULT '', collapse_id TEXT NOT NULL DEFAULT '',
+          date INTEGER NOT NULL, read INTEGER NOT NULL DEFAULT 0, notif_id TEXT);
+        CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        INSERT INTO bots (id, name) VALUES ('aZ3kQ9xT', '部署');
+        INSERT INTO messages (id, bot_id, body, date) VALUES (1, 'aZ3kQ9xT', 'old', 1);
+        PRAGMA user_version = 2;
+        """
+        #expect(sqlite3_exec(db, v2, nil, nil, nil) == SQLITE_OK)
+        sqlite3_close(db)
+
+        let store = try LocalStore(path: path)
+        let old = try #require(try store.message(id: 1))
+        #expect(old.body == "old" && old.open == "" && old.image == "" && old.parseMode == "" && !old.silent)
+        try store.apply(QueuedMessage(id: 2, botID: "aZ3kQ9xT", body: "new", image: "https://a/i.png", silent: true))
+        #expect(try store.message(id: 2)?.silent == true)
+        _ = try LocalStore(path: path) // reopening does not migrate again
+    }
+
     @Test func twoConnectionsShareTheFile() throws {
         // The app and the extension each open the file.
         let path = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".sqlite").path
@@ -560,7 +614,7 @@ let serverBots = [Bot(id: "aZ3kQ9xT", name: "部署", createdAt: 100), Bot(id: "
 @Suite struct BannerTextTests {
     func message(title: String = "", body: String = "") -> StoredMessage {
         StoredMessage(id: 1, botID: "b", title: title, body: body, html: "", data: "", level: "", group: "", url: "",
-                      copy: "", icon: "", collapseID: "", date: 1, read: false)
+                      copy: "", icon: "", open: "", image: "", parseMode: "", silent: false, collapseID: "", date: 1, read: false)
     }
 
     @Test func contentlessPushTakesEverythingFromTheMessage() {
@@ -591,5 +645,62 @@ let serverBots = [Bot(id: "aZ3kQ9xT", name: "部署", createdAt: 100), Bot(id: "
         #expect(u == BannerText(botName: "旧名", title: "旧标题", body: "旧正文"))
         let v = BannerText.choose(message: message(), botName: "", pushTitle: "", pushSubtitle: "", pushBody: "", fallback: "新通知")
         #expect(v.body == "新通知" && v.botName == "Honk")
+    }
+}
+
+@Suite struct NotificationPlanTests {
+    func stored(copy: String = "", url: String = "", open: String = "") -> StoredMessage {
+        StoredMessage(id: 1, botID: "b", title: "", body: "x", html: "", data: "", level: "", group: "", url: url, copy: copy,
+                      icon: "", open: open, image: "", parseMode: "", silent: false, collapseID: "", date: 0, read: false)
+    }
+
+    @Test func fourCategories() {
+        #expect(NotificationPlan.categories.count == 4)
+        #expect(Set(NotificationPlan.categories.map(\.id)).count == 4)
+        for c in NotificationPlan.categories {
+            #expect(c.actions.last == .markRead, "mark as read is always there")
+            #expect(c.actions.contains(.copy) == c.id.contains(".copy"))
+            #expect(c.actions.contains(.openURL) == c.id.contains(".url"))
+        }
+    }
+
+    @Test func categoryFollowsTheMessage() {
+        #expect(NotificationPlan.categoryID(for: stored()) == "honk.msg")
+        #expect(NotificationPlan.categoryID(for: stored(copy: "c")) == "honk.msg.copy")
+        #expect(NotificationPlan.categoryID(for: stored(url: "https://a.example")) == "honk.msg.url")
+        #expect(NotificationPlan.categoryID(for: stored(copy: "c", url: "http://a.example")) == "honk.msg.copy.url")
+        #expect(NotificationPlan.categoryID(for: stored(url: "javascript:alert(1)")) == "honk.msg", "only http(s) links get a button")
+        #expect(NotificationPlan.categories.contains { $0.id == NotificationPlan.categoryID(for: stored(copy: "c", url: "https://a.example")) })
+    }
+
+    @Test func tapOpensTheChatUnlessOpenIsURL() {
+        #expect(NotificationPlan.tap(stored(url: "https://a.example"), botID: "b") == .chat(botID: "b"))
+        #expect(NotificationPlan.tap(stored(url: "https://a.example", open: "url"), botID: "b") == .url(URL(string: "https://a.example")!))
+        #expect(NotificationPlan.tap(stored(open: "url"), botID: "b") == .chat(botID: "b"), "no url: the chat")
+        #expect(NotificationPlan.tap(nil, botID: "b") == .chat(botID: "b"), "message not found: the chat")
+    }
+
+    @Test func actionOutcomes() {
+        let m = stored(copy: "ssh x", url: "https://a.example")
+        #expect(NotificationPlan.outcome(of: .copy, on: m, botID: "b") == .copy("ssh x"))
+        #expect(NotificationPlan.outcome(of: .openURL, on: m, botID: "b") == .open(URL(string: "https://a.example")!))
+        #expect(NotificationPlan.outcome(of: .markRead, on: nil, botID: "b") == .markRead(botID: "b"))
+        #expect(NotificationPlan.outcome(of: .copy, on: stored(), botID: "b") == .nothing)
+    }
+
+    @Test func silentMessagesDoNotNotify() {
+        #expect(NotificationPlan.shouldNotify(QueuedMessage(id: 1, botID: "b")))
+        #expect(!NotificationPlan.shouldNotify(QueuedMessage(id: 1, botID: "b", silent: true)))
+    }
+
+    @Test func imageRules() {
+        #expect(NotificationPlan.imageURL("https://a.example/i.png") != nil)
+        #expect(NotificationPlan.imageURL("http://a.example/i.png") == nil)
+        #expect(NotificationPlan.imageURL("") == nil)
+        let u = URL(string: "https://a.example/pic")!
+        #expect(NotificationPlan.imageExtension(contentType: "image/png; charset=binary", url: u) == "png")
+        #expect(NotificationPlan.imageExtension(contentType: "text/html", url: u) == nil)
+        #expect(NotificationPlan.imageExtension(contentType: nil, url: URL(string: "https://a.example/p.JPG")!) == "jpg")
+        #expect(NotificationPlan.maxImageBytes == 5 * 1024 * 1024)
     }
 }

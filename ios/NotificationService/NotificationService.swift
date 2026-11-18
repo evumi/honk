@@ -76,6 +76,14 @@ final class NotificationService: UNNotificationServiceExtension {
         // (b<bot>:<group>) says it when the fetch failed. Read it before replacing it.
         let group = message?.group ?? NotificationThread.group(fromAPNsThread: content.threadIdentifier, botID: info.botID)
         content.threadIdentifier = NotificationThread.identifier(botID: info.botID, group: group)
+        if let message {
+            // Buttons (copy, open link, mark read) and the picture, from the message.
+            content.categoryIdentifier = NotificationPlan.categoryID(for: message)
+            if !message.image.isEmpty, let file = await NotificationImage().download(message.image),
+               let attachment = try? UNNotificationAttachment(identifier: "image", url: file) {
+                content.attachments = [attachment]
+            }
+        }
         ChangeSignal.post()
 
         // The avatar: the message's own icon, else the bot's.
