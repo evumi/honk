@@ -552,3 +552,40 @@ let serverBots = [Bot(id: "aZ3kQ9xT", name: "部署", createdAt: 100), Bot(id: "
         #expect(try store.botIDs() == ["cX1"])
     }
 }
+
+@Suite struct BannerTextTests {
+    func message(title: String = "", body: String = "") -> StoredMessage {
+        StoredMessage(id: 1, botID: "b", title: title, body: body, html: "", data: "", level: "", group: "", url: "",
+                      copy: "", icon: "", collapseID: "", date: 1, read: false)
+    }
+
+    @Test func contentlessPushTakesEverythingFromTheMessage() {
+        let t = BannerText.choose(message: message(title: "部署成功", body: "sluice 已上线"), botName: "部署",
+                                  pushTitle: "", pushSubtitle: "", pushBody: "新通知", fallback: "新通知")
+        #expect(t == BannerText(botName: "部署", title: "部署成功", body: "sluice 已上线"))
+    }
+
+    @Test func fetchFailureOnContentlessPushShowsTheGenericText() {
+        let t = BannerText.choose(message: nil, botName: nil, pushTitle: "", pushSubtitle: "", pushBody: "", fallback: "新通知")
+        #expect(t == BannerText(botName: "Honk", title: "", body: "新通知"))
+        // The localised loc-key text from the push is kept as it is.
+        let k = BannerText.choose(message: nil, botName: "部署", pushTitle: "", pushSubtitle: "", pushBody: "New notification", fallback: "x")
+        #expect(k == BannerText(botName: "部署", title: "", body: "New notification"))
+    }
+
+    @Test func pushWithContentSurvivesAFailedFetch() {
+        let t = BannerText.choose(message: nil, botName: nil, pushTitle: "部署", pushSubtitle: "成功", pushBody: "已上线", fallback: "新通知")
+        #expect(t == BannerText(botName: "部署", title: "成功", body: "已上线"))
+    }
+
+    @Test func fetchedMessageWinsOverThePush() {
+        let t = BannerText.choose(message: message(title: "新标题", body: "完整正文"), botName: "本地名",
+                                  pushTitle: "旧名", pushSubtitle: "旧标题", pushBody: "截断…", fallback: "新通知")
+        #expect(t == BannerText(botName: "本地名", title: "新标题", body: "完整正文"))
+        // A message without a title keeps the push's; without a body, the push's body.
+        let u = BannerText.choose(message: message(), botName: nil, pushTitle: "旧名", pushSubtitle: "旧标题", pushBody: "旧正文", fallback: "新通知")
+        #expect(u == BannerText(botName: "旧名", title: "旧标题", body: "旧正文"))
+        let v = BannerText.choose(message: message(), botName: "", pushTitle: "", pushSubtitle: "", pushBody: "", fallback: "新通知")
+        #expect(v.body == "新通知" && v.botName == "Honk")
+    }
+}

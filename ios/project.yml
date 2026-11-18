@@ -22,6 +22,8 @@ targets:
     scheme: {}
     sources:
       - path: App
+      # "New notification" for pushes without text (APNs loc-key); the extension has its own copy.
+      - path: Localization
       - path: ../app/dist/nsh
         type: folder
         buildPhase: resources
@@ -47,6 +49,8 @@ targets:
       path: App/Info.plist
       properties:
         CFBundleDisplayName: Honk
+        CFBundleDevelopmentRegion: en
+        CFBundleLocalizations: [en, zh-Hans]
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen: {}
@@ -81,6 +85,7 @@ targets:
     platform: iOS
     sources:
       - path: NotificationService
+      - path: Localization
     dependencies:
       - package: HonkKit
     entitlements:
@@ -94,6 +99,8 @@ targets:
       path: NotificationService/Info.plist
       properties:
         CFBundleDisplayName: Honk Notifications
+        CFBundleDevelopmentRegion: en
+        CFBundleLocalizations: [en, zh-Hans]
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSExtension:

@@ -3,8 +3,10 @@ import UserNotifications
 
 /// Runs for every message push (`mutable-content: 1`): fetches the full
 /// message, stores it in the App Group, and turns the banner into a
-/// communication notification with the bot's avatar. Whatever fails, the
-/// banner from the push itself is still shown.
+/// communication notification with the bot's avatar. The banner text comes
+/// from the fetched message and the local bot (`BannerText`): a push without
+/// content (HONK_PUSH_CONTENT=none) has none of its own. Whatever fails, the
+/// banner from the push itself, or "New notification", is still shown.
 final class NotificationService: UNNotificationServiceExtension {
     private var contentHandler: ((UNNotificationContent) -> Void)?
     private var best: UNMutableNotificationContent?
@@ -88,9 +90,11 @@ final class NotificationService: UNNotificationServiceExtension {
             break
         }
         let png = CommunicationNotification.render(avatar, imageData: imageData)
-        let botName = bot?.name ?? (content.title.isEmpty ? "Honk" : content.title)
-        return CommunicationNotification.content(content, botID: info.botID, botName: botName,
-                                                 title: message?.title ?? content.subtitle,
-                                                 body: content.body, avatarPNG: png)
+        let text = BannerText.choose(
+            message: message, botName: bot?.name,
+            pushTitle: content.title, pushSubtitle: content.subtitle, pushBody: content.body,
+            fallback: NSLocalizedString("New notification", comment: "Banner when the message could not be fetched"))
+        return CommunicationNotification.content(content, botID: info.botID, botName: text.botName,
+                                                 title: text.title, body: text.body, avatarPNG: png)
     }
 }
