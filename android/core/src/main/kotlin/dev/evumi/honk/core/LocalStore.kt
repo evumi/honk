@@ -38,6 +38,13 @@ class LocalStore(private val sql: Sql) {
                 sql.exec("PRAGMA user_version = 3")
             }
         }
+        // v4: whether a message's card may query its bot (`allow_queries`).
+        if ((scalar("PRAGMA user_version") ?: 0) < 4) {
+            transaction {
+                sql.exec("ALTER TABLE messages ADD COLUMN allow_queries INTEGER NOT NULL DEFAULT 0")
+                sql.exec("PRAGMA user_version = 4")
+            }
+        }
     }
 
     // applying queued items
@@ -68,13 +75,13 @@ class LocalStore(private val sql: Sql) {
         }
         sql.run(
             """
-            INSERT INTO messages (id, bot_id, title, body, html, data, level, group_key, url, copy_text, icon, open_mode, image, parse_mode, silent, collapse_id, date, notif_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET data = excluded.data, notif_id = COALESCE(messages.notif_id, excluded.notif_id)
+            INSERT INTO messages (id, bot_id, title, body, html, data, level, group_key, url, copy_text, icon, open_mode, image, parse_mode, silent, collapse_id, allow_queries, date, notif_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET data = excluded.data, allow_queries = excluded.allow_queries, notif_id = COALESCE(messages.notif_id, excluded.notif_id)
             """.trimIndent(),
             listOf(
                 m.id, m.botId, m.title, m.body, m.html, m.data, m.level, m.group, m.url, m.copy, m.icon,
-                m.open, m.image, m.parseMode, m.silent, m.collapseId, m.date, notificationId,
+                m.open, m.image, m.parseMode, m.silent, m.collapseId, m.allowQueries, m.date, notificationId,
             ),
         )
         return ApplyResult(message = messageUnlocked(m.id), staleNotificationIds = stale)
@@ -476,7 +483,7 @@ class LocalStore(private val sql: Sql) {
             Bot(r.text(0).orEmpty(), r.text(1).orEmpty(), r.text(2).orEmpty(), r.text(3) ?: "active", r.long(4), r.long(5))
 
         private const val MESSAGE_COLS =
-            "id, bot_id, title, body, html, data, level, group_key, url, copy_text, icon, open_mode, image, parse_mode, silent, collapse_id, date, read"
+            "id, bot_id, title, body, html, data, level, group_key, url, copy_text, icon, open_mode, image, parse_mode, silent, collapse_id, allow_queries, date, read"
 
         private fun readMessage(r: Sql.Row) = StoredMessage(
             id = r.long(0), botId = r.text(1).orEmpty(), title = r.text(2).orEmpty(), body = r.text(3).orEmpty(),
@@ -484,7 +491,7 @@ class LocalStore(private val sql: Sql) {
             group = r.text(7).orEmpty(), url = r.text(8).orEmpty(), copy = r.text(9).orEmpty(),
             icon = r.text(10).orEmpty(), open = r.text(11).orEmpty(), image = r.text(12).orEmpty(),
             parseMode = r.text(13).orEmpty(), silent = r.long(14) != 0L, collapseId = r.text(15).orEmpty(),
-            date = r.long(16), read = r.long(17) != 0L,
+            allowQueries = r.long(16) != 0L, date = r.long(17), read = r.long(18) != 0L,
         )
 
         /** Version 1, the same tables as ios/HonkKit/Sources/HonkKit/LocalStore.swift. One statement per entry. */

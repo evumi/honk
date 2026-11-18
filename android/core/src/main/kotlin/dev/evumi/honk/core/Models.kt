@@ -72,6 +72,8 @@ data class QueuedMessage(
     @SerialName("id") val collapseId: String = "",
     /** Unix milliseconds. */
     val date: Long = 0,
+    /** The sender let the card's `request()` reach the bot (`allow_queries`). */
+    @SerialName("allow_queries") val allowQueries: Boolean = false,
 ) {
     @Serializable
     enum class Kind {
@@ -110,6 +112,8 @@ data class StoredMessage(
     val collapseId: String,
     val date: Long,
     val read: Boolean,
+    /** The sender let the card's `request()` reach the bot. */
+    val allowQueries: Boolean = false,
 )
 
 /** One row of the chat list: a bot with its latest message and unread count. */

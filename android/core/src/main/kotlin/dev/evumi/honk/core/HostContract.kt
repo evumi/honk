@@ -121,7 +121,7 @@ object HostJson {
         "id" to m.id, "botId" to m.botId, "title" to m.title, "body" to m.body, "html" to m.html, "data" to m.data,
         "level" to m.level, "group" to m.group, "url" to m.url, "copy" to m.copy, "icon" to m.icon,
         "open" to m.open, "image" to m.image, "parseMode" to m.parseMode, "silent" to m.silent,
-        "collapseId" to m.collapseId, "date" to m.date, "read" to m.read,
+        "collapseId" to m.collapseId, "allowQueries" to m.allowQueries, "date" to m.date, "read" to m.read,
     )
 
     fun chat(c: ChatSummary): Map<String, Any?> = mapOf(

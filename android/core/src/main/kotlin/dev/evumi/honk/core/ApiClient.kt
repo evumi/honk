@@ -186,6 +186,16 @@ class ApiClient(
     fun getMe(token: String): Bot =
         request("GET", "bot" + java.net.URLEncoder.encode(token, "UTF-8").replace("%3A", ":") + "/getMe", Bot.serializer(), auth = false)
 
+    @Serializable
+    private data class QueryAnswer(val data: String = "")
+
+    /**
+     * A card's query: the bot's answer to [data], sent for the message [messageId] (`POST /v1/queries`).
+     * The gateway holds the request until the bot answers (up to 15 s), so give the transport a longer timeout.
+     */
+    fun query(messageId: Long, data: String): String =
+        request("POST", "v1/queries", QueryAnswer.serializer(), body = mapOf("message_id" to messageId, "data" to data)).data
+
     fun ack(upTo: Long) {
         request("POST", "v1/ack", JsonElement.serializer(), body = mapOf("up_to" to upTo))
     }

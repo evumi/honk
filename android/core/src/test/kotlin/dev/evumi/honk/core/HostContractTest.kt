@@ -63,6 +63,7 @@ class HostContractTest {
             j.getValue("id").jsonPrimitive.long, s("botId"), s("title"), s("body"), s("html"), s("data"), s("level"), s("group"),
             s("url"), s("copy"), s("icon"), s("open"), s("image"), s("parseMode"), j.getValue("silent").jsonPrimitive.boolean,
             s("collapseId"), j.getValue("date").jsonPrimitive.long, j.getValue("read").jsonPrimitive.boolean,
+            allowQueries = j.getValue("allowQueries").jsonPrimitive.boolean,
         )
     }
 

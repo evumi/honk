@@ -11,11 +11,14 @@ import androidx.core.content.FileProvider
 import androidx.lifecycle.lifecycleScope
 import com.longbridge.nsh.NshHostReply
 import com.longbridge.nsh.NshView
+import dev.evumi.honk.core.ApiClient
 import dev.evumi.honk.core.Args
 import dev.evumi.honk.core.CardHost
+import dev.evumi.honk.core.CardRequests
 import dev.evumi.honk.core.Gateway
 import dev.evumi.honk.core.HostArgs
 import dev.evumi.honk.core.HostJson
+import dev.evumi.honk.core.HttpTransport
 import dev.evumi.honk.core.LocalAvatars
 import dev.evumi.honk.core.MessageArchive
 import kotlinx.coroutines.Dispatchers
@@ -59,6 +62,16 @@ class NshBridge(
         activity.runOnUiThread { nsh.send("honk.card.changed", HostJson.cardChangedEvent(key, result)) }
     }
 
+    // A card's request(): the host sends it to the message's bot itself and gives the card the answer;
+    // the app sees neither (the result it gets has no `request`). The gateway waits up to 15 s for the bot.
+    private val requests = CardRequests(
+        query = { messageId, data ->
+            ApiClient(service.gatewayUrl, service.credentials.load()?.secret, HttpTransport(timeoutMs = 20_000)).query(messageId, data)
+        },
+        answer = { key, seq, ok, data -> cards.answer(key, seq, ok, data) },
+        changed = { key, result -> activity.runOnUiThread { nsh.send("honk.card.changed", HostJson.cardChangedEvent(key, result)) } },
+    )
+
     fun install() {
         removeListener = service.addChangeListener { nsh.send("honk.changed", null) }
         // Only once the app listens: until then pushes get a system notification.
@@ -67,11 +80,18 @@ class NshBridge(
             true
         }
 
-        handle("honk.card.open") { a -> HostArgs.CardCall(a, "load").let { cards.open(it.key, it.payload) } }
-        handle("honk.card.click") { a -> HostArgs.CardCall(a, "path").let { cards.click(it.key, it.payload) } }
+        handle("honk.card.open") { a ->
+            HostArgs.CardCall(a, "load").let {
+                requests.opened(it.key, it.payload)
+                cards.open(it.key, it.payload)
+            }
+        }
+        handle("honk.card.click") { a -> HostArgs.CardCall(a, "path").let { requests.filter(it.key, cards.click(it.key, it.payload)) } }
         handle("honk.card.set") { a -> HostArgs.CardCall(a, "state").let { cards.set(it.key, it.payload) } }
         handle("honk.card.close") { a ->
-            cards.close(HostArgs.CardCall(a, null).key)
+            val key = HostArgs.CardCall(a, null).key
+            requests.closed(key)
+            cards.close(key)
             true
         }
 
