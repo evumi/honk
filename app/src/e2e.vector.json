@@ -1,0 +1,7 @@
+{
+  "about": "One end-to-end encryption test vector (design section 7.3): AES-256-GCM, ciphertext = unpadded base64url of nonce(12) || sealed || tag(16), AAD = the bot's short id. Checked by the Go client (gateway/internal/client), HonkKit and :core, so a message sealed by any of them opens in the others. The nonce is a0 a1 ... ab and the key bytes are 00 01 ... 1f.",
+  "key": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+  "aad": "Ab3dEf9h",
+  "plaintext": "{\"title\":\"部署成功\",\"body\":\"sub2api 已上线\",\"data\":\"{\\\"n\\\":1}\",\"url\":\"https://example.com/a\"}",
+  "ciphertext": "oKGio6SlpqeoqaqrnToIRDGnZ51YR25Qr519bJYkyfUYKGBAvmxJ4gaJTyOhAyXNzlI6Hbortiyx8GRD-Dlqagaxbh9jZCkl-FLr7JaGtBISicaVho7dIq2muM69eJGL6qThG4MFUv-f-SL5oOUJ1gyfu2fYX9FnuIta5-PpRAI"
+}

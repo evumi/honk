@@ -16,6 +16,9 @@ final class HonkService {
     private(set) var config = HonkConfig.fromBundle()
     let credentials: CredentialStore
     let botTokens: BotTokenStore
+    /// Each bot's end-to-end key; with `opener` it decrypts what the queue delivers.
+    let botKeys: BotKeyStore
+    let opener: MessageOpener
     /// The register key of the gateway, when it asks for one.
     let registerKeys: RegisterKeyStore
     let store: LocalStore
@@ -64,6 +67,8 @@ final class HonkService {
     private init() {
         credentials = CredentialStore(accessGroup: config.keychainGroup)
         botTokens = BotTokenStore(accessGroup: config.keychainGroup)
+        botKeys = BotKeyStore(accessGroup: config.keychainGroup)
+        opener = MessageOpener(keys: botKeys)
         registerKeys = RegisterKeyStore(accessGroup: config.keychainGroup)
         do {
             store = try LocalStore(appGroup: config.appGroup)
@@ -285,6 +290,7 @@ final class HonkService {
     private func clearAccountData() {
         credentials.clear()
         botTokens.removeAll()
+        botKeys.removeAll()
         removeNotifications((try? store.reset()) ?? [])
     }
 
@@ -387,7 +393,7 @@ final class HonkService {
                 try await api.getMe(token: $0)
             }
             try store.replaceBots(bots, keeping: renamed.pending)
-            let out = try await SyncEngine(api: api, store: store).run()
+            let out = try await SyncEngine(api: api, store: store, opener: opener).run()
             removeNotifications(out.staleNotificationIDs)
             pruneExpired()
             LocalAvatars(appGroup: config.appGroup).prune(keeping: Set(bots.map(\.avatar)))
@@ -412,7 +418,7 @@ final class HonkService {
         await LegacyBotIDs.renameBeforePush(store: store, tokens: botTokens,
                                             api: APIClient(baseURL: config.gatewayURL, secret: credentials.load()?.secret, timeout: 5))
         do {
-            let m = try await api.message(id: info.messageID)
+            guard let m = opener.open(try await api.message(id: info.messageID)) else { return true }
             let r = try store.apply(m)
             removeNotifications(r.staleNotificationIDs)
             changed()

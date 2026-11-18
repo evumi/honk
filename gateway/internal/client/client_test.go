@@ -405,25 +405,30 @@ func waitFor(t *testing.T, ok func() bool) {
 	t.Fatal("timed out")
 }
 
-// The same vector is checked by HonkKit (Swift) and :core (Kotlin): a message
-// sealed by any of the three opens in the others.
-const (
-	vectorKey        = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
-	vectorAAD        = "Ab3dEf9h"
-	vectorPlaintext  = `{"title":"部署成功","body":"sub2api 已上线","data":"{\"n\":1}","url":"https://example.com/a"}`
-	vectorCiphertext = "oKGio6SlpqeoqaqrnToIRDGnZ51YR25Qr519bJYkyfUYKGBAvmxJ4gaJTyOhAyXNzlI6Hbortiyx8GRD-Dlqagaxbh9jZCkl-FLr7JaGtBISicaVho7dIq2muM69eJGL6qThG4MFUv-f-SL5oOUJ1gyfu2fYX9FnuIta5-PpRAI"
-)
-
+// app/src/e2e.vector.json is also checked by HonkKit (Swift) and :core
+// (Kotlin): a message sealed by any of the three opens in the others.
 func TestSharedVector(t *testing.T) {
-	key, err := ParseKey(vectorKey)
+	b, err := os.ReadFile(filepath.Join("..", "..", "..", "app", "src", "e2e.vector.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	pt, err := Decrypt(key, vectorAAD, vectorCiphertext)
-	if err != nil || string(pt) != vectorPlaintext {
+	var v struct{ Key, AAD, Plaintext, Ciphertext string }
+	if err := json.Unmarshal(b, &v); err != nil {
+		t.Fatal(err)
+	}
+	key, err := ParseKey(v.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pt, err := Decrypt(key, v.AAD, v.Ciphertext)
+	if err != nil || string(pt) != v.Plaintext {
 		t.Fatalf("vector = %q, %v", pt, err)
 	}
-	if _, err := Decrypt(key, "other", vectorCiphertext); err == nil {
+	if _, err := Decrypt(key, "other", v.Ciphertext); err == nil {
 		t.Error("a different AAD must fail")
+	}
+	// nonce (12) + content + tag (16): the format, byte for byte.
+	if raw, err := base64.RawURLEncoding.DecodeString(v.Ciphertext); err != nil || len(raw) != 12+len(v.Plaintext)+16 {
+		t.Errorf("ciphertext shape: %d bytes, %v", len(raw), err)
 	}
 }

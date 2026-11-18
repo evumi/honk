@@ -9,7 +9,7 @@ import UIKit
 ///
 /// Calls: honk.status, honk.chats, honk.messages, honk.search, honk.markRead, honk.focus,
 /// honk.refresh, honk.retention.get, honk.retention.set, honk.export, honk.import, honk.bot.create, honk.bot.update, honk.bot.token,
-/// honk.bot.resetToken, honk.bot.delete, honk.bot.setMuted, honk.bot.setPinned,
+/// honk.bot.resetToken, honk.bot.delete, honk.bot.encryption.{key,enable,disable,resetKey}, honk.bot.setMuted, honk.bot.setPinned,
 /// honk.message.delete, honk.chat.clear, honk.device.delete, honk.devices.list, honk.devices.remove,
 /// honk.link.create, honk.link.claim, honk.notifications.open, honk.avatar.save, honk.avatar.image,
 /// honk.gateway.get, honk.gateway.test, honk.gateway.set, honk.register.retry,
@@ -198,8 +198,49 @@ final class NshBridge {
             service.removeNotifications((try? service.store.clearMessages(botID: id)) ?? [])
             try service.store.deleteBot(id: id)
             service.botTokens.remove(botID: id)
+            service.botKeys.remove(botID: id)
             service.changed()
             return true
+        }
+
+        // MARK: end-to-end encryption (keys never leave the keychain except through these calls)
+
+        handle("honk.bot.encryption.key") { [service] args in
+            let id: String = try CallArgs(args).require("botId")
+            return service.botKeys.key(botID: id).map(Seal.encode) ?? NSNull()
+        }
+        handle("honk.bot.encryption.enable") { [service] args in
+            let id: String = try CallArgs(args).require("botId")
+            let existing = service.botKeys.key(botID: id)
+            let key = existing ?? Seal.generateKey()
+            service.botKeys.save(key, botID: id)
+            do {
+                _ = try await service.api.updateBot(id: id, encrypted: true)
+            } catch {
+                if existing == nil { service.botKeys.remove(botID: id) }
+                throw error
+            }
+            return Seal.encode(key)
+        }
+        handle("honk.bot.encryption.disable") { [service] args in
+            let id: String = try CallArgs(args).require("botId")
+            // The gateway first: with its flag still on, plaintext sends stay refused.
+            _ = try await service.api.updateBot(id: id, encrypted: false)
+            service.botKeys.remove(botID: id)
+            return true
+        }
+        handle("honk.bot.encryption.resetKey") { [service] args in
+            let id: String = try CallArgs(args).require("botId")
+            let old = service.botKeys.key(botID: id)
+            let key = Seal.generateKey()
+            service.botKeys.save(key, botID: id)
+            do {
+                _ = try await service.api.updateBot(id: id, encrypted: true)
+            } catch {
+                if let old { service.botKeys.save(old, botID: id) } else { service.botKeys.remove(botID: id) }
+                throw error
+            }
+            return Seal.encode(key)
         }
         handle("honk.bot.setMuted") { [service] args in
             let a = CallArgs(args)

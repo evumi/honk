@@ -164,7 +164,9 @@ public enum HostArgs {
         case "honk.retention.get", "honk.import": break
         case "honk.retention.set": _ = try RetentionSet(a)
         case "honk.export": _ = Export(a) // no botId: every chat
-        case "honk.markRead", "honk.bot.token", "honk.bot.resetToken", "honk.bot.delete", "honk.chat.clear":
+        case "honk.markRead", "honk.bot.token", "honk.bot.resetToken", "honk.bot.delete", "honk.chat.clear",
+             "honk.bot.encryption.key", "honk.bot.encryption.enable", "honk.bot.encryption.disable",
+             "honk.bot.encryption.resetKey":
             let _: String = try a.require("botId")
         case "honk.focus": break // a missing botId means no chat is open
         case "honk.bot.create": _ = try BotCreate(a)
