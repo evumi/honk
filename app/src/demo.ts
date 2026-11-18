@@ -203,6 +203,14 @@ function demoToken(botId: string): string {
   return `${botId}:${randomString(LETTERS + "0123456789-_", 32)}`;
 }
 
+/** The demo's per-bot end-to-end keys (no gateway here; the real ones live in the keychain / keystore). */
+const keys = new Map<string, string>();
+
+/** A key shaped like the app's: 32 bytes as 43 unpadded base64url characters. */
+function demoKey(): string {
+  return randomString(LETTERS + "0123456789-_", 42) + "A";
+}
+
 function chats(): Chat[] {
   return bots
     .map((bot) => {
@@ -347,6 +355,20 @@ export async function demo<T>(name: string, args: unknown): Promise<T> {
         tokens.set(a.botId, t);
         return t;
       }
+      case "honk.bot.encryption.key":
+        return keys.get(a.botId) ?? null;
+      case "honk.bot.encryption.enable": {
+        if (!keys.has(a.botId)) keys.set(a.botId, demoKey());
+        return keys.get(a.botId)!;
+      }
+      case "honk.bot.encryption.resetKey": {
+        const k = demoKey();
+        keys.set(a.botId, k);
+        return k;
+      }
+      case "honk.bot.encryption.disable":
+        keys.delete(a.botId);
+        return true;
       case "honk.bot.delete":
         bots.splice(bots.findIndex((b) => b.id === a.botId), 1);
         return true;

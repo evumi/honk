@@ -132,6 +132,9 @@ export function BotCreated(props: { botId: string; token: string; botName: strin
           </View>
           {copyRow("curl", tr("复制示例"))}
         </View>
+        <Text testID="e2e-hint" style={{ marginLeft: 32, marginRight: 32, marginTop: 8, fontSize: 13, lineHeight: 18, color: p().hint }}>
+          {tr("要端到端加密？在 Bot 设置里打开，然后用 honk send --key 密钥 发送。")}
+        </Text>
       </FormBody>
       <Confetti />
     </NavPage>

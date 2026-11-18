@@ -212,6 +212,21 @@ export const api = {
   token: (botId: BotId) => call<string | null>("honk.bot.token", { botId }),
   resetToken: (botId: BotId) => call<string>("honk.bot.resetToken", { botId }),
   deleteBot: (botId: BotId) => call<boolean>("honk.bot.delete", { botId }),
+  /**
+   * End-to-end encryption of a bot's messages. The key (base64url, 32 bytes)
+   * lives in the device's keychain / keystore; the gateway only learns that the
+   * bot is encrypted and refuses its plaintext sends from then on.
+   */
+  encryption: {
+    /** The bot's key, or null when encryption is off for it. */
+    key: (botId: BotId) => call<string | null>("honk.bot.encryption.key", { botId }),
+    /** Generates a key (or keeps the existing one), tells the gateway, and returns it. */
+    enable: (botId: BotId) => call<string>("honk.bot.encryption.enable", { botId }),
+    /** Tells the gateway to accept plaintext again and forgets the key. */
+    disable: (botId: BotId) => call<boolean>("honk.bot.encryption.disable", { botId }),
+    /** A new key: senders must switch to it; messages already received stay readable. */
+    resetKey: (botId: BotId) => call<string>("honk.bot.encryption.resetKey", { botId }),
+  },
   setMuted: (botId: BotId, muted: boolean) => call<boolean>("honk.bot.setMuted", { botId, muted }),
   setPinned: (botId: BotId, pinned: boolean) => call<boolean>("honk.bot.setPinned", { botId, pinned }),
   deleteMessage: (messageId: number) => call<boolean>("honk.message.delete", { messageId }),

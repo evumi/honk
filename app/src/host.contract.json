@@ -130,6 +130,15 @@
       ]
     },
     "honk.bot.resetToken": { "samples": [{ "args": { "botId": "aZ3kQ9xT" }, "result": "aZ3kQ9xT:zyxwvutsrqponmlkjihgfedcba543210" }] },
+    "honk.bot.encryption.key": {
+      "samples": [
+        { "args": { "botId": "aZ3kQ9xT" }, "result": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8" },
+        { "args": { "botId": "bQ7mN2pR" }, "result": null }
+      ]
+    },
+    "honk.bot.encryption.enable": { "samples": [{ "args": { "botId": "aZ3kQ9xT" }, "result": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8" }] },
+    "honk.bot.encryption.disable": { "samples": [{ "args": { "botId": "aZ3kQ9xT" }, "result": true }] },
+    "honk.bot.encryption.resetKey": { "samples": [{ "args": { "botId": "aZ3kQ9xT" }, "result": "Hh4dGxkYFhQSEA4MCggGBAIA_v38-vj29PLw7uzq6Obk4uA" }] },
     "honk.bot.delete": { "samples": [{ "args": { "botId": "aZ3kQ9xT" }, "result": true }] },
     "honk.bot.setMuted": { "samples": [{ "args": { "botId": "aZ3kQ9xT", "muted": true }, "result": true }] },
     "honk.bot.setPinned": { "samples": [{ "args": { "botId": "aZ3kQ9xT", "pinned": true }, "result": true }] },
