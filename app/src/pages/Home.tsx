@@ -1,11 +1,11 @@
 import type { JSX } from "nsh";
-import { Canvas, createAnimatedValue, effect, List, Path2D, safeArea, signal, Text, View } from "nsh";
+import { Canvas, createAnimatedValue, effect, List, Path2D, safeArea, Scroll, signal, Text, View } from "nsh";
 import { AlertDialog, Input, NavPage } from "nsh/base";
 import { Avatar, Badge, EdgeBlur, Glyph, glass, Row, Section, UI_ICONS } from "../components";
-import { listTime } from "../format";
+import { lastSeen, listTime } from "../format";
 import { createDissolve, Dissolve } from "../fx/Dissolve";
 import { api, type Chat } from "../host";
-import { chats, loadStatus, nav, reload, status } from "../store";
+import { chats, devices, loadDevices, loadStatus, nav, reload, status } from "../store";
 import { palette, type Palette } from "../theme";
 import { lang, langChoice, setLangChoice, tr, type LangChoice } from "../i18n";
 
@@ -183,6 +183,15 @@ function Empty(props: { p: Palette }) {
       >
         <Text style={{ color: "#ffffff", fontSize: 17, fontWeight: "600" }}>{tr("创建第一个 Bot")}</Text>
       </View>
+      <View
+        testID="pair-existing"
+        role="button"
+        onPress={() => nav.push({ name: "pair" })}
+        activeStyle={{ opacity: 0.6 }}
+        style={{ marginTop: 14, height: 44, paddingLeft: 16, paddingRight: 16, justifyContent: "center" }}
+      >
+        <Text style={{ color: props.p.accent, fontSize: 16 }}>{tr("已有设备？输入配对码")}</Text>
+      </View>
     </View>
   );
 }
@@ -356,35 +365,65 @@ function SettingsTab(props: { p: Palette }) {
     }
   };
   const deleting = signal(false);
-  const deleteData = async () => {
+  void loadDevices();
+  const others = () => devices().filter((d) => !d.current);
+  const failed = (e: unknown, description: string) =>
+    AlertDialog.show({
+      title: tr("删除失败"),
+      description: tr(description, { error: String((e as Error)?.message ?? e) }),
+      actions: [{ id: "ok", label: tr("好") }],
+    });
+  /** Deletes or leaves after a confirmation; the phone keeps its data when the gateway does not confirm. */
+  const confirmed = async (title: string, description: string, label: string, run: () => Promise<unknown>) => {
     if (deleting()) return;
     const { action } = await AlertDialog.show({
-      title: tr("删除这台设备的数据？"),
-      description: tr("将删除：这台设备在网关上的注册；所有 Bot，它们的 token 立即失效；网关上排队的消息；本机的消息和头像。无法恢复。"),
-      actions: [{ id: "cancel", label: tr("取消"), role: "cancel" }, { id: "delete", label: tr("删除"), role: "destructive" }],
+      title, description,
+      actions: [{ id: "cancel", label: tr("取消"), role: "cancel" }, { id: "delete", label, role: "destructive" }],
     });
     if (action !== "delete") return;
     deleting.set(true);
     try {
-      await api.deleteDevice();
-      await Promise.all([reload(), loadStatus()]);
+      await run();
+      await Promise.all([reload(), loadStatus(), loadDevices()]);
     } catch (e) {
-      // The gateway did not confirm, so the phone keeps its data.
-      await AlertDialog.show({
-        title: tr("删除失败"),
-        description: tr("{error}。这台设备的数据没有改动，请稍后重试。", { error: String((e as Error)?.message ?? e) }),
-        actions: [{ id: "ok", label: tr("好") }],
-      });
+      await failed(e, "{error}。这台设备的数据没有改动，请稍后重试。");
     } finally {
       deleting.set(false);
     }
   };
+  const deleteData = () =>
+    confirmed(
+      tr("删除全部数据？"),
+      others().length > 0
+        ? tr("将删除：设备组里所有设备在网关上的注册（包括其他 {n} 台设备）；所有 Bot，它们的 token 立即失效；网关上排队的消息；本机的消息和头像。无法恢复。", { n: others().length })
+        : tr("将删除：这台设备在网关上的注册；所有 Bot，它们的 token 立即失效；网关上排队的消息；本机的消息和头像。无法恢复。"),
+      tr("删除"),
+      () => api.deleteDevice(),
+    );
+  const leaveGroup = () => {
+    const me = devices().find((d) => d.current);
+    if (!me) return Promise.resolve();
+    return confirmed(
+      tr("从设备组移除这台设备？"),
+      tr("这台设备会从设备组里退出，并清空本机的消息、头像和 token。其他设备和 Bot 不受影响，Bot 仍会推送给它们。之后可以用配对码重新加入。"),
+      tr("移除"),
+      () => api.removeDevice(me.id),
+    );
+  };
+  const removeOther = (id: string, name: string) =>
+    confirmed(
+      tr("移除 {name}？", { name }),
+      tr("这台设备不再收到通知，也不再能使用这些 Bot。Bot 和其他设备不受影响。"),
+      tr("移除"),
+      () => api.removeDevice(id),
+    );
+  const deviceName = (d: { name: string; platform: string }) => d.name || (d.platform === "ios" ? "iPhone" : "Android");
   const host = () => {
     const u = status()?.gatewayURL ?? "";
     return u.replace(/^https?:\/\//, "").replace(/\/$/, "") || "…";
   };
   return (
-    <View style={{ flex: 1, gap: 22 }}>
+    <Scroll style={{ flex: 1 }} contentStyle={{ gap: 22, paddingBottom: safeArea().bottom + 96 }}>
       <Header title={tr("设置")} p={p()} />
       <Section
         title={tr("推送")}
@@ -410,26 +449,64 @@ function SettingsTab(props: { p: Palette }) {
       <Section title={tr("通用")} p={p()}>
         <Row p={p()} first label={tr("语言")} value={languageLabel(langChoice())} onPress={() => void pickLanguage()} testID="language-row" chevron />
       </Section>
-      <Section title={tr("数据")} p={p()} footer={tr("删除这台设备在网关上的注册、所有 Bot 和排队的消息，并清空本机数据。之后创建 Bot 或重新打开 App 时，这台设备会重新注册。")}>
+      <Section
+        title={tr("设备")}
+        p={p()}
+        footer={tr("设备组里的手机共用同一批 Bot，每条通知都会推送到所有设备。换新手机时，在新手机上输入旧手机的配对码即可，Bot 的 token 不变。")}
+      >
+        <Each of={devices()} key={(d) => d.id}>
+          {(d, i) => (
+            <Row
+              p={p()}
+              first={i() === 0}
+              testID={`device-${d().id}`}
+              label={deviceName(d())}
+              value={d().current ? tr("这台设备") : `${d().platform === "ios" ? "iOS" : "Android"} · ${lastSeen(d().seenAt)}`}
+              onPress={d().current ? undefined : () => void removeOther(d().id, deviceName(d()))}
+              right={d().current ? undefined : <Icon path={UI_ICONS.trash} color={p().destructive} size={19} width={2} />}
+            />
+          )}
+        </Each>
+        <Row p={p()} first={devices().length === 0} label={tr("添加设备")} color={p().accent} onPress={() => nav.push({ name: "addDevice" })} testID="add-device" />
+        <Row p={p()} label={tr("已有设备？输入配对码")} color={p().accent} onPress={() => nav.push({ name: "pair" })} testID="enter-code" />
+      </Section>
+      <Section
+        title={tr("数据")}
+        p={p()}
+        footer={
+          others().length > 0
+            ? tr("「从设备组移除这台设备」只让这台手机退出，Bot 留给其他设备。「删除全部数据」会删除设备组在网关上的一切，并清空本机。")
+            : tr("删除这台设备在网关上的注册、所有 Bot 和排队的消息，并清空本机数据。之后创建 Bot 或重新打开 App 时，这台设备会重新注册。")
+        }
+      >
+        <If when={others().length > 0}>
+          <Row
+            p={p()}
+            first
+            label={deleting() ? tr("正在删除…") : tr("从设备组移除这台设备")}
+            color={p().destructive}
+            onPress={() => void leaveGroup()}
+            testID="leave-group"
+          />
+        </If>
         <Row
           p={p()}
-          first
-          label={deleting() ? tr("正在删除…") : tr("删除这台设备的数据")}
+          first={others().length === 0}
+          label={deleting() ? tr("正在删除…") : tr("删除全部数据")}
           color={p().destructive}
           onPress={() => void deleteData()}
           testID="delete-device-data"
         />
       </Section>
-      <View style={{ flex: 1 }} />
       <If when={status()?.appVersion}>
         <Text
           testID="app-version"
-          style={{ textAlign: "center", fontSize: 13, color: p().hint, paddingBottom: safeArea().bottom + 96 }}
+          style={{ textAlign: "center", fontSize: 13, color: p().hint, paddingTop: 8 }}
         >
           {`Honk ${status()?.appVersion}${status()?.appBuild ? ` (${status()?.appBuild})` : ""}`}
         </Text>
       </If>
-    </View>
+    </Scroll>
   );
 }
 

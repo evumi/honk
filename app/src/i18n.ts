@@ -165,6 +165,50 @@ const EN: Record<string, string> = {
     "Deletes this device's registration, all bots and queued messages on the gateway, and clears this phone's data. The device registers again when you create a bot or reopen the app.",
   "正在删除…": "Deleting…",
   "删除失败": "Couldn't delete",
+  // device groups
+  "设备": "Devices",
+  "这台设备": "This device",
+  "从未": "never",
+  "刚刚": "just now",
+  "{n} 小时前": "{n} h ago",
+  "{n} 天前": "{n} d ago",
+  "添加设备": "Add device",
+  "已有设备？输入配对码": "Already have a device? Enter a pairing code",
+  "设备组里的手机共用同一批 Bot，每条通知都会推送到所有设备。换新手机时，在新手机上输入旧手机的配对码即可，Bot 的 token 不变。":
+    "The phones in a device group share the same bots, and every notification is pushed to all of them. To switch phones, enter the old phone's pairing code on the new one; the bots' tokens stay the same.",
+  "删除全部数据": "Delete all data",
+  "删除全部数据？": "Delete all data?",
+  "将删除：设备组里所有设备在网关上的注册（包括其他 {n} 台设备）；所有 Bot，它们的 token 立即失效；网关上排队的消息；本机的消息和头像。无法恢复。":
+    "This deletes the registration of every device in the group on the gateway ({n} other devices included); all bots, whose tokens stop working at once; the messages queued on the gateway; and the messages and avatars on this phone. It can't be undone.",
+  "从设备组移除这台设备": "Remove this device from the group",
+  "从设备组移除这台设备？": "Remove this device from the group?",
+  "这台设备会从设备组里退出，并清空本机的消息、头像和 token。其他设备和 Bot 不受影响，Bot 仍会推送给它们。之后可以用配对码重新加入。":
+    "This phone leaves the group, and its messages, avatars and tokens are cleared. The other devices and the bots are not affected; the bots keep pushing to them. You can join again with a pairing code.",
+  "移除": "Remove",
+  "移除 {name}？": "Remove {name}?",
+  "这台设备不再收到通知，也不再能使用这些 Bot。Bot 和其他设备不受影响。":
+    "This device stops getting notifications and can no longer use these bots. The bots and the other devices are not affected.",
+  "「从设备组移除这台设备」只让这台手机退出，Bot 留给其他设备。「删除全部数据」会删除设备组在网关上的一切，并清空本机。":
+    "\"Remove this device from the group\" only takes this phone out; the bots stay with the other devices. \"Delete all data\" deletes everything of the group on the gateway and clears this phone.",
+  "正在生成…": "Generating…",
+  "复制配对码": "Copy pairing code",
+  "重新生成": "Generate a new one",
+  "配对码已过期": "The pairing code has expired",
+  "{time} 后过期，只能用一次": "Expires in {time}; works once",
+  "在新手机上打开 Honk，到「设置 → 设备 → 已有设备？输入配对码」，输入这串配对码。新手机加入后会和这台手机共用所有 Bot，每条通知都会推送到两台手机。":
+    "On the new phone, open Honk, go to Settings → Devices → Already have a device? Enter a pairing code, and type this code. The new phone then shares all bots with this one, and every notification is pushed to both.",
+  "配对码只经过网关一次，网关看不到它：它只存放用配对码加密过的数据。无论谁拿到配对码，都能在有效期内加入你的设备组，请只给你自己的手机。":
+    "The gateway never sees the code: it only holds data encrypted with it. Anyone who has the code can join your device group while it is valid, so give it only to your own phone.",
+  "输入配对码": "Enter pairing code",
+  "配对码": "Pairing code",
+  "粘贴": "Paste",
+  "加入": "Join",
+  "正在加入…": "Joining…",
+  "在已有设备上打开「设置 → 设备 → 添加设备」，会显示 26 位配对码。大小写和短横线都不影响。":
+    "On a device you already have, open Settings → Devices → Add device to see a 26-character code. Case and dashes don't matter.",
+  "已加入设备组": "Joined the device group",
+  "这台手机现在和你的其他设备共用同一批 Bot。你在新手机上原有的 Bot 也并入了设备组。":
+    "This phone now shares its bots with your other devices. Any bots this phone already had joined the group too.",
   "{error}。这台设备的数据没有改动，请稍后重试。": "{error}. This device's data is unchanged; try again later.",
   // gateway
   "切换网关？": "Switch gateway?",

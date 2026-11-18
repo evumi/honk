@@ -39,6 +39,16 @@ export function sameDay(a: number, b: number): boolean {
   return x.getFullYear() === y.getFullYear() && x.getMonth() === y.getMonth() && x.getDate() === y.getDate();
 }
 
+/** How long ago a device was last seen: 刚刚, 5 小时前, 3 天前 (the gateway writes it at most hourly). */
+export function lastSeen(ms: number, now = Date.now()): string {
+  if (ms <= 0) return tr("从未");
+  const minutes = Math.floor((now - ms) / 6e4);
+  if (minutes < 60) return tr("刚刚");
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return tr("{n} 小时前", { n: hours });
+  return tr("{n} 天前", { n: Math.floor(hours / 24) });
+}
+
 /** `aZ3kQ9xT:bQx9••••••••JdG`. */
 export function maskToken(t: string): string {
   const i = t.indexOf(":");

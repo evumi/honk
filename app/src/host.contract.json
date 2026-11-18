@@ -1,5 +1,5 @@
 {
-  "about": "The contract between the nsh app (src/host.ts, src/demo.ts) and the native hosts (ios/App/NshBridge.swift with ios/HonkKit HostContract.swift; android/app NshBridge.kt with android/core HostContract.kt). Every host call has sample arguments and results, every event a sample payload. `optional` lists keys that may be absent in arguments or results. `demo: false` marks calls the in-memory demo does not implement. Tests: src/host.contract.test.ts, HonkKit HostContractTests, android/core HostContractTest. Change this file, host.ts and both bridges together.",
+  "about": "Device groups: honk.devices.list/remove (removing this device's own id leaves the group; honk.device.delete deletes the whole group's data), honk.link.create/claim (pairing). The contract between the nsh app (src/host.ts, src/demo.ts) and the native hosts (ios/App/NshBridge.swift with ios/HonkKit HostContract.swift; android/app NshBridge.kt with android/core HostContract.kt). Every host call has sample arguments and results, every event a sample payload. `optional` lists keys that may be absent in arguments or results. `demo: false` marks calls the in-memory demo does not implement. Tests: src/host.contract.test.ts, HonkKit HostContractTests, android/core HostContractTest. Change this file, host.ts and both bridges together.",
   "samples": {
     "bot": { "id": "aZ3kQ9xT", "name": "Berth 部署", "avatar": "preset:box:#1c1c1e", "defaultLevel": "active", "createdAt": 1700000000000 },
     "message": {
@@ -107,6 +107,21 @@
     "honk.chat.clear": { "samples": [{ "args": { "botId": "aZ3kQ9xT" }, "result": true }] },
     "honk.notifications.open": { "samples": [{ "args": null, "result": true }] },
     "honk.device.delete": { "samples": [{ "args": null, "result": true }] },
+    "honk.devices.list": {
+      "samples": [
+        {
+          "args": null,
+          "result": [
+            { "id": "0192f0e0-7a1b-7c3d-8e4f-5a6b7c8d9e0f", "name": "iPhone 15", "platform": "ios", "seenAt": 1700000000000, "current": true },
+            { "id": "0192f0e1-1b2c-7d3e-9f40-6b7c8d9e0f1a", "name": "Pixel 8", "platform": "android", "seenAt": 1699990000000, "current": false }
+          ]
+        },
+        { "args": null, "result": [] }
+      ]
+    },
+    "honk.devices.remove": { "samples": [{ "args": { "deviceId": "0192f0e1-1b2c-7d3e-9f40-6b7c8d9e0f1a" }, "result": true }] },
+    "honk.link.create": { "samples": [{ "args": null, "result": { "code": "000G-40R4-0M30-E209-185G-R38E-1W", "expiresAt": 1700000600000 } }] },
+    "honk.link.claim": { "samples": [{ "args": { "code": "000G-40R4-0M30-E209-185G-R38E-1W" }, "result": true }] },
     "honk.gateway.get": {
       "optional": ["registerKey"],
       "samples": [

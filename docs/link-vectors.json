@@ -1,0 +1,49 @@
+{
+  "about": "Test vectors for pairing (docs/DESIGN.zh-CN.md, 3.2). code = 16 bytes shown as 26 Crockford base32 characters; link_id = HKDF-SHA256(code, salt empty, info 'honk link id', 32 bytes) base64url without padding; wrap_key = the same with info 'honk link key'; sealed = base64url(nonce(12) || AES-256-GCM(wrap_key, nonce, plaintext, aad 'honk link v1') ciphertext || tag(16)). Generated with Go's standard library, independently of the Swift and Kotlin code that checks them (ios/HonkKit DeviceLinkTests, android/core DeviceLinkTest).",
+  "vectors": [
+    {
+      "code": "000G40R40M30E209185GR38E1W",
+      "code_hex": "000102030405060708090a0b0c0d0e0f",
+      "link_id": "uYzH_HgCBJ4jlChEQYD42p6wVXljEafIyjdCu6n0S9A",
+      "nonce_hex": "a0a1a2a3a4a5a6a7a8a9aaab",
+      "plaintext": "{\"v\":1,\"tokens\":{\"aZ3kQ9xT\":\"aZ3kQ9xT:abcdefghijklmnopqrstuvwxyz012345\"}}",
+      "sealed": "oKGio6SlpqeoqaqrF_6jLJPA0FbB46sz08KiYaisgSYtfElLe3HWg6SKqwFKGjEFlrn7HzqTkks9TrW3QtJVA-d6wsg6sDHtwcDb-DgrWoYdWzphBlcb2hQphUutVoMpwX4BHy4",
+      "wrap_key_hex": "67d4a5270f048a204d8b21dbf3bf2196a0dfaf0500a585c9842c3b0a9c4dc835"
+    },
+    {
+      "code": "ZZZZZZZZZZZZZZZZZZZZZZZZZW",
+      "code_hex": "ffffffffffffffffffffffffffffffff",
+      "link_id": "CBkIazNGF0pM6XR3PeD6dh-_y9a058UYTOOb9uUQgss",
+      "nonce_hex": "000102030405060708090a0b",
+      "plaintext": "{\"v\":1,\"tokens\":{\"aZ3kQ9xT\":\"aZ3kQ9xT:abcdefghijklmnopqrstuvwxyz012345\",\"bQ7mN2pR\":\"bQ7mN2pR:zyxwvutsrqponmlkjihgfedcba543210\"},\"keys\":{\"aZ3kQ9xT\":\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\"},\"group_key\":\"Hx8eHRwbGhkYFxYVFBMSERAPDg0MCwoJCAcGBQQDAgE\"}",
+      "sealed": "AAECAwQFBgcICQoL7obGLIprKUAdOtkAlraM28TaApyq7ZfYboX4eyu5yY11P8y9UjGlAGPvz13JOWeCa43VensQWsEseRkZt6I0RW34tH0RbeUNL6QOfHuf0MgVU3W_vWGkDzlbkN4fbwPwsiWKa8Iidwe27SemcKXc1Z-JIqljxXQi976T28DP6-TGSAOEHasUe0bqS2J77u38cM3M8Lxij0ZyFMMifafLa0uopwtIWtAbNdITPqr7dkUhIURLWSV2dsUPRWipOMRtpiz8aUo9eFk6L0j2jlW_oJ1L1DhtjxKz_H771aKD-x1SQ2UDgo13C19YtvjAPcjIUu7u2-yVaKWbSOToXCODUfVoUGCkcXmFqkAEng",
+      "wrap_key_hex": "41530754f892d42f3d66eb4cf0c079e11bdbeddfac731b90601b01adb90763c9"
+    }
+  ],
+  "normalize": [
+    {
+      "input": "000G-40R4-0M30-E209-185G-R38E-1W",
+      "code": "000G40R40M30E209185GR38E1W"
+    },
+    {
+      "input": " 000g 40r4 0m30 e209 185g r38e 1w ",
+      "code": "000G40R40M30E209185GR38E1W"
+    },
+    {
+      "input": "OOOG40R40M30E209185GR38E1W",
+      "code": "000G40R40M30E209185GR38E1W"
+    },
+    {
+      "input": "000G40R40M30E2O9I85GR38E1W",
+      "code": "000G40R40M30E209185GR38E1W"
+    }
+  ],
+  "invalid": [
+    "",
+    "000G40R40M30E209185GR38E1",
+    "000G40R40M30E209185GR38E1WW",
+    "000G40R40M30E209185GR38E1X",
+    "000G40R40M30E209185GR38E1U",
+    "000G40R40M30E209185GR38E1!"
+  ]
+}

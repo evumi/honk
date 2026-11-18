@@ -147,6 +147,14 @@ const messages: Message[] = [
   }),
 ];
 const DEFAULT_GATEWAY = "https://honk.example.com/";
+// The device group: this phone and, in the demo, one other.
+const groupDevices = [
+  { id: "demo-this", name: "iPhone", platform: "ios" as const, seenAt: Date.now(), current: true },
+  { id: "demo-other", name: "Pixel 8", platform: "android" as const, seenAt: Date.now() - 5 * 36e5, current: false },
+];
+let linkCode = "";
+const CODE_CHARS = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+
 let gateway = DEFAULT_GATEWAY;
 let registerKey = "";
 
@@ -218,7 +226,41 @@ export async function demo<T>(name: string, args: unknown): Promise<T> {
         messages.splice(0, messages.length);
         return { url: gateway, registered: true };
       }
+      case "honk.devices.list":
+        return groupDevices.map((d) => ({ ...d }));
+      case "honk.devices.remove": {
+        const i = groupDevices.findIndex((d) => d.id === a.deviceId);
+        if (i < 0) return true; // already gone
+        if (groupDevices[i].current) {
+          // Leaving the group: this phone starts over on its own.
+          groupDevices.splice(0, groupDevices.length, { id: "demo-this", name: "iPhone", platform: "ios", seenAt: Date.now(), current: true });
+          bots.splice(0, bots.length);
+          messages.splice(0, messages.length);
+          tokens.clear();
+          flags.clear();
+        } else {
+          groupDevices.splice(i, 1);
+        }
+        return true;
+      }
+      case "honk.link.create": {
+        const raw = Array.from({ length: 26 }, () => CODE_CHARS[Math.floor(Math.random() * 32)]).join("");
+        linkCode = raw;
+        return { code: raw.match(/.{1,4}/g)!.join("-"), expiresAt: Date.now() + 10 * 6e4 };
+      }
+      case "honk.link.claim": {
+        const code = String(a.code ?? "").toUpperCase().replace(/[\s-]/g, "");
+        if (code.length !== 26 || (linkCode !== "" && code !== linkCode && code !== "000G40R40M30E209185GR38E1W")) {
+          throw new Error(L("配对码不对、已过期或已用过", "The pairing code is wrong, expired or already used"));
+        }
+        linkCode = "";
+        if (!groupDevices.some((d) => d.id === "demo-other")) {
+          groupDevices.push({ id: "demo-other", name: "Pixel 8", platform: "android", seenAt: Date.now(), current: false });
+        }
+        return true;
+      }
       case "honk.device.delete":
+        groupDevices.splice(0, groupDevices.length, { id: "demo-this", name: "iPhone", platform: "ios", seenAt: Date.now(), current: true });
         bots.splice(0, bots.length);
         messages.splice(0, messages.length);
         tokens.clear();

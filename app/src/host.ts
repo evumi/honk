@@ -62,6 +62,24 @@ export interface Status {
   appBuild?: string;
 }
 
+/** One device of this phone's group (the phones that share its bots). */
+export interface GroupDevice {
+  id: string;
+  /** The phone's name or model; may be empty. */
+  name: string;
+  platform: "ios" | "android";
+  /** Unix milliseconds of its last request to the gateway (written at most hourly). */
+  seenAt: number;
+  /** This phone. */
+  current: boolean;
+}
+
+/** A pairing code for another phone: 26 characters in groups of four, good until `expiresAt` (Unix milliseconds). */
+export interface PairingLink {
+  code: string;
+  expiresAt: number;
+}
+
 export interface Gateway {
   url: string;
   defaultURL: string;
@@ -162,13 +180,29 @@ export const api = {
   deleteMessage: (messageId: number) => call<boolean>("honk.message.delete", { messageId }),
   clearChat: (botId: BotId) => call<boolean>("honk.chat.clear", { botId }),
   /**
-   * Deletes this device's registration on the gateway, with its bots (their
-   * tokens stop working at once) and queued messages, then clears everything
-   * on this phone. Rejects, leaving the phone as it was, when the gateway
-   * cannot be reached. The device registers again when a bot is created next
-   * or the app starts again.
+   * Deletes all data: this device's registration and every other device of
+   * its group, the bots (their tokens stop working at once) and queued
+   * messages on the gateway, then clears everything on this phone. Rejects,
+   * leaving the phone as it was, when the gateway cannot be reached. The
+   * device registers again when a bot is created next or the app starts again.
    */
   deleteDevice: () => call<boolean>("honk.device.delete"),
+  /** The devices of this phone's group, this one included. Rejects on a gateway without device groups. */
+  devices: () => call<GroupDevice[]>("honk.devices.list"),
+  /**
+   * Removes a device from the group. Removing this phone's own id leaves the
+   * group: the gateway forgets this phone and it clears its local data; the
+   * other devices keep the bots.
+   */
+  removeDevice: (deviceId: string) => call<boolean>("honk.devices.remove", { deviceId }),
+  /** Makes a pairing code for another phone to join this group; good for 10 minutes, once. */
+  createLink: () => call<PairingLink>("honk.link.create"),
+  /**
+   * Joins this phone's group to the one that made `code` (any case, with or
+   * without dashes): takes over its bots' tokens and queued messages. Rejects
+   * with the reason when the code is wrong, expired or used.
+   */
+  claimLink: (code: string) => call<boolean>("honk.link.claim", { code }),
   openNotificationSettings: () => call<boolean>("honk.notifications.open"),
   /** Asks for a push token again and registers; resolves with the new status. */
   retryRegistration: () => call<Status>("honk.register.retry"),

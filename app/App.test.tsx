@@ -24,6 +24,7 @@ function host(overrides: Record<string, unknown> = {}) {
       "honk.message.delete": true,
       "honk.avatar.save": (d: unknown) => ((d as { type: string }).type === "image/png" ? "local:a1b2.png" : "local:a1b2.jpg"),
       "honk.avatar.image": null,
+      "honk.devices.list": [{ id: "dev-this", name: "iPhone 15", platform: "ios", seenAt: Date.now(), current: true }],
       "honk.gateway.get": { url: "https://gw.test/", defaultURL: "https://gw.test/", custom: false },
       "honk.gateway.test": (d: unknown) => {
         const url = (d as { url: string }).url;
@@ -210,7 +211,7 @@ test("settings deletes this device's data after a confirmation", async () => {
   app.onDialog(() => "取消");
   await app.press("id:delete-device-data");
   expect(deleted).toBe(0);
-  expect(app.dialogs()[0]).toMatchObject({ title: "删除这台设备的数据？" });
+  expect(app.dialogs()[0]).toMatchObject({ title: "删除全部数据？" });
   app.onDialog(() => "删除");
   await app.press("id:delete-device-data");
   await app.waitUntil(() => deleted === 1);
@@ -456,3 +457,171 @@ test("a banner right after the last one left still shows", async () => {
   expect(app.texts().some((t) => t.includes("CPU 92%"))).toBe(true);
 });
 
+
+// Device groups.
+const group = [
+  { id: "dev-this", name: "iPhone 15", platform: "ios", seenAt: Date.now(), current: true },
+  { id: "dev-other", name: "Pixel 8", platform: "android", seenAt: Date.now() - 5 * 36e5, current: false },
+];
+
+test("settings lists the devices of the group and marks this one", async () => {
+  const app = await open("./App.tsx", { locale: "zh-Hans-CN", host: host({ "honk.devices.list": group }) });
+  await app.press("id:tab-settings");
+  await app.waitFor("text:Pixel 8");
+  expect(app.texts()).toContain("iPhone 15");
+  expect(app.texts()).toContain("这台设备");
+  expect(app.texts()).toContain("Android · 5 小时前");
+  expect(app.texts()).toContain("添加设备");
+  expect(app.texts()).toContain("已有设备？输入配对码");
+});
+
+test("removing another device asks first, then removes it", async () => {
+  const removed: unknown[] = [];
+  const app = await open("./App.tsx", {
+    locale: "zh-Hans-CN",
+    host: host({ "honk.devices.list": group, "honk.devices.remove": (d: unknown) => { removed.push(d); return true; } }),
+  });
+  await app.press("id:tab-settings");
+  await app.waitFor("text:Pixel 8");
+  app.onDialog(() => "取消");
+  await app.press("id:device-dev-other");
+  expect(removed.length).toBe(0);
+  expect(app.dialogs()[0]).toMatchObject({ title: "移除 Pixel 8？" });
+  app.onDialog(() => "移除");
+  await app.press("id:device-dev-other");
+  await app.waitUntil(() => removed.length === 1);
+  expect(removed[0]).toEqual({ deviceId: "dev-other" });
+  // This device has no remove row of its own: it leaves through the Data section.
+  expect(app.count("id:device-dev-this")).toBe(1);
+});
+
+test("leaving the group is offered only with other devices, and removes this device's own id", async () => {
+  const alone = await open("./App.tsx", { locale: "zh-Hans-CN", host: host() });
+  await alone.press("id:tab-settings");
+  await alone.waitFor("text:iPhone 15");
+  expect(alone.count("id:leave-group")).toBe(0);
+
+  const removed: unknown[] = [];
+  const app = await open("./App.tsx", {
+    locale: "zh-Hans-CN",
+    host: host({ "honk.devices.list": group, "honk.devices.remove": (d: unknown) => { removed.push(d); return true; } }),
+  });
+  await app.press("id:tab-settings");
+  await app.waitFor("text:Pixel 8");
+  expect(app.count("id:leave-group")).toBe(1);
+  expect(app.count("id:delete-device-data")).toBe(1);
+  app.onDialog(() => "移除");
+  await app.press("id:leave-group");
+  await app.waitUntil(() => removed.length === 1);
+  expect(removed[0]).toEqual({ deviceId: "dev-this" });
+  expect(app.dialogs()[0]).toMatchObject({ title: "从设备组移除这台设备？" });
+});
+
+test("delete all data names the other devices", async () => {
+  const app = await open("./App.tsx", { locale: "zh-Hans-CN", host: host({ "honk.devices.list": group }) });
+  await app.press("id:tab-settings");
+  await app.waitFor("text:Pixel 8");
+  app.onDialog(() => "取消");
+  await app.press("id:delete-device-data");
+  expect(app.dialogs()[0].message).toContain("其他 1 台设备");
+});
+
+test("a gateway without device groups still shows the settings", async () => {
+  const app = await open("./App.tsx", {
+    locale: "zh-Hans-CN",
+    host: host({ "honk.devices.list": () => { throw new Error("404 Not Found"); } }),
+  });
+  await app.press("id:tab-settings");
+  await app.waitFor("text:添加设备");
+  expect(app.count("id:leave-group")).toBe(0);
+});
+
+test("the add device page shows a pairing code, which copies", async () => {
+  const code = "000G-40R4-0M30-E209-185G-R38E-1W";
+  const app = await open("./App.tsx", {
+    locale: "zh-Hans-CN",
+    host: host({ "honk.devices.list": group, "honk.link.create": { code, expiresAt: Date.now() + 10 * 6e4 } }),
+  });
+  await app.press("id:tab-settings");
+  await app.press("id:add-device");
+  await app.waitFor(`text:${code}`);
+  expect(app.texts().some((t) => t.startsWith("10:00 后过期") || t.startsWith("9:59 后过期"))).toBe(true);
+  await app.press("id:copy-code");
+  expect(app.clipboard()).toBe(code);
+  await app.waitFor("text:已复制");
+});
+
+test("an expired pairing code offers a new one", async () => {
+  let made = 0;
+  const app = await open("./App.tsx", {
+    locale: "zh-Hans-CN",
+    host: host({
+      "honk.devices.list": group,
+      "honk.link.create": () => ({ code: `CODE${++made}-0000-0000-0000-0000-0000-00`, expiresAt: Date.now() - 1000 }),
+    }),
+  });
+  await app.press("id:tab-settings");
+  await app.press("id:add-device");
+  await app.waitFor("text:配对码已过期");
+  await app.press("id:regenerate-code");
+  await app.waitUntil(() => made === 2);
+});
+
+test("a failed pairing code request shows why", async () => {
+  const app = await open("./App.tsx", {
+    locale: "zh-Hans-CN",
+    host: host({ "honk.link.create": () => { throw new Error("连不上网关"); } }),
+  });
+  await app.press("id:tab-settings");
+  await app.press("id:add-device");
+  await app.waitFor("text:连不上网关");
+  expect(app.count("id:regenerate-code")).toBe(1);
+});
+
+test("the empty state offers to enter a pairing code, which joins the group", async () => {
+  const claimed: unknown[] = [];
+  const app = await open("./App.tsx", {
+    locale: "zh-Hans-CN",
+    host: host({
+      "honk.chats": [],
+      "honk.link.claim": (d: unknown) => { claimed.push(d); return true; },
+    }),
+  });
+  await app.waitFor("text:还没有 Bot");
+  await app.press("id:pair-existing");
+  await app.waitFor("text:输入配对码");
+  // Not a code yet: the button does nothing.
+  await app.type("id:pairing-input", "000G-40R4");
+  await app.press("id:join-group");
+  expect(claimed.length).toBe(0);
+  await app.type("id:pairing-input", " 0m30 e209 185g r38e 1w");
+  app.onDialog(() => "好");
+  await app.press("id:join-group");
+  await app.waitUntil(() => claimed.length === 1);
+  expect(claimed[0]).toEqual({ code: "000G-40R4 0m30 e209 185g r38e 1w" });
+  await app.waitUntil(() => app.dialogs().some((d) => d.title === "已加入设备组"));
+  await app.waitFor("text:还没有 Bot");
+});
+
+test("a wrong pairing code shows the host's reason", async () => {
+  const app = await open("./App.tsx", {
+    locale: "zh-Hans-CN",
+    host: host({ "honk.chats": [], "honk.link.claim": () => { throw new Error("配对码不对、已过期或已用过"); } }),
+  });
+  await app.press("id:pair-existing");
+  await app.type("id:pairing-input", "000G40R40M30E209185GR38E1W");
+  await app.press("id:join-group");
+  await app.waitFor("text:配对码不对、已过期或已用过");
+  expect(app.count("id:pair-error")).toBe(1);
+});
+
+test("the device section is in English too", async () => {
+  const app = await open("./App.tsx", { locale: "en-US", host: host({ "honk.devices.list": group }) });
+  await app.press("id:tab-settings");
+  await app.waitFor("text:Pixel 8");
+  expect(app.texts()).toContain("Devices");
+  expect(app.texts()).toContain("This device");
+  expect(app.texts()).toContain("Add device");
+  expect(app.texts()).toContain("Remove this device from the group");
+  expect(app.texts()).toContain("Delete all data");
+});

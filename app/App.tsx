@@ -1,11 +1,13 @@
 import { mount, View } from "nsh";
 import { NavStack } from "nsh/base";
+import { AddDevicePage } from "./src/pages/AddDevice";
 import { BotCreated } from "./src/pages/BotCreated";
 import { BotSettings } from "./src/pages/BotSettings";
 import { ChatPage } from "./src/pages/Chat";
 import { GatewayPage } from "./src/pages/Gateway";
 import { Home } from "./src/pages/Home";
 import { NewBot } from "./src/pages/NewBot";
+import { PairPage } from "./src/pages/Pair";
 import { InAppBanner } from "./src/InAppBanner";
 import { incoming } from "./src/inapp";
 import { listenIncoming, on } from "./src/host";
@@ -37,6 +39,10 @@ function App() {
               return <BotSettings botId={route.botId} />;
             case "gateway":
               return <GatewayPage />;
+            case "addDevice":
+              return <AddDevicePage />;
+            case "pair":
+              return <PairPage />;
           }
         }}
       </NavStack>
