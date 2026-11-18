@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/evumi/honk/gateway/internal/client"
 	"github.com/evumi/honk/gateway/internal/store"
@@ -83,7 +84,7 @@ func TestEncryptedSendAndEdit(t *testing.T) {
 }
 
 func TestEncryptedBotRefusesPlaintext(t *testing.T) {
-	e := setup(t)
+	e := setupWith(t, Options{MessageTTL: time.Hour, SendRate: 100, SendBurst: 20}) // not the send limit's business
 	secret, token := e.register("android")
 	botID := client.BotID(token)
 
