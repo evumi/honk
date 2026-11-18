@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"strconv"
+	"time"
 
 	"golang.org/x/oauth2/google"
 )
@@ -90,7 +92,7 @@ func (f *FCM) Push(ctx context.Context, n Notification) error {
 	req.Header.Set("Content-Type", "application/json")
 	res, err := f.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("fcm: %w", err)
+		return &RetryableError{Err: fmt.Errorf("fcm: %w", err)}
 	}
 	defer res.Body.Close()
 	if res.StatusCode == http.StatusOK {
@@ -98,7 +100,14 @@ func (f *FCM) Push(ctx context.Context, n Notification) error {
 		return nil
 	}
 	raw, _ := io.ReadAll(io.LimitReader(res.Body, 64<<10))
-	return fcmError(res.StatusCode, raw)
+	err = fcmError(res.StatusCode, raw)
+	if secs, e := strconv.Atoi(res.Header.Get("Retry-After")); e == nil && secs > 0 {
+		var re *RetryableError
+		if errors.As(err, &re) {
+			re.After = time.Duration(secs) * time.Second
+		}
+	}
+	return err
 }
 
 func fcmError(status int, raw []byte) error {
@@ -120,5 +129,9 @@ func fcmError(status int, raw []byte) error {
 	if status == http.StatusNotFound && e.Error.Status == "NOT_FOUND" {
 		return ErrTokenGone
 	}
-	return fmt.Errorf("fcm: %d %s %s", status, e.Error.Status, e.Error.Message)
+	err := fmt.Errorf("fcm: %d %s %s", status, e.Error.Status, e.Error.Message)
+	if retryableStatus(status) {
+		return &RetryableError{Err: err}
+	}
+	return err
 }

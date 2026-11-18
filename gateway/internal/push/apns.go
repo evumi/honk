@@ -101,7 +101,7 @@ func (a *APNs) Push(ctx context.Context, n Notification) error {
 	}
 	res, err := a.client.PushWithContext(ctx, req)
 	if err != nil {
-		return fmt.Errorf("apns: %w", err)
+		return &RetryableError{Err: fmt.Errorf("apns: %w", err)}
 	}
 	if res.Sent() {
 		return nil
@@ -109,5 +109,9 @@ func (a *APNs) Push(ctx context.Context, n Notification) error {
 	if res.StatusCode == http.StatusGone || res.Reason == apns2.ReasonBadDeviceToken || res.Reason == apns2.ReasonUnregistered {
 		return ErrTokenGone
 	}
-	return fmt.Errorf("apns: %d %s", res.StatusCode, res.Reason)
+	err = fmt.Errorf("apns: %d %s", res.StatusCode, res.Reason)
+	if retryableStatus(res.StatusCode) {
+		return &RetryableError{Err: err}
+	}
+	return err
 }

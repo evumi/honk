@@ -20,6 +20,9 @@ type Config struct {
 	RegisterPerHour  float64 // HONK_REGISTER_PER_HOUR: device registrations per client IP, default 10
 	MaxBotsPerDevice int     // HONK_MAX_BOTS_PER_DEVICE, default 100
 
+	PushQueue   int // HONK_PUSH_QUEUE: pushes that may wait, default 1024
+	PushWorkers int // HONK_PUSH_WORKERS: concurrent pushes, default 16
+
 	APNs APNs
 	FCM  FCM
 }
@@ -49,6 +52,8 @@ func Load() (Config, error) {
 		SendBurst:        20,
 		RegisterPerHour:  10,
 		MaxBotsPerDevice: 100,
+		PushQueue:        1024,
+		PushWorkers:      16,
 		APNs: APNs{
 			KeyFile: os.Getenv("HONK_APNS_KEY_FILE"),
 			KeyID:   os.Getenv("HONK_APNS_KEY_ID"),
@@ -82,6 +87,16 @@ func Load() (Config, error) {
 	if v := os.Getenv("HONK_MAX_BOTS_PER_DEVICE"); v != "" {
 		if c.MaxBotsPerDevice, err = strconv.Atoi(v); err != nil || c.MaxBotsPerDevice <= 0 {
 			return c, fmt.Errorf("HONK_MAX_BOTS_PER_DEVICE: want a positive integer, got %q", v)
+		}
+	}
+	if v := os.Getenv("HONK_PUSH_QUEUE"); v != "" {
+		if c.PushQueue, err = strconv.Atoi(v); err != nil || c.PushQueue <= 0 {
+			return c, fmt.Errorf("HONK_PUSH_QUEUE: want a positive integer, got %q", v)
+		}
+	}
+	if v := os.Getenv("HONK_PUSH_WORKERS"); v != "" {
+		if c.PushWorkers, err = strconv.Atoi(v); err != nil || c.PushWorkers <= 0 {
+			return c, fmt.Errorf("HONK_PUSH_WORKERS: want a positive integer, got %q", v)
 		}
 	}
 	if v := os.Getenv("HONK_APNS_SANDBOX"); v != "" {

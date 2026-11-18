@@ -72,3 +72,24 @@ func TestCollapseKey(t *testing.T) {
 		t.Error("empty id gave a collapse key")
 	}
 }
+
+func TestFCMErrorRetryable(t *testing.T) {
+	cases := []struct {
+		status int
+		body   string
+		retry  bool
+		gone   bool
+	}{
+		{503, `{"error":{"status":"UNAVAILABLE"}}`, true, false},
+		{429, `{"error":{"status":"QUOTA_EXCEEDED"}}`, true, false},
+		{400, `{"error":{"status":"INVALID_ARGUMENT"}}`, false, false},
+		{404, `{"error":{"status":"NOT_FOUND","details":[{"errorCode":"UNREGISTERED"}]}}`, false, true},
+	}
+	for _, c := range cases {
+		err := fcmError(c.status, []byte(c.body))
+		_, retry := Retryable(err)
+		if retry != c.retry || errors.Is(err, ErrTokenGone) != c.gone {
+			t.Errorf("%d: retry=%v gone=%v, want %v %v (%v)", c.status, retry, errors.Is(err, ErrTokenGone), c.retry, c.gone, err)
+		}
+	}
+}

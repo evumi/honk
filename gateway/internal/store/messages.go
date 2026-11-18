@@ -212,3 +212,31 @@ func (s *Store) Cleanup(ctx context.Context, ackedKeep time.Duration) (int64, er
 	}
 	return res.RowsAffected()
 }
+
+// PushStillWanted reports whether a push for item msgID is still worth
+// retrying: the device exists, still has this push token and a usable one, and
+// has not acked the item (nor has it been cleaned up).
+func (s *Store) PushStillWanted(ctx context.Context, deviceID, token string, msgID int64) (bool, error) {
+	var cur string
+	var pushOK bool
+	err := s.db.QueryRowContext(ctx, `SELECT push_token, push_ok FROM devices WHERE id = ?`, deviceID).Scan(&cur, &pushOK)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if cur != token || !pushOK {
+		return false, nil
+	}
+	var acked sql.NullInt64
+	err = s.db.QueryRowContext(ctx, `SELECT acked_at FROM messages WHERE id = ? AND device_id = ? AND expires_at > ?`,
+		msgID, deviceID, s.ms()).Scan(&acked)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return !acked.Valid, nil
+}

@@ -10,12 +10,34 @@ import (
 	"encoding/hex"
 	"errors"
 	"log/slog"
+	"net/http"
+	"time"
 	"unicode/utf8"
 )
 
 // ErrTokenGone means APNs or FCM no longer knows the push token: the app was
 // removed or the token was rotated.
 var ErrTokenGone = errors.New("push token is no longer valid")
+
+// RetryableError marks a failure that may go away: a network error, a timeout,
+// a 5xx or a 429. After, when positive, is how long the service asked to wait.
+type RetryableError struct {
+	Err   error
+	After time.Duration
+}
+
+func (e *RetryableError) Error() string { return e.Err.Error() }
+func (e *RetryableError) Unwrap() error { return e.Err }
+
+// Retryable reports whether err is worth another attempt and how long the
+// service asked to wait (0 when it did not say).
+func Retryable(err error) (after time.Duration, ok bool) {
+	var re *RetryableError
+	if errors.As(err, &re) {
+		return re.After, true
+	}
+	return 0, false
+}
 
 // Notification is one push to one device.
 type Notification struct {
@@ -96,3 +118,7 @@ func collapseKey(botID, id string) string {
 	h := sha256.Sum256([]byte(id))
 	return "b" + botID + ":" + hex.EncodeToString(h[:16])
 }
+
+// retryableStatus: the service is overloaded or briefly down, or asks for a
+// slower pace. Every other 4xx is a permanent refusal.
+func retryableStatus(code int) bool { return code == http.StatusTooManyRequests || code >= 500 }

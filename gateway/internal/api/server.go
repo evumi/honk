@@ -5,7 +5,6 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -36,6 +35,16 @@ type Options struct {
 	RegisterBurst   int
 	// MaxBotsPerDevice caps the bots one device can own. Default 100.
 	MaxBotsPerDevice int
+	// PushQueue and PushWorkers size the push queue (defaults 1024 and 16).
+	PushQueue   int
+	PushWorkers int
+	// PushBackoff is the wait before each retry of a failed push; its length
+	// is the number of retries. Default 2 s, 10 s, 60 s.
+	PushBackoff []time.Duration
+	// RegisterKey, when set, must be sent as register_key to register a device.
+	RegisterKey string
+	// AccessLog logs every request at debug level.
+	AccessLog bool
 }
 
 // limiter is a token bucket with the time it was last used, so idle ones can be dropped.
@@ -55,7 +64,8 @@ type Server struct {
 	limiters   map[string]*limiter // per bot: sends
 	registrars map[string]*limiter // per client IP: device registrations
 
-	pushes sync.WaitGroup
+	pq pushQueue
+	m  serverMetrics
 }
 
 // New returns a Server.
@@ -69,12 +79,20 @@ func New(st *store.Store, p push.Pusher, log *slog.Logger, opts Options) *Server
 	if opts.MaxBotsPerDevice <= 0 {
 		opts.MaxBotsPerDevice = 100
 	}
-	return &Server{store: st, pusher: p, log: log, opts: opts, limiters: map[string]*limiter{}, registrars: map[string]*limiter{}}
+	if opts.PushQueue <= 0 {
+		opts.PushQueue = 1024
+	}
+	if opts.PushWorkers <= 0 {
+		opts.PushWorkers = 16
+	}
+	if opts.PushBackoff == nil {
+		opts.PushBackoff = []time.Duration{2 * time.Second, 10 * time.Second, time.Minute}
+	}
+	s := &Server{store: st, pusher: p, log: log, opts: opts, limiters: map[string]*limiter{}, registrars: map[string]*limiter{}}
+	s.initMetrics()
+	s.startPushQueue()
+	return s
 }
-
-// Wait blocks until the pushes in flight finish; call it after the HTTP
-// server has shut down.
-func (s *Server) Wait() { s.pushes.Wait() }
 
 // Handler returns the HTTP routes.
 func (s *Server) Handler() http.Handler {
@@ -165,40 +183,6 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	enc := json.NewEncoder(w)
 	enc.SetEscapeHTML(false) // card HTML stays readable
 	_ = enc.Encode(v)
-}
-
-// ---- push ----
-
-// notify pushes n to the device in the background: the message is already
-// queued, so the bot API answers at once and a slow APNs/FCM never holds it
-// up. A failed push is logged; the device still gets the message by /sync.
-// A token APNs/FCM reports gone is recorded so later pushes skip it.
-func (s *Server) notify(d store.Device, n push.Notification) {
-	if !d.PushOK || d.PushToken == "" {
-		return
-	}
-	// Debug simulator builds register without APNs; they poll /v1/sync instead.
-	if strings.HasPrefix(d.PushToken, SimulatorTokenPrefix) {
-		return
-	}
-	n.Platform, n.Token = d.Platform, d.PushToken
-	s.pushes.Add(1)
-	go func() {
-		defer s.pushes.Done()
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		err := s.pusher.Push(ctx, n)
-		switch {
-		case err == nil:
-		case errors.Is(err, push.ErrTokenGone):
-			s.log.Info("push token gone", "device", d.ID, "platform", d.Platform)
-			if err := s.store.MarkPushGone(ctx, d.ID, d.PushToken); err != nil {
-				s.log.Error("mark push gone", "err", err)
-			}
-		default:
-			s.log.Warn("push failed", "device", d.ID, "platform", d.Platform, "kind", n.Kind, "err", err)
-		}
-	}()
 }
 
 // allow takes a send from the bot's bucket.

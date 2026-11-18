@@ -71,6 +71,7 @@ func setupWith(t *testing.T, opts Options) *env {
 	s := New(st, p, slog.New(slog.NewTextHandler(io.Discard, nil)), opts)
 	srv := httptest.NewServer(s.Handler())
 	t.Cleanup(srv.Close)
+	t.Cleanup(s.Close)
 	return &env{t: t, s: s, srv: srv, pusher: p}
 }
 

@@ -64,6 +64,7 @@ func run(log *slog.Logger) error {
 	srv := api.New(st, router, log, api.Options{
 		Version: version, MessageTTL: cfg.MessageTTL, SendRate: cfg.SendRate, SendBurst: cfg.SendBurst,
 		RegisterPerHour: cfg.RegisterPerHour, MaxBotsPerDevice: cfg.MaxBotsPerDevice,
+		PushQueue: cfg.PushQueue, PushWorkers: cfg.PushWorkers,
 	})
 	httpSrv := &http.Server{
 		Addr:              cfg.Addr,
@@ -92,7 +93,7 @@ func run(log *slog.Logger) error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	err = httpSrv.Shutdown(shutdownCtx)
-	srv.Wait() // pushes still in flight (each has its own 10 s timeout)
+	srv.Close() // pushes in flight finish (each has its own 10 s timeout); waiting retries are dropped
 	return err
 }
 
