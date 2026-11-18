@@ -158,4 +158,50 @@ class LocalStoreTest {
         }
         assertEquals("kept", LocalStore(JdbcSql(path)).messages("b1").first().body)
     }
+
+    @Test fun sendOptionsAreStoredAndApplyIsIdempotent() {
+        val store = tempStore()
+        val m = QueuedMessage(
+            30, "b1", body = "**x**", url = "https://a.example/b", open = "url", image = "https://a.example/i.png",
+            parseMode = "Markdown", silent = true, date = 9,
+        )
+        val first = store.apply(m, "n30")
+        store.apply(m)
+        val got = store.message(30)!!
+        assertEquals(first.message, got)
+        assertTrue(got.open == "url" && got.image == "https://a.example/i.png" && got.parseMode == "Markdown" && got.silent)
+        // A silent message still counts as unread (badge and chat list).
+        assertEquals(1, store.unreadTotal())
+        assertTrue(store.chats().first { it.bot.id == "b1" }.last!!.silent)
+        val plain = store.apply(QueuedMessage(31, "b1", body = "p", date = 10)).message!!
+        assertTrue(plain.open == "" && plain.image == "" && plain.parseMode == "" && !plain.silent)
+    }
+
+    @Test fun decodesSendOptionsFromTheGateway() {
+        val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+        val m = json.decodeFromString<QueuedMessage>(
+            """{"message_id":5,"bot_id":"aZ3kQ9xT","kind":"message","body":"b","open":"url","image":"https://a/i.png","parse_mode":"Markdown","silent":true,"date":1}""",
+        )
+        assertTrue(m.open == "url" && m.image == "https://a/i.png" && m.parseMode == "Markdown" && m.silent)
+        val old = json.decodeFromString<QueuedMessage>("""{"message_id":6,"bot_id":"aZ3kQ9xT","kind":"message"}""")
+        assertTrue(old.open == "" && !old.silent)
+    }
+
+    @Test fun migratesV2ToSendOptions() {
+        val path = tempPath()
+        JdbcSql(path).apply {
+            LocalStore.SCHEMA_V1.forEach(::exec)
+            LocalStore.MIGRATE_V2.forEach(::exec)
+            exec("INSERT INTO bots (id, name) VALUES ('aZ3kQ9xT', 'b')")
+            exec("INSERT INTO messages (id, bot_id, body, date) VALUES (1, 'aZ3kQ9xT', 'old', 1)")
+            exec("PRAGMA user_version = 2")
+            close()
+        }
+        val store = LocalStore(JdbcSql(path))
+        val old = store.message(1)!!
+        assertTrue(old.body == "old" && old.open == "" && old.image == "" && old.parseMode == "" && !old.silent)
+        store.apply(QueuedMessage(2, "aZ3kQ9xT", body = "new", image = "https://a/i.png", silent = true))
+        assertTrue(store.message(2)!!.silent)
+        LocalStore(JdbcSql(path)).close() // reopening does not migrate again
+    }
 }

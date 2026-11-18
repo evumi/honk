@@ -12,7 +12,9 @@ let package = Package(
         .library(name: "HonkKit", targets: ["HonkKit"]),
     ],
     targets: [
-        .target(name: "HonkKit", linkerSettings: [.linkedLibrary("sqlite3")]),
+        // The system zlib, to measure a card the way the gateway does (zlib level 9).
+        .systemLibrary(name: "CZlib"),
+        .target(name: "HonkKit", dependencies: ["CZlib"], linkerSettings: [.linkedLibrary("sqlite3")]),
         .testTarget(name: "HonkKitTests", dependencies: ["HonkKit"]),
     ]
 )

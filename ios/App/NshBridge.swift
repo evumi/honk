@@ -7,10 +7,11 @@ import UIKit
 /// receives (`host.on("honk.…")`). The TSX side of this contract is
 /// app/src/host.ts; keep the two in step.
 ///
-/// Calls: honk.status, honk.chats, honk.messages, honk.markRead, honk.focus,
-/// honk.refresh, honk.bot.create, honk.bot.update, honk.bot.token,
-/// honk.bot.resetToken, honk.bot.delete, honk.bot.setMuted, honk.bot.setPinned,
-/// honk.message.delete, honk.chat.clear, honk.notifications.open, honk.avatar.save, honk.avatar.image,
+/// Calls: honk.status, honk.chats, honk.messages, honk.search, honk.markRead, honk.focus,
+/// honk.refresh, honk.retention.get, honk.retention.set, honk.export, honk.import, honk.bot.create, honk.bot.update, honk.bot.token,
+/// honk.bot.resetToken, honk.bot.delete, honk.bot.encryption.{key,enable,disable,resetKey}, honk.bot.setMuted, honk.bot.setPinned,
+/// honk.message.delete, honk.chat.clear, honk.device.delete, honk.devices.list, honk.devices.remove,
+/// honk.link.create, honk.link.claim, honk.notifications.open, honk.avatar.save, honk.avatar.image,
 /// honk.gateway.get, honk.gateway.test, honk.gateway.set, honk.register.retry,
 /// honk.card.open, honk.card.click, honk.card.set, honk.card.close.
 /// Events: honk.changed (the store changed), honk.open { botId } (open a chat),
@@ -32,7 +33,7 @@ final class NshBridge {
         // Only once the app listens: until then pushes get the system banner.
         handle("honk.incoming.listen") { [weak self, service] _ in
             service.onIncoming = { botID, messageID in
-                self?.app.send("honk.incoming", ["botId": botID, "messageId": messageID])
+                self?.app.send("honk.incoming", HostJSON.incomingEvent(botID: botID, messageID: messageID))
             }
             return true
         }
@@ -40,23 +41,38 @@ final class NshBridge {
         // Card scripts run off the main thread in their own QuickJS runtimes
         // (native/card); the strings in and out are JSON the app reads.
         let cards = CardHost { [weak self] key, result in
-            Task { @MainActor in self?.app.send("honk.card.changed", ["key": key, "result": result]) }
+            Task { @MainActor in self?.app.send("honk.card.changed", HostJSON.cardChangedEvent(key: key, result: result)) }
         }
         self.cards = cards
+        // A card's request(): the host sends it to the message's bot itself and gives the card the
+        // answer; the app sees neither (the result it gets has no `request`).
+        let requests = CardRequests(
+            query: { [service] messageID, data in
+                let api = await MainActor.run { service.api }
+                return try await api.cardQuery(messageID: messageID, data: data)
+            },
+            answer: { key, seq, ok, data in await cards.answer(key: key, seq: seq, ok: ok, data: data) },
+            changed: { [weak self] key, result in
+                Task { @MainActor in self?.app.send("honk.card.changed", HostJSON.cardChangedEvent(key: key, result: result)) }
+            })
         handle("honk.card.open") { args in
-            let a = Args(args)
-            return await cards.open(key: try a.require("key"), load: try a.require("load"))
+            let c = try HostArgs.CardCall(CallArgs(args), payload: "load")
+            requests.opened(key: c.key, load: c.payload)
+            return await cards.open(key: c.key, load: c.payload)
         }
         handle("honk.card.click") { args in
-            let a = Args(args)
-            return await cards.click(key: try a.require("key"), path: try a.require("path"))
+            let c = try HostArgs.CardCall(CallArgs(args), payload: "path")
+            let result = await cards.click(key: c.key, path: c.payload)
+            return requests.filter(key: c.key, result: result)
         }
         handle("honk.card.set") { args in
-            let a = Args(args)
-            return await cards.set(key: try a.require("key"), state: try a.require("state"))
+            let c = try HostArgs.CardCall(CallArgs(args), payload: "state")
+            return await cards.set(key: c.key, state: c.payload)
         }
         handle("honk.card.close") { args in
-            await cards.close(key: try Args(args).require("key"))
+            let key = try HostArgs.CardCall(CallArgs(args), payload: nil).key
+            requests.closed(key: key)
+            await cards.close(key: key)
             return true
         }
 
@@ -66,20 +82,57 @@ final class NshBridge {
             return await Self.status(service)
         }
         handle("honk.chats") { [service] _ in
-            try service.store.chats().map(Self.chat)
+            try service.store.chats().map(HostJSON.chat)
         }
         handle("honk.messages") { [service] args in
-            let a = Args(args)
-            let limit = a.int("limit").map { Int($0) } ?? 50
-            return try service.store.messages(botID: try a.require("botId"), before: a.int("before"), limit: limit)
-                .map(Self.message)
+            let m = try HostArgs.Messages(CallArgs(args))
+            // `around`: a window around that message (a search result opened in its chat).
+            if let around = m.around {
+                return try service.store.messages(botID: m.botID, around: around, limit: m.limit).map(HostJSON.message)
+            }
+            return try service.store.messages(botID: m.botID, before: m.before, limit: m.limit).map(HostJSON.message)
+        }
+        handle("honk.search") { [service] args in
+            let s = try HostArgs.Search(CallArgs(args))
+            return try service.store.search(s.query, before: s.before).map(HostJSON.message)
+        }
+
+        // MARK: retention, export and import
+
+        handle("honk.retention.get") { [service] _ in service.store.retentionDays }
+        handle("honk.retention.set") { [service] args in
+            try service.store.setRetentionDays(try HostArgs.RetentionSet(CallArgs(args)).days)
+            service.pruneExpired()
+            service.changed()
+            return service.store.retentionDays
+        }
+        handle("honk.export") { [service] args in
+            // One chat, or every chat when `botId` is missing. Resolves once the share sheet is gone.
+            let botID = HostArgs.Export(CallArgs(args)).botID
+            let messages = try service.store.exportMessages(botID: botID)
+            guard !messages.isEmpty else { return HostJSON.exportResult(count: 0, shared: false) }
+            let name = MessageArchive.fileName(botName: try botID.flatMap { try service.store.bot(id: $0)?.name })
+            let shared = try await FileExchange.share(try MessageArchive.encode(messages), name: name)
+            return HostJSON.exportResult(count: messages.count, shared: shared)
+        }
+        handle("honk.import") { [service] _ in
+            // Picks a file and adds its messages; `null` when the user cancels.
+            guard let data = try await FileExchange.pickFile() else { return NSNull() }
+            // Off the main thread: a large archive takes a moment to read.
+            let store = service.store
+            let (r, invalid) = try await Task.detached {
+                let archive = MessageArchive.decode(data)
+                return (try store.importMessages(archive.messages), archive.invalid)
+            }.value
+            service.changed()
+            return HostJSON.importResult(r, invalid: invalid)
         }
         handle("honk.markRead") { [service] args in
-            service.markRead(botID: try Args(args).require("botId"))
+            service.markRead(botID: try CallArgs(args).require("botId"))
             return true
         }
         handle("honk.focus") { [service] args in
-            service.focusedBotID = Args(args).string("botId")
+            service.focusedBotID = CallArgs(args).string("botId")
             return true
         }
         handle("honk.refresh") { [service] _ in
@@ -90,70 +143,116 @@ final class NshBridge {
         // MARK: gateway
 
         handle("honk.gateway.get") { [service] _ in
-            ["url": service.config.gatewayURL.absoluteString,
-             "defaultURL": service.config.defaultGatewayURL.absoluteString,
-             "custom": service.config.isCustomGateway]
+            HostJSON.gatewayGet(url: service.config.gatewayURL.absoluteString,
+                                defaultURL: service.config.defaultGatewayURL.absoluteString,
+                                custom: service.config.isCustomGateway,
+                                registerKey: service.registerKeys.load() ?? "")
         }
         handle("honk.gateway.test") { [service] args in
             do {
-                let (url, info) = try await service.testGateway(try Args(args).require("url"))
-                return ["ok": true, "url": url.absoluteString, "version": info.version]
+                let (url, info) = try await service.testGateway(try CallArgs(args).require("url"))
+                return HostJSON.gatewayTest(url: url.absoluteString, version: info.version, registerKeyRequired: info.registerKeyRequired, push: info.push)
             } catch {
-                return ["ok": false, "error": error.localizedDescription]
+                return HostJSON.gatewayTest(error: error.localizedDescription)
             }
         }
         handle("honk.gateway.set") { [service] args in
-            // `url` null or missing: back to the default gateway.
-            try await service.switchGateway(to: Args(args).string("url"))
-            return ["url": service.config.gatewayURL.absoluteString, "registered": service.isRegistered]
+            // `url` null or missing: back to the default gateway. `registerKey` missing or empty: none.
+            let g = try HostArgs.GatewaySet(CallArgs(args))
+            try await service.switchGateway(to: g.url, registerKey: g.registerKey)
+            return HostJSON.gatewaySet(url: service.config.gatewayURL.absoluteString, registered: service.isRegistered)
         }
 
         // MARK: bots
 
         handle("honk.bot.create") { [service] args in
-            let a = Args(args)
-            let created = try await service.api.createBot(name: try a.require("name"), avatar: a.string("avatar") ?? "",
-                                                          defaultLevel: a.string("defaultLevel") ?? "active")
+            let a = try HostArgs.BotCreate(CallArgs(args))
+            // After the device's data was deleted, the first bot registers it again.
+            if !service.isRegistered { await service.retryRegistration() }
+            let created = try await service.api.createBot(name: a.name, avatar: a.avatar, defaultLevel: a.defaultLevel)
             try service.store.saveBot(created.bot)
             service.botTokens.save(created.token, botID: created.bot.id)
             service.changed()
-            return ["bot": Self.bot(created.bot), "token": created.token]
+            return HostJSON.botCreated(created.bot, token: created.token)
         }
         handle("honk.bot.update") { [service] args in
-            let a = Args(args)
-            let bot = try await service.api.updateBot(id: try a.require("botId"), name: a.string("name"),
-                                                      avatar: a.string("avatar"), defaultLevel: a.string("defaultLevel"))
+            let a = try HostArgs.BotUpdate(CallArgs(args))
+            let bot = try await service.api.updateBot(id: a.botID, name: a.name, avatar: a.avatar, defaultLevel: a.defaultLevel)
             try service.store.saveBot(bot)
             service.changed()
-            return Self.bot(bot)
+            return HostJSON.bot(bot)
         }
         handle("honk.bot.token") { [service] args in
-            if let token = service.botTokens.token(botID: try Args(args).require("botId")) { return token }
+            if let token = service.botTokens.token(botID: try CallArgs(args).require("botId")) { return token }
             return NSNull()
         }
         handle("honk.bot.resetToken") { [service] args in
-            let id: String = try Args(args).require("botId")
+            let id: String = try CallArgs(args).require("botId")
             let token = try await service.api.resetToken(botID: id)
             service.botTokens.save(token, botID: id)
             return token
         }
         handle("honk.bot.delete") { [service] args in
-            let id: String = try Args(args).require("botId")
+            let id: String = try CallArgs(args).require("botId")
             try await service.api.deleteBot(id: id)
             service.removeNotifications((try? service.store.clearMessages(botID: id)) ?? [])
             try service.store.deleteBot(id: id)
             service.botTokens.remove(botID: id)
+            service.botKeys.remove(botID: id)
             service.changed()
             return true
         }
+
+        // MARK: end-to-end encryption (keys never leave the keychain except through these calls)
+
+        handle("honk.bot.encryption.key") { [service] args in
+            let id: String = try CallArgs(args).require("botId")
+            return service.botKeys.key(botID: id).map(Seal.encode) ?? NSNull()
+        }
+        handle("honk.bot.encryption.enable") { [service] args in
+            let id: String = try CallArgs(args).require("botId")
+            let api = service.api
+            // The gateway's own view decides: a bot already encrypted there takes its key from the group
+            // (a phone paired a moment ago waits for it) instead of making a new one that replaces the group's.
+            guard let bot = try await api.listBots().first(where: { $0.id == id }) else {
+                throw Failure(reason: "找不到这个 Bot")
+            }
+            // The wrapped key lets the group's other devices unwrap it; the key is kept once the gateway has it.
+            let key = try await service.keyRing.enable(bot: bot) { wrapped in
+                _ = try await api.updateBot(id: id, encrypted: true, keyWrapped: wrapped)
+            }
+            try service.store.setEncrypted(botID: id, true)
+            service.changed()
+            return Seal.encode(key)
+        }
+        handle("honk.bot.encryption.disable") { [service] args in
+            let id: String = try CallArgs(args).require("botId")
+            // The gateway first: with its flag still on, plaintext sends stay refused.
+            _ = try await service.api.updateBot(id: id, encrypted: false, keyWrapped: "")
+            service.botKeys.remove(botID: id)
+            try service.store.setEncrypted(botID: id, false)
+            service.changed()
+            return true
+        }
+        handle("honk.bot.encryption.resetKey") { [service] args in
+            let id: String = try CallArgs(args).require("botId")
+            let api = service.api
+            // The old key stays until the gateway has the new one.
+            let key = try await service.keyRing.reset(botID: id) { wrapped in
+                _ = try await api.updateBot(id: id, encrypted: true, keyWrapped: wrapped)
+            }
+            try service.store.setEncrypted(botID: id, true)
+            service.changed()
+            return Seal.encode(key)
+        }
         handle("honk.bot.setMuted") { [service] args in
-            let a = Args(args)
+            let a = CallArgs(args)
             try service.store.setMuted(botID: try a.require("botId"), a.bool("muted") ?? false)
             service.changed()
             return true
         }
         handle("honk.bot.setPinned") { [service] args in
-            let a = Args(args)
+            let a = CallArgs(args)
             try service.store.setPinned(botID: try a.require("botId"), a.bool("pinned") ?? false)
             service.changed()
             return true
@@ -162,12 +261,12 @@ final class NshBridge {
         // MARK: avatars (kept on this phone only)
 
         handle("honk.avatar.save") { [service] args in
-            let base64: String = try Args(args).require("data")
+            let base64: String = try CallArgs(args).require("data")
             guard let data = Data(base64Encoded: base64) else { throw LocalAvatars.SaveError.notAnImage }
             return try LocalAvatars(appGroup: service.config.appGroup).save(data)
         }
         handle("honk.avatar.image") { [service] args in
-            let avatar: String = try Args(args).require("avatar")
+            let avatar: String = try CallArgs(args).require("avatar")
             if let url = LocalAvatars(appGroup: service.config.appGroup).dataURL(for: avatar) { return url }
             return NSNull()
         }
@@ -175,15 +274,34 @@ final class NshBridge {
         // MARK: messages
 
         handle("honk.message.delete") { [service] args in
-            if let n = try service.store.deleteMessage(id: try Args(args).require("messageId")) {
+            if let n = try service.store.deleteMessage(id: try CallArgs(args).require("messageId")) {
                 service.removeNotifications([n])
             }
             service.changed()
             return true
         }
         handle("honk.chat.clear") { [service] args in
-            service.removeNotifications(try service.store.clearMessages(botID: try Args(args).require("botId")))
+            service.removeNotifications(try service.store.clearMessages(botID: try CallArgs(args).require("botId")))
             service.changed()
+            return true
+        }
+        handle("honk.device.delete") { [service] _ in
+            try await service.deleteDeviceData()
+            return true
+        }
+        handle("honk.devices.list") { [service] _ in
+            try await service.listDevices().map(HostJSON.device)
+        }
+        handle("honk.devices.remove") { [service] args in
+            try await service.removeDevice(id: try CallArgs(args).require("deviceId"))
+            return true
+        }
+        handle("honk.link.create") { [service] _ in
+            let c = try await service.createLink()
+            return HostJSON.linkCreated(code: c.code, expiresAt: c.expiresAt)
+        }
+        handle("honk.link.claim") { [service] args in
+            try await service.claimLink(code: try CallArgs(args).require("code"))
             return true
         }
         handle("honk.notifications.open") { _ in
@@ -195,43 +313,25 @@ final class NshBridge {
     }
 
     func openChat(botID: String) {
-        app.send("honk.open", ["botId": botID])
+        app.send("honk.open", HostJSON.openEvent(botID: botID))
     }
 
     private func handle(_ name: String, _ body: @escaping @MainActor (Any?) async throws -> Any) {
         app.handle(name) { data in try await body(data) }
     }
 
-    // MARK: JSON shapes (camelCase; bot ids are strings, message ids numbers)
-
-    static func bot(_ b: Bot) -> [String: Any] {
-        ["id": b.id, "name": b.name, "avatar": b.avatar, "defaultLevel": b.defaultLevel, "createdAt": b.createdAt]
-    }
-
-    static func message(_ m: StoredMessage) -> [String: Any] {
-        ["id": m.id, "botId": m.botID, "title": m.title, "body": m.body, "html": m.html, "data": m.data,
-         "level": m.level, "group": m.group, "url": m.url, "copy": m.copy, "icon": m.icon, "collapseId": m.collapseID,
-         "date": m.date, "read": m.read]
-    }
-
-    static func chat(_ c: ChatSummary) -> [String: Any] {
-        ["bot": bot(c.bot), "muted": c.muted, "pinned": c.pinned, "unread": c.unread,
-         "last": c.last.map(message) ?? NSNull()]
-    }
+    // MARK: status
 
     static func status(_ service: HonkService) async -> [String: Any] {
         let settings = await UNUserNotificationCenter.current().notificationSettings()
-        var out: [String: Any] = [
-            "registered": service.isRegistered,
-            "registration": service.registration.name,
-            "pushMode": service.pushMode.rawValue,
-            "gatewayURL": service.config.gatewayURL.absoluteString,
-            "notifications": Self.authorization(settings.authorizationStatus),
-            "appVersion": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "",
-            "appBuild": Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "",
-        ]
-        if case let .failed(reason) = service.registration { out["registrationError"] = reason }
-        return out
+        var failure: String?
+        if case let .failed(reason) = service.registration { failure = reason }
+        return HostJSON.status(
+            registered: service.isRegistered, registration: service.registration.name, registrationError: failure,
+            pushMode: service.pushMode.rawValue, gatewayURL: service.config.gatewayURL.absoluteString,
+            notifications: Self.authorization(settings.authorizationStatus),
+            appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "",
+            appBuild: Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "")
     }
 
     static func authorization(_ s: UNAuthorizationStatus) -> String {
@@ -239,48 +339,6 @@ final class NshBridge {
         case .authorized, .provisional, .ephemeral: return "authorized"
         case .denied: return "denied"
         default: return "notDetermined"
-        }
-    }
-}
-
-/// Reads the JSON object a host call passes.
-struct Args {
-    let dict: [String: Any]
-
-    init(_ data: Any?) { dict = data as? [String: Any] ?? [:] }
-
-    func string(_ k: String) -> String? {
-        switch dict[k] {
-        case let s as String: return s
-        case let n as NSNumber where CFGetTypeID(n) != CFBooleanGetTypeID(): return n.stringValue
-        default: return nil
-        }
-    }
-    func bool(_ k: String) -> Bool? { (dict[k] as? NSNumber)?.boolValue }
-    func int(_ k: String) -> Int64? {
-        switch dict[k] {
-        case let n as NSNumber: return n.int64Value
-        case let s as String: return Int64(s)
-        default: return nil
-        }
-    }
-
-    func require(_ k: String) throws -> Int64 {
-        guard let v = int(k) else { throw BridgeError.missing(k) }
-        return v
-    }
-
-    func require(_ k: String) throws -> String {
-        guard let v = string(k), !v.isEmpty else { throw BridgeError.missing(k) }
-        return v
-    }
-}
-
-enum BridgeError: Error, LocalizedError {
-    case missing(String)
-    var errorDescription: String? {
-        switch self {
-        case let .missing(k): return "missing argument \(k)"
         }
     }
 }

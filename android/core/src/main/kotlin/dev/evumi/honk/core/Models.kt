@@ -4,6 +4,7 @@ import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 import kotlinx.serialization.descriptors.PrimitiveKind
 import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
 import kotlinx.serialization.encoding.Decoder
@@ -41,6 +42,10 @@ data class Bot(
     @SerialName("default_level") val defaultLevel: String = "active",
     @SerialName("created_at") val createdAt: Long = 0,
     @SerialName("updated_at") val updatedAt: Long = 0,
+    /** End-to-end encryption is on for this bot (the gateway refuses its plaintext). */
+    val encrypted: Boolean = false,
+    /** The bot's key sealed with the group key ([KeyWrap]); empty when there is none. */
+    @SerialName("key_wrapped") val keyWrapped: String = "",
 )
 
 /** One item from the gateway's queue: a new message, or an edit or delete of one. */
@@ -60,10 +65,27 @@ data class QueuedMessage(
     val url: String = "",
     val copy: String = "",
     val icon: String = "",
+    /** `url`: tapping the notification opens [url] instead of the chat. */
+    val open: String = "",
+    /** An https image for the notification and the bubble. */
+    val image: String = "",
+    /** `Markdown` when [body] is Markdown. */
+    @SerialName("parse_mode") val parseMode: String = "",
+    /** Stored and counted, but with no banner. */
+    val silent: Boolean = false,
     /** The sender's replaceable id (`id` in the bot API). */
     @SerialName("id") val collapseId: String = "",
     /** Unix milliseconds. */
     val date: Long = 0,
+    /** The sender let the card's `request()` reach the bot (`allow_queries`). */
+    @SerialName("allow_queries") val allowQueries: Boolean = false,
+    /** The end-to-end sealed content ([Seal]); [MessageOpener] replaces it with the fields above. */
+    val ciphertext: String = "",
+    /**
+     * Set by [MessageOpener] on the stand-in it makes for a message it could not open; never on the wire.
+     * [LocalStore] marks the stored row so real content can replace it later.
+     */
+    @Transient val placeholder: Boolean = false,
 ) {
     @Serializable
     enum class Kind {
@@ -95,9 +117,15 @@ data class StoredMessage(
     val url: String,
     val copy: String,
     val icon: String,
+    val open: String,
+    val image: String,
+    val parseMode: String,
+    val silent: Boolean,
     val collapseId: String,
     val date: Long,
     val read: Boolean,
+    /** The sender let the card's `request()` reach the bot. */
+    val allowQueries: Boolean = false,
 )
 
 /** One row of the chat list: a bot with its latest message and unread count. */
@@ -148,6 +176,8 @@ data class PushInfo(
     val body: String = "",
     val group: String = "",
     val level: String = "",
+    /** A message sent with `silent`: store it, show no notification. */
+    val silent: Boolean = false,
 ) {
     companion object {
         fun parse(data: Map<String, String>): PushInfo? {
@@ -165,6 +195,7 @@ data class PushInfo(
                 body = data["body"].orEmpty(),
                 group = data["group"].orEmpty(),
                 level = data["level"].orEmpty(),
+                silent = data["silent"] == "1",
             )
         }
     }

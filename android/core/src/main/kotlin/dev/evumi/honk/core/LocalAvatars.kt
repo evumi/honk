@@ -40,6 +40,11 @@ class LocalAvatars(private val dir: File) {
         return "data:$type;base64," + Base64.getEncoder().encodeToString(d)
     }
 
+    /** Deletes every kept image (the device's data was deleted). */
+    fun removeAll() {
+        dir.listFiles()?.forEach { it.delete() }
+    }
+
     /**
      * Deletes images no bot uses any more. Ones younger than [graceMs] stay: a
      * picked image is saved before the bot that will use it is created.

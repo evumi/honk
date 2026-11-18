@@ -33,6 +33,26 @@ export function lang(): Lang {
 }
 
 const EN: Record<string, string> = {
+  "图片": "Image",
+  "端到端加密": "End-to-end encryption",
+  "无法更改加密设置": "Can't change the encryption setting",
+  "关闭端到端加密？": "Turn off end-to-end encryption?",
+  "关闭后这个 Bot 可以再用明文发送，这台设备上的密钥会删除。已收到的消息不受影响。":
+    "This bot can send plaintext again, and this device's key is deleted. Messages already received are not affected.",
+  "关闭加密": "Turn off encryption",
+  "重置密钥？": "Reset the key?",
+  "旧密钥立即作废，发送方需要换成新密钥，否则新消息无法解密。已收到的消息不受影响。":
+    "The old key stops working at once. Senders must switch to the new one or new messages can't be decrypted. Messages already received are not affected.",
+  "复制密钥": "Copy key",
+  "重置密钥": "Reset key",
+  "发送方需要 token 和这个密钥：honk send --key，或照 README 里的示例加密。网关、推送中继、苹果和谷歌都看不到通知内容。":
+    "Senders need the token and this key: honk send --key, or encrypt as in the README's examples. The gateway, push relay, Apple and Google can't see the content.",
+  "等待其他设备同步密钥：这个 Bot 已开启加密，密钥还没到这台设备。在已有密钥的设备上打开 Honk 即可。":
+    "Waiting for the key from your other devices: encryption is on for this bot, but its key has not reached this phone yet. Open Honk on a device that has it.",
+  "打开后，通知内容在发送方加密，只有你的设备能解开。网关、推送中继、苹果和谷歌都读不到。":
+    "Once on, content is encrypted by the sender and only your device can open it. The gateway, push relay, Apple and Google can't read it.",
+  "要端到端加密？在 Bot 设置里打开，然后用 honk send --key 密钥 发送。":
+    "Want end-to-end encryption? Turn it on in the bot's settings, then send with honk send --key KEY.",
   "上传图片": "Upload image",
   "无法使用这张图片": "Can't use this image",
   "图片太大，请换一张小一点的": "The image is too large; pick a smaller one",
@@ -44,7 +64,30 @@ const EN: Record<string, string> = {
   "完成": "Done",
   "新建 Bot": "New Bot",
   "搜索": "Search",
-  "没有匹配的会话": "No matching chats",
+  "没有匹配的结果": "No matches",
+  // message storage: retention, export and import
+  "保留期限": "Keep messages",
+  "永久": "Forever",
+  "1 年": "1 year",
+  "90 天": "90 days",
+  "30 天": "30 days",
+  "只保留最近 {period}？": "Keep only the last {period}?",
+  "这台设备上更早的消息会立即删除，无法恢复。网关上的消息不受影响。":
+    "Older messages on this device are deleted at once and can't be recovered. Messages on the gateway are not affected.",
+  "无法更改": "Couldn't change it",
+  "超过保留期限的消息会从这台设备上删除，不影响网关。导出的 JSON Lines 文件可以在这里导入回来；属于这台设备上没有的 Bot 的消息会被跳过。":
+    "Messages past the retention period are deleted from this device; the gateway is not affected. A JSON Lines file exported earlier can be imported here; messages of bots this device doesn't have are skipped.",
+  "导出全部消息": "Export all messages",
+  "导入消息": "Import messages",
+  "导出消息": "Export messages",
+  "没有可导出的消息": "No messages to export",
+  "导出失败": "Export failed",
+  "导入完成": "Import finished",
+  "导入失败": "Import failed",
+  "新增 {n} 条消息。": "{n} messages added.",
+  "{n} 条已经在这台设备上。": "{n} already on this device.",
+  "{n} 条属于这台设备上没有的 Bot，已跳过。": "{n} belong to bots this device doesn't have; skipped.",
+  "{n} 行无法读取。": "{n} lines couldn't be read.",
   "还没有 Bot": "No bots yet",
   "每个 Bot 是一个独立的通知渠道。创建后用它的 token 调用发送接口，通知就会出现在这里。":
     "Each bot is its own notification channel. Create one, send to its token, and notifications show up here.",
@@ -155,6 +198,59 @@ const EN: Record<string, string> = {
   "删除后 token 立即失效。": "Deleting a bot revokes its token at once.",
   "清空消息": "Clear messages",
   "删除 Bot": "Delete Bot",
+  // delete this device's data
+  "数据": "Data",
+  "将删除：这台设备在网关上的注册；所有 Bot，它们的 token 立即失效；网关上排队的消息；本机的消息和头像。无法恢复。":
+    "This deletes this device's registration on the gateway; all bots, whose tokens stop working at once; the messages queued on the gateway; and the messages and avatars on this phone. It can't be undone.",
+  "删除这台设备在网关上的注册、所有 Bot 和排队的消息，并清空本机数据。之后创建 Bot 或重新打开 App 时，这台设备会重新注册。":
+    "Deletes this device's registration, all bots and queued messages on the gateway, and clears this phone's data. The device registers again when you create a bot or reopen the app.",
+  "正在删除…": "Deleting…",
+  "删除失败": "Couldn't delete",
+  // device groups
+  "设备": "Devices",
+  "这台设备": "This device",
+  "从未": "never",
+  "刚刚": "just now",
+  "{n} 小时前": "{n} h ago",
+  "{n} 天前": "{n} d ago",
+  "添加设备": "Add device",
+  "已有设备？输入配对码": "Already have a device? Enter a pairing code",
+  "设备组里的手机共用同一批 Bot，每条通知都会推送到所有设备。换新手机时，在新手机上输入旧手机的配对码即可，Bot 的 token 不变。":
+    "The phones in a device group share the same bots, and every notification is pushed to all of them. To switch phones, enter the old phone's pairing code on the new one; the bots' tokens stay the same.",
+  "删除全部数据": "Delete all data",
+  "删除全部数据？": "Delete all data?",
+  "将删除：设备组里所有设备在网关上的注册（包括其他 {n} 台设备）；所有 Bot，它们的 token 立即失效；网关上排队的消息；本机的消息和头像。无法恢复。":
+    "This deletes the registration of every device in the group on the gateway ({n} other devices included); all bots, whose tokens stop working at once; the messages queued on the gateway; and the messages and avatars on this phone. It can't be undone.",
+  "从设备组移除这台设备": "Remove this device from the group",
+  "从设备组移除这台设备？": "Remove this device from the group?",
+  "这台设备会从设备组里退出，并清空本机的消息、头像和 token。其他设备和 Bot 不受影响，Bot 仍会推送给它们。之后可以用配对码重新加入。":
+    "This phone leaves the group, and its messages, avatars and tokens are cleared. The other devices and the bots are not affected; the bots keep pushing to them. You can join again with a pairing code.",
+  "移除": "Remove",
+  "移除 {name}？": "Remove {name}?",
+  "这台设备不再收到通知，也不再能使用这些 Bot。Bot 和其他设备不受影响。":
+    "This device stops getting notifications and can no longer use these bots. The bots and the other devices are not affected.",
+  "「从设备组移除这台设备」只让这台手机退出，Bot 留给其他设备。「删除全部数据」会删除设备组在网关上的一切，并清空本机。":
+    "\"Remove this device from the group\" only takes this phone out; the bots stay with the other devices. \"Delete all data\" deletes everything of the group on the gateway and clears this phone.",
+  "正在生成…": "Generating…",
+  "复制配对码": "Copy pairing code",
+  "重新生成": "Generate a new one",
+  "配对码已过期": "The pairing code has expired",
+  "{time} 后过期，只能用一次": "Expires in {time}; works once",
+  "在新手机上打开 Honk，到「设置 → 设备 → 已有设备？输入配对码」，输入这串配对码。新手机加入后会和这台手机共用所有 Bot，每条通知都会推送到两台手机。":
+    "On the new phone, open Honk, go to Settings → Devices → Already have a device? Enter a pairing code, and type this code. The new phone then shares all bots with this one, and every notification is pushed to both.",
+  "配对码只经过网关一次，网关看不到它：它只存放用配对码加密过的数据。无论谁拿到配对码，都能在有效期内加入你的设备组，请只给你自己的手机。":
+    "The gateway never sees the code: it only holds data encrypted with it. Anyone who has the code can join your device group while it is valid, so give it only to your own phone.",
+  "输入配对码": "Enter pairing code",
+  "配对码": "Pairing code",
+  "粘贴": "Paste",
+  "加入": "Join",
+  "正在加入…": "Joining…",
+  "在已有设备上打开「设置 → 设备 → 添加设备」，会显示 26 位配对码。大小写和短横线都不影响。":
+    "On a device you already have, open Settings → Devices → Add device to see a 26-character code. Case and dashes don't matter.",
+  "已加入设备组": "Joined the device group",
+  "这台手机现在和你的其他设备共用同一批 Bot。你在新手机上原有的 Bot 也并入了设备组。":
+    "This phone now shares its bots with your other devices. Any bots this phone already had joined the group too.",
+  "{error}。这台设备的数据没有改动，请稍后重试。": "{error}. This device's data is unchanged; try again later.",
   // gateway
   "切换网关？": "Switch gateway?",
   "改用 {url}。这台设备会在新网关上重新注册，当前的 Bot 和消息会从这台设备上清除；它们在原网关上仍然保留。":
@@ -174,6 +270,17 @@ const EN: Record<string, string> = {
   "自定义": "Custom",
   "默认": "Default",
   "恢复默认网关": "Restore default gateway",
+  "注册口令": "Register key",
+  "可选": "Optional",
+  "需要注册口令": "needs a register key",
+  "直连": "direct",
+  "经中继": "via relay",
+  "关闭": "off",
+  "iOS 推送：{mode}": "iOS push: {mode}",
+  "Android 推送：{mode}": "Android push: {mode}",
+  "推送关闭的平台，只能在打开 App 时收到通知。": "On a platform with push off, notifications arrive only when the app is opened.",
+  "网关设置了注册口令（HONK_REGISTER_KEY）时，填在这里，注册这台设备时会带上；没有就留空。":
+    "If the gateway is set up with a register key (HONK_REGISTER_KEY), enter it here; it is sent when this device registers. Leave it empty otherwise.",
   "切换中…": "Switching…",
   "保存并切换": "Save and switch",
 };

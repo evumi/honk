@@ -1,15 +1,18 @@
 import { createNavStack } from "nsh/base";
 import { signal } from "nsh";
-import { api, on, type BotId, type Chat, type Status } from "./host";
+import { api, on, type BotId, type Chat, type GroupDevice, type Status } from "./host";
 import { reuse } from "./stable";
 
 export type Route =
   | { name: "home" }
-  | { name: "chat"; botId: BotId }
+  /** `messageId`: open scrolled to that message (a search result). */
+  | { name: "chat"; botId: BotId; messageId?: number }
   | { name: "newBot"; botId?: BotId }
   | { name: "botCreated"; botId: BotId; token: string; botName: string; avatar: string }
   | { name: "botSettings"; botId: BotId }
-  | { name: "gateway" };
+  | { name: "gateway" }
+  | { name: "addDevice" }
+  | { name: "pair" };
 
 export const nav = createNavStack<Route>([{ name: "home" }]);
 
@@ -25,6 +28,18 @@ export async function reload() {
     console.error("chats", e);
   }
   version.update((v) => v + 1);
+}
+
+/** The devices of this phone's group; empty until loaded, and for a gateway without device groups. */
+export const devices = signal<GroupDevice[]>([]);
+
+export async function loadDevices() {
+  try {
+    devices.set(reuse(devices(), await api.devices(), (d) => d.id));
+  } catch (e) {
+    devices.set([]);
+    console.error("devices", e);
+  }
 }
 
 export async function loadStatus() {

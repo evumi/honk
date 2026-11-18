@@ -15,6 +15,7 @@ internal object CardNative {
     @JvmStatic external fun open(load: ByteArray, result: Array<ByteArray?>): Long
     @JvmStatic external fun click(card: Long, path: ByteArray): ByteArray?
     @JvmStatic external fun tick(card: Long): ByteArray?
+    @JvmStatic external fun answer(card: Long, seq: Int, ok: Boolean, data: ByteArray): ByteArray?
     @JvmStatic external fun set(card: Long, state: ByteArray): ByteArray?
     @JvmStatic external fun next(card: Long): Double
     @JvmStatic external fun memory(card: Long): Long
@@ -64,6 +65,14 @@ class CardHost(private val changed: (key: String, result: String) -> Unit) {
     }
 
     fun click(key: String, path: String): String = call(key) { CardNative.click(it, path.toByteArray(Charsets.UTF_8)) }
+
+    /**
+     * Delivers the answer to a card's `request` (the result's {"seq", "data"}): [ok] resolves its
+     * promise with [data] (at most 1024 bytes), otherwise it rejects with [data] as the error code
+     * ("TIMEOUT", "NETWORK", ...). Returns a normal result; an unknown seq changes nothing.
+     */
+    fun answer(key: String, seq: Int, ok: Boolean, data: String): String =
+        call(key) { CardNative.answer(it, seq, ok, data.toByteArray(Charsets.UTF_8)) }
 
     fun set(key: String, state: String): String = call(key) { CardNative.set(it, state.toByteArray(Charsets.UTF_8)) }
 

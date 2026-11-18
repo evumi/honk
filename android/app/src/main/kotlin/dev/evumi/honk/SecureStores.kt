@@ -5,9 +5,12 @@ import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKeys
 import dev.evumi.honk.core.ApiClient
+import dev.evumi.honk.core.BotKeyStore
 import dev.evumi.honk.core.BotTokenStore
 import dev.evumi.honk.core.CredentialStore
 import dev.evumi.honk.core.Credentials
+import dev.evumi.honk.core.GroupKeyStore
+import dev.evumi.honk.core.Seal
 
 /** EncryptedSharedPreferences with a key in the Android Keystore. Not backed up (allowBackup is off). */
 object SecurePrefs {
@@ -52,6 +55,8 @@ class PrefsBotTokenStore(private val prefs: SharedPreferences) : BotTokenStore {
         prefs.edit().remove(key(botId)).apply()
     }
 
+    override fun ids(): List<String> = prefs.all.keys.filter { it.startsWith(PREFIX) }.map { it.removePrefix(PREFIX) }
+
     override fun removeAll() {
         val edit = prefs.edit()
         prefs.all.keys.filter { it.startsWith(PREFIX) }.forEach(edit::remove)
@@ -62,5 +67,59 @@ class PrefsBotTokenStore(private val prefs: SharedPreferences) : BotTokenStore {
 
     private companion object {
         const val PREFIX = "bot-token."
+    }
+}
+
+/**
+ * Each bot's end-to-end key, keyed `bot-key.<id>` as unpadded base64url, in the
+ * same EncryptedSharedPreferences as the tokens (Keystore-backed, not backed up).
+ * The FCM service and the activity share them, so a notification can be
+ * decrypted while the app is closed.
+ */
+class PrefsBotKeyStore(private val prefs: SharedPreferences) : BotKeyStore {
+    override fun key(botId: String): ByteArray? = prefs.getString(prefKey(botId), null)?.let(Seal::parseKey)
+
+    override fun save(botId: String, key: ByteArray) {
+        prefs.edit().putString(prefKey(botId), Seal.encode(key)).commit()
+    }
+
+    override fun remove(botId: String) {
+        prefs.edit().remove(prefKey(botId)).commit()
+    }
+
+    override fun ids(): List<String> = prefs.all.keys.filter { it.startsWith(PREFIX) }.map { it.removePrefix(PREFIX) }
+
+    override fun removeAll() {
+        val edit = prefs.edit()
+        prefs.all.keys.filter { it.startsWith(PREFIX) }.forEach(edit::remove)
+        edit.commit()
+    }
+
+    private fun prefKey(botId: String) = "$PREFIX$botId"
+
+    private companion object {
+        const val PREFIX = "bot-key."
+    }
+}
+
+/**
+ * The group key (unpadded base64url) in the same EncryptedSharedPreferences. It
+ * wraps each bot's key for the gateway so the group's other devices can unwrap
+ * it, and never goes to the gateway in clear: a pairing bundle (sealed with the
+ * pairing code) carries it to a new phone.
+ */
+class PrefsGroupKeyStore(private val prefs: SharedPreferences) : GroupKeyStore {
+    override fun groupKey(): ByteArray? = prefs.getString(KEY, null)?.let(Seal::parseKey)
+
+    override fun save(key: ByteArray) {
+        prefs.edit().putString(KEY, Seal.encode(key)).commit()
+    }
+
+    override fun remove() {
+        prefs.edit().remove(KEY).commit()
+    }
+
+    private companion object {
+        const val KEY = "group-key"
     }
 }

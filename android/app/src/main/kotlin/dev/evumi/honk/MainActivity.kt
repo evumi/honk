@@ -3,6 +3,7 @@ package dev.evumi.honk
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
@@ -12,8 +13,10 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.longbridge.nsh.NshView
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Hosts the nsh app (built from ../app into assets/nsh) full screen and wires
@@ -27,6 +30,29 @@ class MainActivity : ComponentActivity() {
 
     private val askNotifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
         bridge.statusChanged()
+    }
+
+    private var picked: CompletableDeferred<Uri?>? = null
+    private val openDocument = registerForActivityResult(ActivityResultContracts.OpenDocument()) {
+        val answer = synchronized(this) { picked.also { picked = null } }
+        answer?.complete(it)
+    }
+
+    /** Lets the user pick a file (honk.import): its Uri, or null when they cancel. Any thread. */
+    suspend fun pickDocument(): Uri? {
+        val answer = CompletableDeferred<Uri?>()
+        // One picker at a time: a second call while one is open is answered as cancelled, so the first
+        // caller's result is never overwritten or left waiting.
+        synchronized(this) {
+            if (picked != null) return null
+            picked = answer
+        }
+        try {
+            withContext(Dispatchers.Main) { openDocument.launch(arrayOf("*/*")) }
+            return answer.await()
+        } finally {
+            synchronized(this) { if (picked === answer) picked = null }
+        }
     }
 
     override fun onCreate(state: Bundle?) {
@@ -52,6 +78,8 @@ class MainActivity : ComponentActivity() {
 
         requestNotificationPermission()
         handleOpen(intent)
+        // Messages past the retention period go at start, whether or not a refresh follows.
+        lifecycleScope.launch(Dispatchers.IO) { if (service.pruneExpired()) service.changed() }
     }
 
     private fun load() {
@@ -115,6 +143,8 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        // A picker still open can no longer answer: cancel its waiting caller.
+        synchronized(this) { picked.also { picked = null } }?.complete(null)
         bridge.uninstall()
         nsh.destroy()
         super.onDestroy()

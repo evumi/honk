@@ -7,19 +7,26 @@ import android.os.Build
 import android.provider.Settings
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.lifecycle.lifecycleScope
 import com.longbridge.nsh.NshHostReply
 import com.longbridge.nsh.NshView
-import dev.evumi.honk.core.Bot
+import dev.evumi.honk.core.ApiClient
+import dev.evumi.honk.core.Args
 import dev.evumi.honk.core.CardHost
-import dev.evumi.honk.core.ChatSummary
+import dev.evumi.honk.core.CardRequests
 import dev.evumi.honk.core.Gateway
+import dev.evumi.honk.core.HostArgs
+import dev.evumi.honk.core.HostJson
+import dev.evumi.honk.core.HttpTransport
 import dev.evumi.honk.core.LocalAvatars
-import dev.evumi.honk.core.StoredMessage
+import dev.evumi.honk.core.MessageArchive
+import dev.evumi.honk.core.Seal
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import java.io.File
 import java.util.Base64
 
 /**
@@ -28,10 +35,11 @@ import java.util.Base64
  * app/src/host.ts and the iOS side ios/App/NshBridge.swift; keep the three in
  * step.
  *
- * Calls: honk.status, honk.chats, honk.messages, honk.markRead, honk.focus,
- * honk.refresh, honk.bot.create, honk.bot.update, honk.bot.token,
- * honk.bot.resetToken, honk.bot.delete, honk.bot.setMuted, honk.bot.setPinned,
- * honk.message.delete, honk.chat.clear, honk.notifications.open, honk.avatar.save, honk.avatar.image,
+ * Calls: honk.status, honk.chats, honk.messages, honk.search, honk.markRead, honk.focus,
+ * honk.refresh, honk.retention.get, honk.retention.set, honk.export, honk.import, honk.bot.create, honk.bot.update, honk.bot.token,
+ * honk.bot.resetToken, honk.bot.delete, honk.bot.encryption.{key,enable,disable,resetKey}, honk.bot.setMuted, honk.bot.setPinned,
+ * honk.message.delete, honk.chat.clear, honk.device.delete, honk.devices.list, honk.devices.remove,
+ * honk.link.create, honk.link.claim, honk.notifications.open, honk.avatar.save, honk.avatar.image,
  * honk.gateway.get, honk.gateway.test, honk.gateway.set, honk.register.retry.
  * Card scripts: honk.card.open, honk.card.click, honk.card.set, honk.card.close.
  * Events: honk.changed (the store changed), honk.open { botId } (open a chat),
@@ -52,22 +60,39 @@ class NshBridge(
     // Card scripts run on their own thread, each in a QuickJS runtime (native/card);
     // the strings in and out are JSON the app reads. Timer changes go to the UI thread.
     private val cards = CardHost { key, result ->
-        activity.runOnUiThread { nsh.send("honk.card.changed", mapOf("key" to key, "result" to result)) }
+        activity.runOnUiThread { nsh.send("honk.card.changed", HostJson.cardChangedEvent(key, result)) }
     }
+
+    // A card's request(): the host sends it to the message's bot itself and gives the card the answer;
+    // the app sees neither (the result it gets has no `request`). The gateway waits up to 15 s for the bot.
+    private val requests = CardRequests(
+        query = { messageId, data ->
+            ApiClient(service.gatewayUrl, service.credentials.load()?.secret, HttpTransport(timeoutMs = 20_000)).query(messageId, data)
+        },
+        answer = { key, seq, ok, data -> cards.answer(key, seq, ok, data) },
+        changed = { key, result -> activity.runOnUiThread { nsh.send("honk.card.changed", HostJson.cardChangedEvent(key, result)) } },
+    )
 
     fun install() {
         removeListener = service.addChangeListener { nsh.send("honk.changed", null) }
         // Only once the app listens: until then pushes get a system notification.
         handle("honk.incoming.listen") {
-            service.onIncoming = { botId, messageId -> nsh.send("honk.incoming", mapOf("botId" to botId, "messageId" to messageId)) }
+            service.onIncoming = { botId, messageId -> nsh.send("honk.incoming", HostJson.incomingEvent(botId, messageId)) }
             true
         }
 
-        handle("honk.card.open") { a -> cards.open(a.requireString("key"), a.requireString("load")) }
-        handle("honk.card.click") { a -> cards.click(a.requireString("key"), a.requireString("path")) }
-        handle("honk.card.set") { a -> cards.set(a.requireString("key"), a.requireString("state")) }
+        handle("honk.card.open") { a ->
+            HostArgs.CardCall(a, "load").let {
+                requests.opened(it.key, it.payload)
+                cards.open(it.key, it.payload)
+            }
+        }
+        handle("honk.card.click") { a -> HostArgs.CardCall(a, "path").let { requests.filter(it.key, cards.click(it.key, it.payload)) } }
+        handle("honk.card.set") { a -> HostArgs.CardCall(a, "state").let { cards.set(it.key, it.payload) } }
         handle("honk.card.close") { a ->
-            cards.close(a.requireString("key"))
+            val key = HostArgs.CardCall(a, null).key
+            requests.closed(key)
+            cards.close(key)
             true
         }
 
@@ -76,9 +101,70 @@ class NshBridge(
             service.retryRegistration()
             status()
         }
-        handle("honk.chats") { service.store.chats().map(::chat) }
+        handle("honk.chats") { service.store.chats().map(HostJson::chat) }
         handle("honk.messages") { a ->
-            service.store.messages(a.requireString("botId"), a.long("before"), a.long("limit")?.toInt() ?: 50).map(::message)
+            HostArgs.Messages(a).let {
+                // `around`: a window around that message (a search result opened in its chat).
+                val around = it.around
+                if (around != null) service.store.messagesAround(it.botId, around, it.limit)
+                else service.store.messages(it.botId, it.before, it.limit)
+            }.map(HostJson::message)
+        }
+        handle("honk.search") { a -> HostArgs.Search(a).let { service.store.search(it.query, it.before) }.map(HostJson::message) }
+
+        // retention, export and import
+
+        handle("honk.retention.get") { service.store.retentionDays }
+        handle("honk.retention.set") { a ->
+            service.store.retentionDays = HostArgs.RetentionSet(a).days
+            service.pruneExpired()
+            service.changed()
+            service.store.retentionDays
+        }
+        handle("honk.export") { a ->
+            // One chat, or every chat when `botId` is missing: written to the cache and offered in the share sheet.
+            val botId = HostArgs.Export(a).botId
+            val messages = service.store.exportMessages(botId)
+            if (messages.isEmpty()) {
+                HostJson.exportResult(0, false)
+            } else {
+                val name = MessageArchive.fileName(botId?.let { service.store.bot(it)?.name })
+                val dir = File(activity.cacheDir, "exports").apply { deleteRecursively(); mkdirs() }
+                val file = File(dir, name).apply { writeText(MessageArchive.encode(messages)) }
+                val uri = FileProvider.getUriForFile(activity, "${activity.packageName}.exports", file)
+                val send = Intent(Intent.ACTION_SEND)
+                    .setType("text/plain")
+                    .putExtra(Intent.EXTRA_STREAM, uri)
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                withContext(Dispatchers.Main) {
+                    activity.startActivity(Intent.createChooser(send, activity.getString(R.string.export_messages)))
+                }
+                // The share sheet gives no result: it is on screen, which is all the app can know.
+                HostJson.exportResult(messages.size, true)
+            }
+        }
+        handle("honk.import") {
+            // Picks a file and adds its messages; null when the user cancels.
+            val uri = activity.pickDocument()
+            if (uri == null) {
+                null
+            } else {
+                val bytes = activity.contentResolver.openInputStream(uri)?.use { input ->
+                    val out = java.io.ByteArrayOutputStream()
+                    val buf = ByteArray(64 * 1024)
+                    while (true) {
+                        val n = input.read(buf)
+                        if (n < 0) break
+                        out.write(buf, 0, n)
+                        if (out.size() > MAX_IMPORT_BYTES) throw IllegalArgumentException("the file is larger than 64 MB")
+                    }
+                    out.toByteArray()
+                } ?: throw IllegalArgumentException("cannot read the file")
+                val archive = MessageArchive.decode(String(bytes, Charsets.UTF_8))
+                val r = service.store.importMessages(archive.messages)
+                service.changed()
+                HostJson.importResult(r, archive.invalid)
+            }
         }
         handle("honk.markRead") { a ->
             service.markRead(a.requireString("botId"))
@@ -96,42 +182,48 @@ class NshBridge(
         // gateway
 
         handle("honk.gateway.get") {
-            mapOf("url" to service.gatewayUrl, "defaultURL" to service.defaultGatewayUrl, "custom" to service.isCustomGateway)
+            HostJson.gatewayGet(service.gatewayUrl, service.defaultGatewayUrl, service.isCustomGateway, service.registerKey.orEmpty())
         }
         handle("honk.gateway.test") { a ->
             try {
                 val checked = service.testGateway(a.requireString("url"))
-                mapOf("ok" to true, "url" to checked.url, "version" to checked.version)
+                HostJson.gatewayTest(checked.url, checked.version, checked.registerKeyRequired, checked.push)
             } catch (e: Exception) {
-                mapOf("ok" to false, "error" to Gateway.describe(e))
+                HostJson.gatewayTestFailed(Gateway.describe(e))
             }
         }
         handle("honk.gateway.set") { a ->
-            // `url` null or missing: back to the default gateway. Failures reject the call.
+            // `url` null or missing: back to the default gateway; `registerKey` missing or empty: none.
+            // Failures reject the call.
+            val g = HostArgs.GatewaySet(a)
             try {
-                service.switchGateway(a.string("url"))
+                service.switchGateway(g.url, g.registerKey)
             } catch (e: Exception) {
                 throw IllegalStateException(Gateway.describe(e), e)
             }
-            mapOf("url" to service.gatewayUrl, "registered" to service.isRegistered)
+            HostJson.gatewaySet(service.gatewayUrl, service.isRegistered)
         }
 
         // bots
 
         handle("honk.bot.create") { a ->
-            val created = service.api.createBot(a.requireString("name"), a.string("avatar").orEmpty(), a.string("defaultLevel") ?: "active")
+            val c = HostArgs.BotCreate(a)
+            // After the device's data was deleted, the first bot registers it again.
+            if (!service.isRegistered) service.retryRegistration()
+            val created = service.api.createBot(c.name, c.avatar, c.defaultLevel)
             service.store.saveBot(created.bot)
             service.botTokens.save(created.bot.id, created.token)
             service.notifier.ensureChannel(created.bot.id, created.bot.name)
             service.changed()
-            mapOf("bot" to bot(created.bot), "token" to created.token)
+            HostJson.botCreated(created.bot, created.token)
         }
         handle("honk.bot.update") { a ->
-            val b = service.api.updateBot(a.requireString("botId"), a.string("name"), a.string("avatar"), a.string("defaultLevel"))
+            val u = HostArgs.BotUpdate(a)
+            val b = service.api.updateBot(u.botId, u.name, u.avatar, u.defaultLevel)
             service.store.saveBot(b)
             service.notifier.ensureChannel(b.id, b.name)
             service.changed()
-            bot(b)
+            HostJson.bot(b)
         }
         handle("honk.bot.token") { a -> service.botTokens.token(a.requireString("botId")) }
         handle("honk.bot.resetToken") { a ->
@@ -144,9 +236,44 @@ class NshBridge(
             service.notifier.cancel(service.store.clearMessages(id))
             service.store.deleteBot(id)
             service.botTokens.remove(id)
+            service.botKeys.remove(id)
             service.notifier.deleteChannel(id)
             service.changed()
             true
+        }
+
+        // end-to-end encryption (keys never leave the keystore except through these calls)
+
+        handle("honk.bot.encryption.key") { a -> service.botKeys.key(a.requireString("botId"))?.let(Seal::encode) }
+        handle("honk.bot.encryption.enable") { a ->
+            val id = a.requireString("botId")
+            val api = service.api
+            // The gateway's own view decides: a bot already encrypted there takes its key from the group (a
+            // phone paired a moment ago waits for it) instead of making a new one that replaces the group's.
+            val bot = api.listBots().firstOrNull { it.id == id } ?: throw IllegalStateException("找不到这个 Bot")
+            // The wrapped key lets the group's other devices unwrap it; the key is kept once the gateway has it.
+            val key = service.keyRing.enable(bot) { wrapped -> api.updateBot(id, encrypted = true, keyWrapped = wrapped) }
+            service.store.setEncrypted(id, true)
+            service.changed()
+            Seal.encode(key)
+        }
+        handle("honk.bot.encryption.disable") { a ->
+            val id = a.requireString("botId")
+            // The gateway first: with its flag still on, plaintext sends stay refused.
+            service.api.updateBot(id, encrypted = false, keyWrapped = "")
+            service.botKeys.remove(id)
+            service.store.setEncrypted(id, false)
+            service.changed()
+            true
+        }
+        handle("honk.bot.encryption.resetKey") { a ->
+            val id = a.requireString("botId")
+            val api = service.api
+            // The old key stays until the gateway has the new one.
+            val key = service.keyRing.reset(id) { wrapped -> api.updateBot(id, encrypted = true, keyWrapped = wrapped) }
+            service.store.setEncrypted(id, true)
+            service.changed()
+            Seal.encode(key)
         }
         handle("honk.bot.setMuted") { a ->
             service.store.setMuted(a.requireString("botId"), a.bool("muted") ?: false)
@@ -182,6 +309,23 @@ class NshBridge(
             service.changed()
             true
         }
+        handle("honk.device.delete") {
+            service.deleteDeviceData()
+            true
+        }
+        handle("honk.devices.list") { service.listDevices().map { HostJson.device(it) } }
+        handle("honk.devices.remove") { a ->
+            service.removeDevice(a.requireString("deviceId"))
+            true
+        }
+        handle("honk.link.create") {
+            val c = service.createLink()
+            HostJson.linkCreated(c.code, c.expiresAt)
+        }
+        handle("honk.link.claim") { a ->
+            service.claimLink(a.requireString("code"))
+            true
+        }
         handle("honk.notifications.open", io = false) {
             val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
                 .putExtra(Settings.EXTRA_APP_PACKAGE, activity.packageName)
@@ -198,7 +342,7 @@ class NshBridge(
     }
 
     fun openChat(botId: String) {
-        nsh.send("honk.open", mapOf("botId" to botId))
+        nsh.send("honk.open", HostJson.openEvent(botId))
     }
 
     /** The notification permission may have changed (back from settings, the dialog answered). */
@@ -207,16 +351,16 @@ class NshBridge(
     }
 
     /** honk.status: Android always has a real push channel (FCM), so pushMode is "apns" as on a device. */
-    private fun status(): Map<String, Any?> = buildMap {
-        put("registered", service.isRegistered)
-        put("registration", service.registration.name)
-        (service.registration as? HonkService.Registration.Failed)?.let { put("registrationError", it.reason) }
-        put("pushMode", "apns")
-        put("gatewayURL", service.gatewayUrl)
-        put("notifications", notificationStatus())
-        put("appVersion", BuildConfig.VERSION_NAME)
-        put("appBuild", BuildConfig.VERSION_CODE.toString())
-    }
+    private fun status(): Map<String, Any?> = HostJson.status(
+        registered = service.isRegistered,
+        registration = service.registration.name,
+        registrationError = (service.registration as? HonkService.Registration.Failed)?.reason,
+        pushMode = "apns",
+        gatewayUrl = service.gatewayUrl,
+        notifications = notificationStatus(),
+        appVersion = BuildConfig.VERSION_NAME,
+        appBuild = BuildConfig.VERSION_CODE.toString(),
+    )
 
     private fun notificationStatus(): String {
         val granted = Build.VERSION.SDK_INT < 33 ||
@@ -234,7 +378,7 @@ class NshBridge(
                 try {
                     val args = Args(data)
                     val result = if (io) withContext(Dispatchers.IO) { body(args) } else body(args)
-                    reply.resolve(result)
+                    reply.resolve(orgJson(result))
                 } catch (e: Exception) {
                     reply.reject(e.message ?: e.javaClass.simpleName)
                 }
@@ -242,40 +386,16 @@ class NshBridge(
         }
     }
 
-    // JSON shapes (camelCase; bot ids are strings, message ids numbers), the same as NshBridge.swift.
-
-    private fun bot(b: Bot): Map<String, Any?> =
-        mapOf("id" to b.id, "name" to b.name, "avatar" to b.avatar, "defaultLevel" to b.defaultLevel, "createdAt" to b.createdAt)
-
-    private fun message(m: StoredMessage): Map<String, Any?> = mapOf(
-        "id" to m.id, "botId" to m.botId, "title" to m.title, "body" to m.body, "html" to m.html, "data" to m.data,
-        "level" to m.level, "group" to m.group, "url" to m.url, "copy" to m.copy, "icon" to m.icon,
-        "collapseId" to m.collapseId, "date" to m.date, "read" to m.read,
-    )
-
-    private fun chat(c: ChatSummary): Map<String, Any?> = mapOf(
-        "bot" to bot(c.bot), "muted" to c.muted, "pinned" to c.pinned, "unread" to c.unread,
-        // nsh serialises through org.json, whose JSONObject(Map) drops null values: JSONObject.NULL keeps `last: null`.
-        "last" to (c.last?.let(::message) ?: JSONObject.NULL),
-    )
+    /**
+     * nsh serialises through org.json, whose JSONObject(Map) drops null values
+     * (`last: null` would vanish): JSONObject.NULL keeps them. The shapes come
+     * from HostJson in :core, the same as HostJSON in ios/HonkKit.
+     */
+    private fun orgJson(v: Any?): Any? = when (v) {
+        is Map<*, *> -> v.entries.associate { (k, x) -> k to (orgJson(x) ?: JSONObject.NULL) }
+        is List<*> -> v.map { orgJson(it) ?: JSONObject.NULL }
+        else -> v
+    }
 }
 
-/** Reads the JSON object a host call passes. */
-class Args(data: Any?) {
-    private val map: Map<*, *> = data as? Map<*, *> ?: emptyMap<String, Any>()
-
-    fun string(k: String): String? = when (val v = map[k]) {
-        is String -> v
-        is Number -> v.toLong().toString()
-        else -> null
-    }
-    fun bool(k: String): Boolean? = map[k] as? Boolean
-    fun long(k: String): Long? = when (val v = map[k]) {
-        is Number -> v.toLong()
-        is String -> v.toLongOrNull()
-        else -> null
-    }
-
-    fun require(k: String): Long = long(k) ?: throw IllegalArgumentException("missing argument $k")
-    fun requireString(k: String): String = string(k)?.takeIf { it.isNotEmpty() } ?: throw IllegalArgumentException("missing argument $k")
-}
+private const val MAX_IMPORT_BYTES = 64 * 1024 * 1024

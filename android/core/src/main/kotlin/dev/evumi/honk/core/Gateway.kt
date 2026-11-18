@@ -27,8 +27,8 @@ object Gateway {
         return "$scheme://${uri.rawAuthority}$path"
     }
 
-    /** A successful check: the normalised address and the gateway's version. */
-    data class Checked(val url: String, val version: String)
+    /** A successful check: the normalised address, the gateway's version and whether it asks for a register key. */
+    data class Checked(val url: String, val version: String, val registerKeyRequired: Boolean = false, val push: ApiClient.PushRoutes? = null)
 
     class InvalidUrl : IOException("地址无效：需要 http:// 或 https:// 开头的网址")
     class NotHonk : IOException("这个地址不是 Honk 网关")
@@ -38,7 +38,7 @@ object Gateway {
         val url = normalize(address) ?: throw InvalidUrl()
         val info = ApiClient(url, null, transport).info()
         if (info.name != "honk") throw NotHonk()
-        return Checked(url, info.version)
+        return Checked(url, info.version, info.registerKeyRequired, info.push)
     }
 
     /** A short Chinese description of a failure, for the settings page. */

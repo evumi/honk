@@ -10,12 +10,34 @@ import (
 	"encoding/hex"
 	"errors"
 	"log/slog"
+	"net/http"
+	"time"
 	"unicode/utf8"
 )
 
 // ErrTokenGone means APNs or FCM no longer knows the push token: the app was
 // removed or the token was rotated.
 var ErrTokenGone = errors.New("push token is no longer valid")
+
+// RetryableError marks a failure that may go away: a network error, a timeout,
+// a 5xx or a 429. After, when positive, is how long the service asked to wait.
+type RetryableError struct {
+	Err   error
+	After time.Duration
+}
+
+func (e *RetryableError) Error() string { return e.Err.Error() }
+func (e *RetryableError) Unwrap() error { return e.Err }
+
+// Retryable reports whether err is worth another attempt and how long the
+// service asked to wait (0 when it did not say).
+func Retryable(err error) (after time.Duration, ok bool) {
+	var re *RetryableError
+	if errors.As(err, &re) {
+		return re.After, true
+	}
+	return 0, false
+}
 
 // Notification is one push to one device.
 type Notification struct {
@@ -32,10 +54,41 @@ type Notification struct {
 	Level     string // passive | active | timeSensitive
 	// CollapseID is the sender's id for replaceable messages, unique per bot.
 	CollapseID string
+	// CollapseKey, when set, is the collapse key to use as is (a relayed push
+	// carries it already hashed, so the relay never sees the sender's id).
+	CollapseKey string
+	// Bare asks for a push without the bot name, title and body: APNs shows a
+	// generic banner until the extension fetches the message, FCM carries only
+	// ids. A relayed push is bare when it arrived without them.
+	Bare bool
+	// Quiet sends a message as a silent push: the device stores it without a
+	// banner.
+	Quiet bool
+	// Expires is when APNs/FCM may stop trying to reach an offline device
+	// (the message's ttl); zero means a day from the push. It is a time, not
+	// a duration, so a retried push does not outlive its message.
+	Expires time.Time
+}
+
+// pushTTL is how long APNs/FCM keep the push: until Expires, a day when it
+// is not set, and at most FCM's four weeks.
+func (n Notification) pushTTL() time.Duration {
+	const maxTTL = 28 * 24 * time.Hour
+	if n.Expires.IsZero() {
+		return 24 * time.Hour
+	}
+	d := time.Until(n.Expires)
+	if d < time.Second {
+		d = time.Second
+	}
+	if d > maxTTL {
+		d = maxTTL
+	}
+	return d
 }
 
 // Silent reports whether the push should not show anything by itself.
-func (n Notification) Silent() bool { return n.Kind != "message" }
+func (n Notification) Silent() bool { return n.Kind != "message" || n.Quiet }
 
 // Pusher sends one notification.
 type Pusher interface {
@@ -96,3 +149,25 @@ func collapseKey(botID, id string) string {
 	h := sha256.Sum256([]byte(id))
 	return "b" + botID + ":" + hex.EncodeToString(h[:16])
 }
+
+// CollapseKeyFor is the key a gateway sends to a relay: always hashed, so the
+// relay learns nothing about the sender's id.
+func CollapseKeyFor(botID, id string) string {
+	if id == "" {
+		return ""
+	}
+	h := sha256.Sum256([]byte(id))
+	return "b" + botID + ":" + hex.EncodeToString(h[:16])
+}
+
+// key is the collapse key to give APNs or FCM.
+func (n Notification) key() string {
+	if n.CollapseKey != "" {
+		return n.CollapseKey
+	}
+	return collapseKey(n.BotID, n.CollapseID)
+}
+
+// retryableStatus: the service is overloaded or briefly down, or asks for a
+// slower pace. Every other 4xx is a permanent refusal.
+func retryableStatus(code int) bool { return code == http.StatusTooManyRequests || code >= 500 }

@@ -1,5 +1,5 @@
 import type { ListRef } from "nsh";
-import { Clipboard, cleanup, computed, List, openUrl, signal, Text, View, effect, safeArea } from "nsh";
+import { Clipboard, cleanup, computed, Image, List, openUrl, signal, Text, View, effect, safeArea } from "nsh";
 import { AlertDialog, NavPage } from "nsh/base";
 import { Avatar, Badge, EdgeBlur, glass, Icon, TopBar } from "../components";
 import { clock, dayLabel, sameDay } from "../format";
@@ -8,12 +8,13 @@ import { chatOf, nav, reload, version } from "../store";
 import { palette, type Palette } from "../theme";
 import { tr } from "../i18n";
 import { reuse } from "../stable";
+import { MessageBody } from "../MessageBody";
 import { Widget } from "../widget/Widget";
 import { createDissolve, Dissolve } from "../fx/Dissolve";
 
 interface Row { m: Message; day: boolean }
 
-export function ChatPage(props: { botId: string }) {
+export function ChatPage(props: { botId: string; messageId?: number }) {
   const p = palette;
   // Newest first, as the host answers: the list is inverted (item 0 at the
   // bottom), so it opens on the newest message and stays there as messages
@@ -26,9 +27,41 @@ export function ChatPage(props: { botId: string }) {
   // Scrolled up away from the newest messages, and how many arrived since.
   const away = signal(false);
   const fresh = signal(0);
+  // A search result opens the chat on a window of messages around it instead of the newest; "back to the newest"
+  // (or nothing found) clears it.
+  const anchor = signal<number | undefined>(props.messageId);
+  let scrolledToAnchor = false;
+
+  // Only the latest load applies: a slow window must not overwrite the newest page after "back to the newest".
+  let loadSeq = 0;
+
+  const loadAround = async (id: number, seq: number) => {
+    const window = await api.messagesAround(props.botId, id);
+    if (seq !== loadSeq) return;
+    // Older messages already loaded past the window stay.
+    const floor = window.at(-1)?.id;
+    const older = floor === undefined ? [] : messages().filter((m) => m.id < floor);
+    messages.set(reuse(messages(), [...window, ...older], (m) => String(m.id)));
+    // The window's older half may stop short without the start being near: the first scroll up asks for more.
+    reachedStart = false;
+    const at = messages().findIndex((m) => m.id === id);
+    if (at < 0) {
+      anchor.set(undefined);
+    } else if (!scrolledToAnchor) {
+      scrolledToAnchor = true;
+      // Once the rows are laid out.
+      setTimeout(() => list?.scrollToIndex({ index: at, animated: false, viewPosition: 0.5 }), 60);
+    }
+    // As below: only when something in the window is unread, so marking read does not loop through the reload.
+    if (window.some((m) => !m.read)) await api.markRead(props.botId);
+  };
 
   const load = async () => {
+    const seq = ++loadSeq;
+    const around = anchor();
+    if (around !== undefined) return loadAround(around, seq);
     const latest = await api.messages(props.botId);
+    if (seq !== loadSeq) return;
     const newestBefore = messages()[0]?.id;
     if (away() && newestBefore !== undefined) {
       const at = latest.findIndex((m) => m.id === newestBefore);
@@ -74,7 +107,15 @@ export function ChatPage(props: { botId: string }) {
     if (!away()) fresh.set(0);
   };
   const jumpToLatest = () => {
-    list?.scrollToIndex({ index: 0, animated: true });
+    loadSeq++; // drops a window still loading
+    if (anchor() !== undefined) {
+      // Leaves the window: the effect above loads the newest page.
+      anchor.set(undefined);
+      messages.set([]);
+      reachedStart = false;
+    } else {
+      list?.scrollToIndex({ index: 0, animated: true });
+    }
     away.set(false);
     fresh.set(0);
   };
@@ -148,7 +189,7 @@ export function ChatPage(props: { botId: string }) {
 
         <EdgeBlur edge="bottom" height={safeArea().bottom + 80} tint={p().chatWall} />
         {/* Back to the newest message, with how many arrived while scrolled up. */}
-        <If when={away() || fresh() > 0}>
+        <If when={away() || fresh() > 0 || anchor() !== undefined}>
           <View
             testID="jump-latest"
             role="button"
@@ -188,6 +229,19 @@ function DayChip(props: { ms: number }) {
     <View style={{ alignSelf: "center", paddingLeft: 12, paddingRight: 12, paddingTop: 4, paddingBottom: 4, borderRadius: 12, backgroundColor: "rgba(40,70,40,0.28)" }}>
       <Text style={{ fontSize: 13, fontWeight: "500", color: "#ffffff" }}>{dayLabel(props.ms)}</Text>
     </View>
+  );
+}
+
+/** A message's image across the top of its bubble, at the image's own proportions (within reason). */
+function Picture(props: { src: string }) {
+  const ratio = signal(4 / 3);
+  return (
+    <Image
+      src={props.src}
+      accessibilityLabel={tr("图片")}
+      onLoad={(e) => ratio.set(Math.min(2.5, Math.max(0.6, e.size.width / Math.max(1, e.size.height))))}
+      style={{ width: "100%", aspectRatio: ratio(), objectFit: "cover" } as never}
+    />
   );
 }
 
@@ -239,15 +293,18 @@ function Bubble(props: { message: Message; p: Palette }) {
       <Each of={m().html ? [m()] : []} key={(x) => `${x.id}\u0000${x.html}\u0000${x.data}`}>
         {(x) => (
           <View style={{ paddingTop: 12, paddingBottom: 12, paddingLeft: 16, paddingRight: 16, borderBottomWidth: 0.5, borderBottomColor: props.p.separator }}>
-            <Widget html={x().html} data={x().data} palette={props.p} />
+            <Widget html={x().html} data={x().data} palette={props.p} messageId={x().id} allowQueries={x().allowQueries} />
           </View>
         )}
       </Each>
+      <If when={m().image && !m().html}>
+        <Picture src={m().image} />
+      </If>
       <View style={{ paddingTop: 10, paddingBottom: 8, paddingLeft: 14, paddingRight: 14, gap: 2 }}>
         <If when={m().title && !m().html}>
           <Text style={{ fontSize: 16, fontWeight: "600", color: props.p.text }}>{m().title}</Text>
         </If>
-        <Text style={{ fontSize: 16, lineHeight: 22, color: props.p.text }}>{m().body}</Text>
+        <MessageBody body={m().body} markdown={m().parseMode === "Markdown"} p={props.p} />
         <Text style={{ alignSelf: "flex-end", fontSize: 12, color: props.p.hint }}>{clock(m().date)}</Text>
       </View>
     </View>

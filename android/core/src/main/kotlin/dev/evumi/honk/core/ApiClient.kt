@@ -63,9 +63,23 @@ class ApiClient(
 
     // gateway
 
+    /** How the gateway sends pushes to each platform: `direct`, `relay` (through a push relay) or `off`. */
+    @Serializable
+    data class PushRoutes(val ios: String, val android: String)
+
     /** What the gateway says it is; a Honk gateway answers `name` "honk". */
     @Serializable
-    data class GatewayInfo(val name: String = "", val version: String = "", val api: Int = 0)
+    data class GatewayInfo(
+        val name: String = "",
+        val version: String = "",
+        val api: Int = 0,
+        /** The gateway only registers devices that send its `register_key` (HONK_REGISTER_KEY). */
+        @SerialName("register_key_required") val registerKeyRequired: Boolean = false,
+        /** What the gateway can do beyond the base API, e.g. `relay`; empty for an older gateway. */
+        val features: List<String> = emptyList(),
+        /** Null for a gateway that does not say. */
+        val push: PushRoutes? = null,
+    )
 
     fun info(): GatewayInfo = request("GET", "v1/info", GatewayInfo.serializer(), auth = false)
 
@@ -74,8 +88,56 @@ class ApiClient(
     @Serializable
     data class Registration(val device: DeviceInfo, @SerialName("device_secret") val deviceSecret: String)
 
-    fun registerDevice(pushToken: String, platform: String = "android"): Registration =
-        request("POST", "v1/devices", Registration.serializer(), body = mapOf("platform" to platform, "push_token" to pushToken), auth = false)
+    /** [registerKey]: what a gateway with HONK_REGISTER_KEY set wants to see; sent only when not empty. */
+    fun registerDevice(pushToken: String, platform: String = "android", registerKey: String? = null, name: String? = null): Registration {
+        val body = buildMap<String, Any> {
+            put("platform", platform)
+            put("push_token", pushToken)
+            if (!name.isNullOrEmpty()) put("name", name)
+            if (!registerKey.isNullOrEmpty()) put("register_key", registerKey)
+        }
+        return request("POST", "v1/devices", Registration.serializer(), body = body, auth = false)
+    }
+
+    /**
+     * Removes this device from its group (`DELETE /v1/devices/me`); when it is the
+     * last one the group's bots and queued messages go too. With [all] the whole
+     * group goes: every device, bot and queued message.
+     */
+    fun deleteDevice(all: Boolean = false) {
+        request("DELETE", if (all) "v1/devices/me?all=true" else "v1/devices/me", JsonElement.serializer())
+    }
+
+    /** A device of the group, as `GET /v1/devices` lists it. [seenAt] is Unix milliseconds. */
+    @Serializable
+    data class GroupDevice(
+        val id: String,
+        val name: String = "",
+        val platform: String = "",
+        @SerialName("seen_at") val seenAt: Long = 0,
+        val current: Boolean = false,
+    )
+
+    fun listDevices(): List<GroupDevice> = request("GET", "v1/devices", ListSerializer(GroupDevice.serializer()))
+
+    /** Removes another device of the group (`DELETE /v1/devices/<id>`). */
+    fun removeDevice(id: String) {
+        request("DELETE", "v1/devices/$id", JsonElement.serializer())
+    }
+
+    @Serializable
+    private data class Created(@SerialName("expires_in") val expiresIn: Int)
+
+    @Serializable
+    private data class Claimed(val bundle: String)
+
+    /** Stores the sealed bundle under [linkId] for a while; returns the seconds it lives. */
+    fun createLink(linkId: String, bundle: String): Int =
+        request("POST", "v1/links", Created.serializer(), body = mapOf("link_id" to linkId, "bundle" to bundle)).expiresIn
+
+    /** Joins this device's group to the one that made the link; returns the sealed bundle. */
+    fun claimLink(linkId: String): String =
+        request("POST", "v1/links/claim", Claimed.serializer(), body = mapOf("link_id" to linkId)).bundle
 
     fun updatePushToken(token: String): DeviceInfo =
         request("PUT", "v1/devices/me", DeviceInfo.serializer(), body = mapOf("push_token" to token))
@@ -93,11 +155,20 @@ class ApiClient(
     fun createBot(name: String, avatar: String, defaultLevel: String): CreatedBot =
         request("POST", "v1/bots", CreatedBot.serializer(), body = mapOf("name" to name, "avatar" to avatar, "default_level" to defaultLevel))
 
-    fun updateBot(id: String, name: String? = null, avatar: String? = null, defaultLevel: String? = null): Bot {
+    fun updateBot(
+        id: String,
+        name: String? = null,
+        avatar: String? = null,
+        defaultLevel: String? = null,
+        encrypted: Boolean? = null,
+        keyWrapped: String? = null,
+    ): Bot {
         val body = buildMap<String, Any> {
             name?.let { put("name", it) }
             avatar?.let { put("avatar", it) }
             defaultLevel?.let { put("default_level", it) }
+            encrypted?.let { put("encrypted", it) }
+            keyWrapped?.let { put("key_wrapped", it) }
         }
         return request("PATCH", "v1/bots/$id", Bot.serializer(), body = body)
     }
@@ -111,7 +182,9 @@ class ApiClient(
     // messages
 
     @Serializable
-    data class SyncPage(val messages: List<QueuedMessage> = emptyList(), val cursor: Long, @SerialName("has_more") val hasMore: Boolean = false)
+    data class SyncPage(val messages: List<QueuedMessage> = emptyList(), val cursor: Long, @SerialName("has_more") val hasMore: Boolean = false,
+        /** The device must sync again from cursor 0 (after a merge); absent from older gateways. */
+        val reset: Boolean = false)
 
     fun message(id: Long): QueuedMessage = request("GET", "v1/messages/$id", QueuedMessage.serializer())
 
@@ -123,6 +196,16 @@ class ApiClient(
      */
     fun getMe(token: String): Bot =
         request("GET", "bot" + java.net.URLEncoder.encode(token, "UTF-8").replace("%3A", ":") + "/getMe", Bot.serializer(), auth = false)
+
+    @Serializable
+    private data class QueryAnswer(val data: String = "")
+
+    /**
+     * A card's query: the bot's answer to [data], sent for the message [messageId] (`POST /v1/queries`).
+     * The gateway holds the request until the bot answers (up to 15 s), so give the transport a longer timeout.
+     */
+    fun query(messageId: Long, data: String): String =
+        request("POST", "v1/queries", QueryAnswer.serializer(), body = mapOf("message_id" to messageId, "data" to data)).data
 
     fun ack(upTo: Long) {
         request("POST", "v1/ack", JsonElement.serializer(), body = mapOf("up_to" to upTo))

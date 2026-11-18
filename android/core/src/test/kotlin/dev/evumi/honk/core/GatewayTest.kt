@@ -25,11 +25,15 @@ class FakeGateway(private val handler: (method: String, path: String, body: Stri
     }
 }
 
+/** An opener for tests that send no ciphertext: no keys, so plaintext passes through. */
+val plainOpener = MessageOpener(MemoryBotKeys(), "无法解密的通知")
+
 class MemoryTokens(val map: MutableMap<String, String> = mutableMapOf()) : BotTokenStore {
     override fun token(botId: String) = map[botId]
     override fun save(botId: String, token: String) { map[botId] = token }
     override fun remove(botId: String) { map.remove(botId) }
     override fun removeAll() = map.clear()
+    override fun ids() = map.keys.toList()
 }
 
 class MemoryCredentials(var value: Credentials? = null) : CredentialStore {
@@ -57,7 +61,7 @@ class GatewayTest {
                 else -> FakeGateway.fail(404, "Not Found")
             }
         }
-        val out = SyncEngine(ApiClient(FakeGateway.BASE, "s3cret", gw), store).run(pageSize = 2)
+        val out = SyncEngine(ApiClient(FakeGateway.BASE, "s3cret", gw), store, plainOpener).run(pageSize = 2)
 
         assertEquals(3, out.applied)
         assertEquals(listOf("c1:dep-old"), out.staleNotificationIds)
@@ -76,7 +80,7 @@ class GatewayTest {
             if (path.startsWith("v1/sync?cursor=9")) FakeGateway.ok("""{"messages":[],"cursor":9,"has_more":false}""")
             else FakeGateway.fail(404, "Not Found")
         }
-        assertEquals(0, SyncEngine(ApiClient(FakeGateway.BASE, "s", gw), store).run().applied)
+        assertEquals(0, SyncEngine(ApiClient(FakeGateway.BASE, "s", gw), store, plainOpener).run().applied)
         assertTrue(gw.requests.none { it.path == "v1/ack" })
     }
 
@@ -92,7 +96,7 @@ class GatewayTest {
                 else -> FakeGateway.ok("""{"acked":1}""")
             }
         }
-        val engine = SyncEngine(ApiClient(FakeGateway.BASE, "s", gw), store)
+        val engine = SyncEngine(ApiClient(FakeGateway.BASE, "s", gw), store, plainOpener)
         assertThrows(ApiException.Gateway::class.java) { engine.run() }
         ackFails = false
         engine.run()
@@ -213,6 +217,70 @@ class GatewayTest {
         val gw = FakeGateway { _, _, _ -> FakeGateway.fail(500, "Internal Server Error") }
         assertThrows(ApiException.Gateway::class.java) { DeviceRegistrar(FakeGateway.BASE, creds, gw).register("t2") }
         assertEquals(Credentials("d", "s", "t1"), creds.value)
+    }
+
+    @Test fun registerSendsTheRegisterKeyOnlyWhenSet() {
+        val gw = FakeGateway { _, _, _ -> FakeGateway.ok("""{"device":{"id":"d","platform":"android","push_ok":true},"device_secret":"sec"}""") }
+        DeviceRegistrar(FakeGateway.BASE, MemoryCredentials(), gw, registerKey = "s3cret").register("t1")
+        assertTrue(gw.requests.last().body!!.contains("\"register_key\":\"s3cret\""))
+        DeviceRegistrar(FakeGateway.BASE, MemoryCredentials(), gw).register("t1")
+        assertTrue(!gw.requests.last().body!!.contains("register_key"))
+        DeviceRegistrar(FakeGateway.BASE, MemoryCredentials(), gw, registerKey = "").register("t1")
+        assertTrue(!gw.requests.last().body!!.contains("register_key"))
+    }
+
+    @Test fun deleteDeviceCallsTheGatewayWithTheDeviceSecret() {
+        val gw = FakeGateway { method, path, _ ->
+            if (method == "DELETE" && path == "v1/devices/me") FakeGateway.ok("true") else FakeGateway.fail(404, "Not Found")
+        }
+        ApiClient(FakeGateway.BASE, "s3cret", gw).deleteDevice()
+        assertEquals("Bearer s3cret", gw.requests.single().headers["Authorization"])
+        val failing = FakeGateway { _, _, _ -> FakeGateway.fail(500, "Internal Server Error") }
+        assertThrows(ApiException.Gateway::class.java) { ApiClient(FakeGateway.BASE, "s", failing).deleteDevice() }
+        assertThrows(ApiException.NotRegistered::class.java) { ApiClient(FakeGateway.BASE, null, gw).deleteDevice() }
+    }
+
+    @Test fun deviceGroupCalls() {
+        val gw = FakeGateway { method, path, _ ->
+            when ("$method $path") {
+                "GET v1/devices" -> FakeGateway.ok("""[{"id":"d1","name":"Pixel","platform":"android","seen_at":5,"created_at":1,"push_ok":true,"current":true},{"id":"d2","platform":"ios","seen_at":0,"current":false}]""")
+                "DELETE v1/devices/d2", "DELETE v1/devices/me", "DELETE v1/devices/me?all=true" -> FakeGateway.ok("true")
+                "POST v1/devices" -> FakeGateway.ok("""{"device":{"id":"d3","platform":"android","push_ok":true},"device_secret":"s"}""")
+                "POST v1/links" -> FakeGateway.ok("""{"expires_in":600}""")
+                "POST v1/links/claim" -> FakeGateway.ok("""{"bundle":"YnVuZGxl"}""")
+                else -> FakeGateway.fail(404, "Not Found")
+            }
+        }
+        val api = ApiClient(FakeGateway.BASE, "s", gw)
+        assertEquals(
+            listOf(ApiClient.GroupDevice("d1", "Pixel", "android", 5, true), ApiClient.GroupDevice("d2", "", "ios", 0, false)),
+            api.listDevices(),
+        )
+        api.removeDevice("d2")
+        api.deleteDevice()
+        api.deleteDevice(all = true)
+        assertEquals(600, api.createLink("l", "b"))
+        assertEquals("YnVuZGxl", api.claimLink("l"))
+        assertEquals(
+            listOf("GET v1/devices", "DELETE v1/devices/d2", "DELETE v1/devices/me", "DELETE v1/devices/me?all=true", "POST v1/links", "POST v1/links/claim"),
+            gw.requests.map { "${it.method} ${it.path}" },
+        )
+        api.registerDevice("t", name = "Pixel 8")
+        assertTrue(gw.requests.last().body!!.contains(""""name":"Pixel 8""""))
+    }
+
+    @Test fun infoSaysWhetherARegisterKeyIsRequired() {
+        val gw = FakeGateway { _, _, _ -> FakeGateway.ok("""{"name":"honk","version":"1","api":2,"register_key_required":true}""") }
+        assertTrue(ApiClient(FakeGateway.BASE, null, gw).info().registerKeyRequired)
+        val plain = FakeGateway { _, _, _ -> FakeGateway.ok("""{"name":"honk","version":"1","api":2}""") }
+        assertTrue(!ApiClient(FakeGateway.BASE, null, plain).info().registerKeyRequired)
+        assertNull("an older gateway does not say how it pushes", ApiClient(FakeGateway.BASE, null, plain).info().push)
+        val relay = FakeGateway { _, _, _ ->
+            FakeGateway.ok("""{"name":"honk","version":"1","api":2,"features":["relay"],"push":{"ios":"direct","android":"relay"}}""")
+        }
+        val info = ApiClient(FakeGateway.BASE, null, relay).info()
+        assertEquals(listOf("relay"), info.features)
+        assertEquals(ApiClient.PushRoutes("direct", "relay"), info.push)
     }
 
     private var counter = 0

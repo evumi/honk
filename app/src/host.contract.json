@@ -1,0 +1,218 @@
+{
+  "about": "Device groups: honk.devices.list/remove (removing this device's own id leaves the group; honk.device.delete deletes the whole group's data), honk.link.create/claim (pairing). The contract between the nsh app (src/host.ts, src/demo.ts) and the native hosts (ios/App/NshBridge.swift with ios/HonkKit HostContract.swift; android/app NshBridge.kt with android/core HostContract.kt). Every host call has sample arguments and results, every event a sample payload. `optional` lists keys that may be absent in arguments or results. `demo: false` marks calls the in-memory demo does not implement. Tests: src/host.contract.test.ts, HonkKit HostContractTests, android/core HostContractTest. Change this file, host.ts and both bridges together.",
+  "samples": {
+    "bot": { "id": "aZ3kQ9xT", "name": "Berth 部署", "avatar": "preset:box:#1c1c1e", "defaultLevel": "active", "createdAt": 1700000000000, "encrypted": false },
+    "message": {
+      "id": 7, "botId": "aZ3kQ9xT", "title": "部署成功", "body": "sluice 已上线", "html": "<p>{{status}}</p>", "data": "{\"status\":\"ok\"}",
+      "level": "active", "group": "prod", "url": "https://example.com", "copy": "dep_1", "icon": "", "open": "url", "image": "https://example.com/i.png", "parseMode": "Markdown", "silent": false, "collapseId": "dep", "allowQueries": false, "date": 1700000001000, "read": false
+    }
+  },
+  "calls": {
+    "honk.status": {
+      "optional": ["registrationError", "appVersion", "appBuild", "registration", "pushMode"],
+      "samples": [
+        {
+          "args": null,
+          "result": { "registered": true, "registration": "registered", "pushMode": "apns", "gatewayURL": "https://gw.test/", "notifications": "authorized", "appVersion": "0.1.0", "appBuild": "12" }
+        },
+        {
+          "args": null,
+          "result": { "registered": false, "registration": "failed", "registrationError": "连不上网关", "pushMode": "simulator", "gatewayURL": "https://gw.test/", "notifications": "denied", "appVersion": "0.1.0", "appBuild": "12" }
+        }
+      ]
+    },
+    "honk.register.retry": {
+      "optional": ["registrationError", "appVersion", "appBuild", "registration", "pushMode"],
+      "samples": [
+        {
+          "args": null,
+          "result": { "registered": true, "registration": "registered", "pushMode": "apns", "gatewayURL": "https://gw.test/", "notifications": "notDetermined", "appVersion": "0.1.0", "appBuild": "12" }
+        }
+      ]
+    },
+    "honk.chats": {
+      "samples": [
+        {
+          "args": null,
+          "result": [
+            {
+              "bot": { "id": "aZ3kQ9xT", "name": "Berth 部署", "avatar": "preset:box:#1c1c1e", "defaultLevel": "active", "createdAt": 1700000000000, "encrypted": false },
+              "muted": false, "pinned": true, "unread": 2,
+              "last": {
+                "id": 7, "botId": "aZ3kQ9xT", "title": "部署成功", "body": "sluice 已上线", "html": "<p>{{status}}</p>", "data": "{\"status\":\"ok\"}",
+                "level": "active", "group": "prod", "url": "https://example.com", "copy": "dep_1", "icon": "", "open": "url", "image": "https://example.com/i.png", "parseMode": "Markdown", "silent": false, "collapseId": "dep", "allowQueries": false, "date": 1700000001000, "read": false
+              }
+            },
+            {
+              "bot": { "id": "bQ7mN2pR", "name": "空会话", "avatar": "", "defaultLevel": "passive", "createdAt": 1700000002000, "encrypted": true },
+              "muted": true, "pinned": false, "unread": 0, "last": null
+            }
+          ]
+        }
+      ]
+    },
+    "honk.messages": {
+      "optional": ["before", "around"],
+      "samples": [
+        {
+          "args": { "botId": "aZ3kQ9xT", "before": 8, "limit": 50 },
+          "result": [
+            {
+              "id": 7, "botId": "aZ3kQ9xT", "title": "部署成功", "body": "sluice 已上线", "html": "<p>{{status}}</p>", "data": "{\"status\":\"ok\"}",
+              "level": "active", "group": "prod", "url": "https://example.com", "copy": "dep_1", "icon": "", "open": "url", "image": "https://example.com/i.png", "parseMode": "Markdown", "silent": false, "collapseId": "dep", "allowQueries": false, "date": 1700000001000, "read": false
+            }
+          ]
+        },
+        { "args": { "botId": "aZ3kQ9xT", "limit": 50 }, "result": [] },
+        { "args": { "botId": "aZ3kQ9xT", "around": 7, "limit": 50 }, "result": [] }
+      ]
+    },
+    "honk.search": {
+      "optional": ["before"],
+      "samples": [
+        {
+          "args": { "query": "部署", "before": 8 },
+          "result": [
+            {
+              "id": 7, "botId": "aZ3kQ9xT", "title": "部署成功", "body": "sluice 已上线", "html": "<p>{{status}}</p>", "data": "{\"status\":\"ok\"}",
+              "level": "active", "group": "prod", "url": "https://example.com", "copy": "dep_1", "icon": "", "open": "url", "image": "https://example.com/i.png", "parseMode": "Markdown", "silent": false, "collapseId": "dep", "allowQueries": false, "date": 1700000001000, "read": false
+            }
+          ]
+        },
+        { "args": { "query": "nothing" }, "result": [] }
+      ]
+    },
+    "honk.retention.get": { "samples": [{ "args": null, "result": 0 }, { "args": null, "result": 90 }] },
+    "honk.retention.set": { "samples": [{ "args": { "days": 30 }, "result": 30 }, { "args": { "days": 0 }, "result": 0 }] },
+    "honk.export": {
+      "samples": [
+        { "args": null, "result": { "count": 12, "shared": true } },
+        { "args": { "botId": "aZ3kQ9xT" }, "result": { "count": 0, "shared": false } }
+      ]
+    },
+    "honk.import": {
+      "samples": [
+        { "args": null, "result": { "imported": 5, "existing": 2, "unknownBot": 1, "invalid": 0 } },
+        { "args": null, "result": null }
+      ]
+    },
+    "honk.markRead": { "samples": [{ "args": { "botId": "aZ3kQ9xT" }, "result": true }] },
+    "honk.focus": { "samples": [{ "args": { "botId": "aZ3kQ9xT" }, "result": true }, { "args": { "botId": null }, "result": true }] },
+    "honk.refresh": { "samples": [{ "args": null, "result": true }] },
+    "honk.bot.create": {
+      "samples": [
+        {
+          "args": { "name": "Berth 部署", "avatar": "preset:box:#1c1c1e", "defaultLevel": "active" },
+          "result": {
+            "bot": { "id": "aZ3kQ9xT", "name": "Berth 部署", "avatar": "preset:box:#1c1c1e", "defaultLevel": "active", "createdAt": 1700000000000, "encrypted": false },
+            "token": "aZ3kQ9xT:abcdefghijklmnopqrstuvwxyz012345"
+          }
+        }
+      ]
+    },
+    "honk.bot.update": {
+      "optional": ["name", "avatar", "defaultLevel"],
+      "samples": [
+        {
+          "args": { "botId": "aZ3kQ9xT", "name": "新名字", "avatar": "preset:bell:#c2410c", "defaultLevel": "timeSensitive" },
+          "result": { "id": "aZ3kQ9xT", "name": "新名字", "avatar": "preset:bell:#c2410c", "defaultLevel": "timeSensitive", "createdAt": 1700000000000, "encrypted": false }
+        },
+        {
+          "args": { "botId": "aZ3kQ9xT", "name": "只改名" },
+          "result": { "id": "aZ3kQ9xT", "name": "只改名", "avatar": "preset:box:#1c1c1e", "defaultLevel": "active", "createdAt": 1700000000000, "encrypted": false }
+        }
+      ]
+    },
+    "honk.bot.token": {
+      "samples": [
+        { "args": { "botId": "aZ3kQ9xT" }, "result": "aZ3kQ9xT:abcdefghijklmnopqrstuvwxyz012345" },
+        { "args": { "botId": "bQ7mN2pR" }, "result": null }
+      ]
+    },
+    "honk.bot.resetToken": { "samples": [{ "args": { "botId": "aZ3kQ9xT" }, "result": "aZ3kQ9xT:zyxwvutsrqponmlkjihgfedcba543210" }] },
+    "honk.bot.encryption.key": {
+      "samples": [
+        { "args": { "botId": "aZ3kQ9xT" }, "result": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8" },
+        { "args": { "botId": "bQ7mN2pR" }, "result": null }
+      ]
+    },
+    "honk.bot.encryption.enable": { "samples": [{ "args": { "botId": "aZ3kQ9xT" }, "result": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8" }] },
+    "honk.bot.encryption.disable": { "samples": [{ "args": { "botId": "aZ3kQ9xT" }, "result": true }] },
+    "honk.bot.encryption.resetKey": { "samples": [{ "args": { "botId": "aZ3kQ9xT" }, "result": "Hh4dGxkYFhQSEA4MCggGBAIA_v38-vj29PLw7uzq6Obk4uA" }] },
+    "honk.bot.delete": { "samples": [{ "args": { "botId": "aZ3kQ9xT" }, "result": true }] },
+    "honk.bot.setMuted": { "samples": [{ "args": { "botId": "aZ3kQ9xT", "muted": true }, "result": true }] },
+    "honk.bot.setPinned": { "samples": [{ "args": { "botId": "aZ3kQ9xT", "pinned": true }, "result": true }] },
+    "honk.message.delete": { "samples": [{ "args": { "messageId": 7 }, "result": true }] },
+    "honk.chat.clear": { "samples": [{ "args": { "botId": "aZ3kQ9xT" }, "result": true }] },
+    "honk.notifications.open": { "samples": [{ "args": null, "result": true }] },
+    "honk.device.delete": { "samples": [{ "args": null, "result": true }] },
+    "honk.devices.list": {
+      "samples": [
+        {
+          "args": null,
+          "result": [
+            { "id": "0192f0e0-7a1b-7c3d-8e4f-5a6b7c8d9e0f", "name": "iPhone 15", "platform": "ios", "seenAt": 1700000000000, "current": true },
+            { "id": "0192f0e1-1b2c-7d3e-9f40-6b7c8d9e0f1a", "name": "Pixel 8", "platform": "android", "seenAt": 1699990000000, "current": false }
+          ]
+        },
+        { "args": null, "result": [] }
+      ]
+    },
+    "honk.devices.remove": { "samples": [{ "args": { "deviceId": "0192f0e1-1b2c-7d3e-9f40-6b7c8d9e0f1a" }, "result": true }] },
+    "honk.link.create": { "samples": [{ "args": null, "result": { "code": "000G-40R4-0M30-E209-185G-R38E-1W", "expiresAt": 1700000600000 } }] },
+    "honk.link.claim": { "samples": [{ "args": { "code": "000G-40R4-0M30-E209-185G-R38E-1W" }, "result": true }] },
+    "honk.gateway.get": {
+      "optional": ["registerKey"],
+      "samples": [
+        { "args": null, "result": { "url": "https://gw.test/", "defaultURL": "https://honk.example.com/", "custom": true, "registerKey": "s3cret" } },
+        { "args": null, "result": { "url": "https://honk.example.com/", "defaultURL": "https://honk.example.com/", "custom": false, "registerKey": "" } }
+      ]
+    },
+    "honk.gateway.test": {
+      "optional": ["url", "version", "error", "registerKeyRequired", "push"],
+      "samples": [
+        { "args": { "url": "gw.test" }, "result": { "ok": true, "url": "https://gw.test/", "version": "0.2.0", "registerKeyRequired": false, "push": { "ios": "direct", "android": "relay" } } },
+        { "args": { "url": "old.test" }, "result": { "ok": true, "url": "https://old.test/", "version": "0.1.0", "registerKeyRequired": false } },
+        { "args": { "url": "locked.test" }, "result": { "ok": true, "url": "https://locked.test/", "version": "0.2.0", "registerKeyRequired": true } },
+        { "args": { "url": "nope" }, "result": { "ok": false, "error": "无法连接到这个地址" } }
+      ]
+    },
+    "honk.gateway.set": {
+      "optional": ["registerKey"],
+      "samples": [
+        { "args": { "url": "https://gw.test/", "registerKey": "s3cret" }, "result": { "url": "https://gw.test/", "registered": true } },
+        { "args": { "url": "https://gw.test/" }, "result": { "url": "https://gw.test/", "registered": true } },
+        { "args": { "url": null }, "result": { "url": "https://honk.example.com/", "registered": false } }
+      ]
+    },
+    "honk.avatar.save": {
+      "samples": [{ "args": { "data": "iVBORw0KGgo=", "type": "image/png" }, "result": "local:a1b2c3d4.png" }]
+    },
+    "honk.avatar.image": {
+      "samples": [
+        { "args": { "avatar": "local:a1b2c3d4.png" }, "result": "data:image/png;base64,iVBORw0KGgo=" },
+        { "args": { "avatar": "local:gone.png" }, "result": null }
+      ]
+    },
+    "honk.incoming.listen": { "samples": [{ "args": null, "result": true }] },
+    "honk.card.open": {
+      "demo": false,
+      "samples": [{ "args": { "key": "c1", "load": "{\"html\":\"<p>x</p>\",\"data\":\"{}\",\"messageId\":7,\"allowQueries\":true}" }, "result": "{\"tree\":null,\"prevented\":false,\"stopped\":false,\"logs\":[]}" }]
+    },
+    "honk.card.click": {
+      "demo": false,
+      "samples": [{ "args": { "key": "c1", "path": "0.1" }, "result": "{\"tree\":null,\"prevented\":false,\"stopped\":false,\"logs\":[]}" }]
+    },
+    "honk.card.set": {
+      "demo": false,
+      "samples": [{ "args": { "key": "c1", "state": "{}" }, "result": "{\"tree\":null,\"prevented\":false,\"stopped\":false,\"logs\":[]}" }]
+    },
+    "honk.card.close": { "samples": [{ "args": { "key": "c1" }, "result": true }] }
+  },
+  "events": {
+    "honk.changed": { "samples": [null] },
+    "honk.open": { "samples": [{ "botId": "aZ3kQ9xT" }] },
+    "honk.incoming": { "samples": [{ "botId": "aZ3kQ9xT", "messageId": 7 }] },
+    "honk.card.changed": { "samples": [{ "key": "c1", "result": "{\"tree\":null,\"prevented\":false,\"stopped\":false,\"logs\":[]}" }] }
+  }
+}

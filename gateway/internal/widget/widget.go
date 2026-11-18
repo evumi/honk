@@ -77,44 +77,79 @@ var (
 	ambiguousScript = regexp.MustCompile(`(?i)<!--|</?script[\s/>]`)
 )
 
+// Report is what Inspect found: the cleaned HTML, its sizes and what the
+// whitelist removed.
+type Report struct {
+	HTML       string   `json:"html"`
+	InputSize  int      `json:"input_size"`      // bytes sent
+	Raw        int      `json:"raw_size"`        // bytes of HTML after cleaning
+	Compressed int      `json:"compressed_size"` // zlib level 9, after cleaning
+	Removed    []string `json:"removed"`         // e.g. "<iframe>", "onclick on <div>"
+}
+
+// remove records one removal, once per distinct description.
+func (rp *Report) remove(what string) {
+	if rp == nil {
+		return
+	}
+	for _, r := range rp.Removed {
+		if r == what {
+			return
+		}
+	}
+	rp.Removed = append(rp.Removed, what)
+}
+
 // Clean checks the size limits and returns the cleaned HTML. An empty input
 // returns "".
 func Clean(src string) (string, error) {
+	rp, err := Inspect(src)
+	return rp.HTML, err
+}
+
+// Inspect is Clean with a report. On a size error the report still carries
+// the sizes found (the cleaned HTML is empty).
+func Inspect(src string) (Report, error) {
+	rp := Report{InputSize: len(src), Removed: []string{}}
 	if src == "" {
-		return "", nil
+		return rp, nil
 	}
 	if len(src) > MaxRaw {
-		return "", ErrTooLarge
+		return rp, ErrTooLarge
 	}
 	if strings.ContainsRune(src, 0) {
-		return "", ErrInvalid
+		return rp, ErrInvalid
 	}
 	ctx := &html.Node{Type: html.ElementNode, Data: "body", DataAtom: atom.Body}
 	nodes, err := html.ParseFragment(strings.NewReader(src), ctx)
 	if err != nil {
-		return "", ErrInvalid
+		return rp, ErrInvalid
 	}
 	var out bytes.Buffer
 	for _, n := range nodes {
-		for _, kept := range clean(n) {
+		for _, kept := range clean(n, &rp) {
 			if err := html.Render(&out, kept); err != nil {
-				return "", ErrInvalid
+				return rp, ErrInvalid
 			}
 		}
 	}
 	res := out.String()
+	rp.Raw = len(res)
 	if len(res) > MaxRaw {
-		return "", ErrTooLarge
+		return rp, ErrTooLarge
 	}
-	if n, err := compressedSize(res); err != nil || n > MaxCompressed {
-		return "", ErrTooLarge
+	n, err := compressedSize(res)
+	rp.Compressed = n
+	if err != nil || n > MaxCompressed {
+		return rp, ErrTooLarge
 	}
-	return res, nil
+	rp.HTML = res
+	return rp, nil
 }
 
 // clean returns what is left of n: n itself, its children (for an unwrapped
 // wrapper) or nothing.
-func clean(n *html.Node) []*html.Node {
+func clean(n *html.Node, rp *Report) []*html.Node {
 	switch n.Type {
 	case html.TextNode:
 		return []*html.Node{n}
@@ -124,20 +159,23 @@ func clean(n *html.Node) []*html.Node {
 	}
 	name := strings.ToLower(n.Data)
 	if unwrap[name] {
-		return cleanChildren(n)
+		return cleanChildren(n, rp)
 	}
 	if name == "script" {
 		if !keepScript(n) {
+			rp.remove("<script> (external, module or ambiguous)")
 			return nil
 		}
 		n.Attr = nil
 		return []*html.Node{n}
 	}
 	if !allowed[name] {
+		rp.remove("<" + name + ">")
 		return nil
 	}
 	if name == "style" {
 		if n.FirstChild != nil && badCSSText(n.FirstChild.Data) {
+			rp.remove("<style> (loads a resource)")
 			return nil
 		}
 		return []*html.Node{n}
@@ -146,10 +184,12 @@ func clean(n *html.Node) []*html.Node {
 	for _, a := range n.Attr {
 		if keepAttr(name, a) {
 			attrs = append(attrs, a)
+		} else {
+			rp.remove(strings.ToLower(a.Key) + " on <" + name + ">")
 		}
 	}
 	n.Attr = attrs
-	kids := cleanChildren(n)
+	kids := cleanChildren(n, rp)
 	for c := n.FirstChild; c != nil; {
 		next := c.NextSibling
 		n.RemoveChild(c)
@@ -196,10 +236,10 @@ func keepScript(n *html.Node) bool {
 	return true
 }
 
-func cleanChildren(n *html.Node) []*html.Node {
+func cleanChildren(n *html.Node, rp *Report) []*html.Node {
 	var out []*html.Node
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
-		out = append(out, clean(c)...)
+		out = append(out, clean(c, rp)...)
 	}
 	return out
 }

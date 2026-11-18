@@ -35,12 +35,18 @@ public struct Bot: Codable, Equatable, Sendable {
     public var defaultLevel: String
     public var createdAt: Int64
     public var updatedAt: Int64
+    /// End-to-end encryption is on for this bot (the gateway refuses its plaintext).
+    public var encrypted: Bool = false
+    /// The bot's key sealed with the group key (`KeyWrap`); empty when there is none.
+    public var keyWrapped: String = ""
 
     enum CodingKeys: String, CodingKey {
         case id, name, avatar
         case defaultLevel = "default_level"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
+        case encrypted
+        case keyWrapped = "key_wrapped"
     }
 
     public init(id: String, name: String, avatar: String = "", defaultLevel: String = "active", createdAt: Int64 = 0, updatedAt: Int64 = 0) {
@@ -60,6 +66,8 @@ public struct Bot: Codable, Equatable, Sendable {
         defaultLevel = try c.decodeIfPresent(String.self, forKey: .defaultLevel) ?? "active"
         createdAt = try c.decodeIfPresent(Int64.self, forKey: .createdAt) ?? 0
         updatedAt = try c.decodeIfPresent(Int64.self, forKey: .updatedAt) ?? 0
+        encrypted = try c.decodeIfPresent(Bool.self, forKey: .encrypted) ?? false
+        keyWrapped = try c.decodeIfPresent(String.self, forKey: .keyWrapped) ?? ""
     }
 }
 
@@ -81,13 +89,30 @@ public struct QueuedMessage: Codable, Equatable, Sendable {
     public var url: String
     public var copy: String
     public var icon: String
+    /// `url`: tapping the notification opens `url` instead of the chat.
+    public var open: String
+    /// An https image for the notification and the bubble.
+    public var image: String
+    /// `Markdown` when `body` is Markdown.
+    public var parseMode: String
+    /// Stored and counted, but with no banner.
+    public var silent: Bool
+    /// The end-to-end sealed content (`Seal`); `MessageOpener` replaces it with the fields above.
+    public var ciphertext: String
     /// The sender's replaceable id (`id` in the bot API).
     public var collapseID: String
+    /// The sender let the card's `request()` reach the bot (`allow_queries`).
+    public var allowQueries: Bool
     /// Unix milliseconds.
     public var date: Int64
+    /// Set by `MessageOpener` on the stand-in it makes for a message it could not open; never on the wire.
+    /// `LocalStore` marks the stored row so real content can replace it later.
+    public var placeholder: Bool = false
 
     enum CodingKeys: String, CodingKey {
-        case kind, title, body, html, data, level, group, url, copy, icon, date
+        case kind, title, body, html, data, level, group, url, copy, icon, date, open, image, silent, ciphertext
+        case parseMode = "parse_mode"
+        case allowQueries = "allow_queries"
         case id = "message_id"
         case botID = "bot_id"
         case targetID = "target_id"
@@ -96,7 +121,9 @@ public struct QueuedMessage: Codable, Equatable, Sendable {
 
     public init(id: Int64, botID: String, kind: Kind = .message, targetID: Int64 = 0, title: String = "", body: String = "",
                 html: String = "", data: String = "", level: String = "", group: String = "", url: String = "",
-                copy: String = "", icon: String = "", collapseID: String = "", date: Int64 = 0) {
+                copy: String = "", icon: String = "", ciphertext: String = "", open: String = "", image: String = "", parseMode: String = "",
+                silent: Bool = false, collapseID: String = "", allowQueries: Bool = false, date: Int64 = 0,
+                placeholder: Bool = false) {
         self.id = id
         self.botID = botID
         self.kind = kind
@@ -110,8 +137,15 @@ public struct QueuedMessage: Codable, Equatable, Sendable {
         self.url = url
         self.copy = copy
         self.icon = icon
+        self.open = open
+        self.image = image
+        self.parseMode = parseMode
+        self.silent = silent
+        self.ciphertext = ciphertext
         self.collapseID = collapseID
+        self.allowQueries = allowQueries
         self.date = date
+        self.placeholder = placeholder
     }
 
     // The gateway omits empty fields.
@@ -130,7 +164,13 @@ public struct QueuedMessage: Codable, Equatable, Sendable {
         url = try c.decodeIfPresent(String.self, forKey: .url) ?? ""
         copy = try c.decodeIfPresent(String.self, forKey: .copy) ?? ""
         icon = try c.decodeIfPresent(String.self, forKey: .icon) ?? ""
+        open = try c.decodeIfPresent(String.self, forKey: .open) ?? ""
+        image = try c.decodeIfPresent(String.self, forKey: .image) ?? ""
+        parseMode = try c.decodeIfPresent(String.self, forKey: .parseMode) ?? ""
+        silent = try c.decodeIfPresent(Bool.self, forKey: .silent) ?? false
+        ciphertext = try c.decodeIfPresent(String.self, forKey: .ciphertext) ?? ""
         collapseID = try c.decodeIfPresent(String.self, forKey: .collapseID) ?? ""
+        allowQueries = try c.decodeIfPresent(Bool.self, forKey: .allowQueries) ?? false
         date = try c.decodeIfPresent(Int64.self, forKey: .date) ?? 0
     }
 }
@@ -179,5 +219,22 @@ public struct PushInfo: Equatable, Sendable {
         case let s as String: return Int64(s)
         default: return nil
         }
+    }
+}
+
+/// How notifications are grouped in Notification Center: one thread per bot,
+/// or per bot and message group when the sender sets `group`.
+public enum NotificationThread {
+    /// `bot-<id>`, or `bot-<id>:<group>` for a message with a group.
+    public static func identifier(botID: String, group: String) -> String {
+        group.isEmpty ? "bot-\(botID)" : "bot-\(botID):\(group)"
+    }
+
+    /// The group in the thread id the gateway put in the push (`thread-id`,
+    /// `b<bot>:<group>`; just `b<bot>` without a group). The extension uses it
+    /// when it could not fetch the message to read the group from.
+    public static func group(fromAPNsThread thread: String, botID: String) -> String {
+        let prefix = "b\(botID):"
+        return thread.hasPrefix(prefix) ? String(thread.dropFirst(prefix.count)) : ""
     }
 }

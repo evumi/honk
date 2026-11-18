@@ -13,7 +13,9 @@ import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.Typeface
+import android.net.Uri
 import android.os.Build
 import android.text.SpannableStringBuilder
 import android.text.Spanned
@@ -26,12 +28,20 @@ import androidx.core.content.pm.ShortcutInfoCompat
 import androidx.core.content.pm.ShortcutManagerCompat
 import androidx.core.graphics.drawable.IconCompat
 import dev.evumi.honk.core.Avatar
+import dev.evumi.honk.core.AvatarIcons
+import dev.evumi.honk.core.Banner
 import dev.evumi.honk.core.Bot
+import dev.evumi.honk.core.BoundedRead
+import dev.evumi.honk.core.Deadline
 import dev.evumi.honk.core.LocalAvatars
+import dev.evumi.honk.core.NotificationPlan
+import dev.evumi.honk.core.SvgPath
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
+import java.util.concurrent.FutureTask
+import java.util.concurrent.TimeUnit
 
 /**
  * Builds the system notifications: one NotificationChannel per bot (in a
@@ -57,6 +67,12 @@ class Notifier(private val context: Context) {
         val level: String,
         val date: Long,
         val muted: Boolean,
+        val url: String = "",
+        val copy: String = "",
+        val open: String = "",
+        val image: String = "",
+        /** At most this long (ms in all) for the picture and the avatar downloads, which run at the same time. */
+        val imageBudgetMs: Long = 10_000,
     )
 
     private val manager = NotificationManagerCompat.from(context)
@@ -129,7 +145,14 @@ class Notifier(private val context: Context) {
     fun show(c: Content) {
         if (!canPost()) return
         ensureChannel(c.botId, c.botName)
-        val icon = avatarBitmap(Avatar.parse(c.avatar), c.botName)?.let(IconCompat::createWithBitmap)
+        // The picture and the avatar download at the same time, each within the budget.
+        val pictureTask = NotificationPlan.imageUrl(c.image)?.let { url ->
+            FutureTask<Bitmap?> { picture(url, c.imageBudgetMs.coerceAtLeast(Deadline.MIN_SLICE_MS).toInt()) }.also {
+                Thread(it, "honk-picture").apply { isDaemon = true }.start()
+            }
+        }
+        val avatar = avatarBitmap(Avatar.parse(c.avatar), timeoutMs = minOf(5_000L, c.imageBudgetMs).coerceAtLeast(Deadline.MIN_SLICE_MS).toInt())
+        val icon = avatar?.let(IconCompat::createWithBitmap)
         val bot = Person.Builder()
             .setName(c.botName)
             .setKey(channelId(c.botId))
@@ -144,8 +167,21 @@ class Notifier(private val context: Context) {
             }
             append(c.body)
         }
-        val style = NotificationCompat.MessagingStyle(me)
-            .addMessage(NotificationCompat.MessagingStyle.Message(text, c.date, bot))
+        // With a picture the notification is a BigPictureStyle (the avatar becomes the large icon);
+        // without, a MessagingStyle conversation.
+        val picture = pictureTask?.let {
+            try {
+                it.get(c.imageBudgetMs + 1_000, TimeUnit.MILLISECONDS)
+            } catch (e: Exception) {
+                it.cancel(true)
+                null
+            }
+        }
+        val style: NotificationCompat.Style = if (picture != null) {
+            NotificationCompat.BigPictureStyle().bigPicture(picture).bigLargeIcon(null as Bitmap?).setSummaryText(text)
+        } else {
+            NotificationCompat.MessagingStyle(me).addMessage(NotificationCompat.MessagingStyle.Message(text, c.date, bot))
+        }
         pushShortcut(c.botId, c.botName, bot, icon)
 
         // passive and muted bots: no sound or heads-up, like iOS's passive level.
@@ -164,7 +200,11 @@ class Notifier(private val context: Context) {
             .setGroup(if (c.group.isEmpty()) channelId(c.botId) else "${channelId(c.botId)}:${c.group}")
             .setSilent(quiet)
             .setPriority(if (quiet) NotificationCompat.PRIORITY_LOW else NotificationCompat.PRIORITY_HIGH)
-            .setContentIntent(openIntent(c.botId, c.messageId))
+            .setContentIntent(tapIntent(c))
+            .apply {
+                if (picture != null) setLargeIcon(avatar)
+                NotificationPlan.actions(c.copy, c.url).forEach { addAction(action(it, c)) }
+            }
             .build()
         try {
             manager.notify(c.tag, NOTIFICATION_ID, n)
@@ -175,6 +215,50 @@ class Notifier(private val context: Context) {
 
     fun cancel(tags: List<String>) {
         tags.forEach { manager.cancel(it, NOTIFICATION_ID) }
+    }
+
+    /** Removes every notification of the app. */
+    fun cancelAll() {
+        manager.cancelAll()
+    }
+
+    /** `open=url` opens the link straight from the notification; otherwise the chat. */
+    private fun tapIntent(c: Content): PendingIntent =
+        when (val tap = NotificationPlan.tap(c.open, c.url, c.botId)) {
+            is NotificationPlan.Tap.Url -> viewIntent(tap.url, c.messageId)
+            is NotificationPlan.Tap.Chat -> openIntent(c.botId, c.messageId)
+        }
+
+    // An activity started by the notification itself: from a broadcast receiver Android 12+ would refuse it.
+    private fun viewIntent(url: String, messageId: Long): PendingIntent =
+        PendingIntent.getActivity(
+            context,
+            messageId.toInt() * 4 + 1,
+            Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+
+    private fun action(a: NotificationPlan.Action, c: Content): NotificationCompat.Action {
+        val (label, pending) = when (a) {
+            NotificationPlan.Action.COPY -> context.getString(R.string.action_copy) to receiverIntent(a, c, 2)
+            NotificationPlan.Action.OPEN_URL -> context.getString(R.string.action_open_link) to viewIntent(c.url, c.messageId)
+            NotificationPlan.Action.MARK_READ -> context.getString(R.string.action_mark_read) to receiverIntent(a, c, 3)
+        }
+        return NotificationCompat.Action.Builder(0, label, pending).build()
+    }
+
+    private fun receiverIntent(a: NotificationPlan.Action, c: Content, slot: Int): PendingIntent {
+        val intent = Intent(context, NotificationActionReceiver::class.java)
+            .setAction(a.id)
+            .putExtra(NotificationActionReceiver.EXTRA_BOT_ID, c.botId)
+            .putExtra(NotificationActionReceiver.EXTRA_MESSAGE_ID, c.messageId)
+            .putExtra(NotificationActionReceiver.EXTRA_TAG, c.tag)
+        return PendingIntent.getBroadcast(
+            context,
+            c.messageId.toInt() * 4 + slot,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
     }
 
     private fun openIntent(botId: String, messageId: Long): PendingIntent {
@@ -209,14 +293,13 @@ class Notifier(private val context: Context) {
     // avatars
 
     /**
-     * The avatar as a bitmap: an https image (cached, 5 s timeout, 2 MB at
-     * most) or a picked image kept on the phone, else the preset's colour with the bot name's first letter. The
-     * preset icon itself is drawn by the nsh app; the notification uses the
-     * letter so the app ships no icon set of its own.
+     * The avatar as a bitmap: an https image (cached, [timeoutMs] in all, 2 MB at
+     * most) or a picked image kept on the phone, else the preset: its icon in white on its colour, the same as the
+     * nsh app draws it (the path data in [AvatarIcons] is generated from the app's `ICONS`).
      */
-    fun avatarBitmap(avatar: Avatar, name: String, size: Int = 192): Bitmap? {
+    fun avatarBitmap(avatar: Avatar, size: Int = 192, timeoutMs: Int = 5000): Bitmap? {
         if (avatar is Avatar.Image) {
-            image(avatar.url)?.let { return circle(it, size) }
+            image(avatar.url, timeoutMs = timeoutMs)?.let { return circle(it, size) }
         }
         if (avatar is Avatar.Local) {
             localAvatars(context).file(avatar.stringValue)?.let { BitmapFactory.decodeFile(it.path) }?.let { return circle(it, size) }
@@ -225,36 +308,69 @@ class Notifier(private val context: Context) {
         val canvas = Canvas(bmp)
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = avatar.argb }
         canvas.drawCircle(size / 2f, size / 2f, size / 2f, paint)
-        val letter = name.trim().let { if (it.isEmpty()) "H" else it.substring(0, it.offsetByCodePoints(0, 1)).uppercase() }
-        paint.color = Color.WHITE
-        paint.textSize = size * 0.46f
-        paint.typeface = Typeface.DEFAULT_BOLD
-        paint.textAlign = Paint.Align.CENTER
-        val y = size / 2f - (paint.descent() + paint.ascent()) / 2
-        canvas.drawText(letter, size / 2f, y, paint)
+        drawIcon(canvas, (avatar as? Avatar.Preset)?.icon ?: "bell", size)
         return bmp
     }
 
-    private fun image(url: String): Bitmap? {
+    /** The preset icon as the app's `Glyph` draws it: 24-unit grid at half the size, stroke 1.8, round caps and joins, white. */
+    private fun drawIcon(canvas: Canvas, icon: String, size: Int) {
+        val d = AvatarIcons.PATHS[icon] ?: AvatarIcons.PATHS.getValue("bell")
+        val path = Path()
+        for (op in SvgPath.parse(d)) {
+            when (op) {
+                is SvgPath.Op.MoveTo -> path.moveTo(op.x, op.y)
+                is SvgPath.Op.LineTo -> path.lineTo(op.x, op.y)
+                is SvgPath.Op.CubicTo -> path.cubicTo(op.x1, op.y1, op.x2, op.y2, op.x, op.y)
+                SvgPath.Op.Close -> path.close()
+            }
+        }
+        val scale = size * ICON_SCALE / 24f
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            color = Color.WHITE
+            strokeWidth = 1.8f
+            strokeCap = Paint.Cap.ROUND
+            strokeJoin = Paint.Join.ROUND
+        }
+        canvas.save()
+        canvas.translate(size / 2f - 12 * scale, size / 2f - 12 * scale)
+        canvas.scale(scale, scale)
+        canvas.drawPath(path, paint)
+        canvas.restore()
+    }
+
+
+    /** The message's picture for the notification: https, 5 MB at most, [timeoutMs] in all, scaled down to 1024 px. */
+    private fun picture(url: String, timeoutMs: Int = NotificationPlan.IMAGE_TIMEOUT_MS): Bitmap? =
+        image(url, NotificationPlan.MAX_IMAGE_BYTES, minOf(timeoutMs, NotificationPlan.IMAGE_TIMEOUT_MS), 1024)
+
+    private fun image(url: String, maxBytes: Int = MAX_IMAGE, timeoutMs: Int = 5000, maxSide: Int = 0): Bitmap? {
         val dir = File(context.cacheDir, "avatars").apply { mkdirs() }
         val name = MessageDigest.getInstance("SHA-256").digest(url.toByteArray()).joinToString("") { "%02x".format(it) }
         val file = File(dir, name)
         if (!file.exists()) {
+            // timeoutMs bounds the whole download, not only the gaps between reads; the size is checked
+            // from Content-Length first and again while streaming.
+            val deadline = Deadline(timeoutMs.toLong())
             val bytes = runCatching {
                 val conn = URL(url).openConnection() as HttpURLConnection
-                conn.connectTimeout = 5000
-                conn.readTimeout = 5000
+                conn.connectTimeout = timeoutMs
+                conn.readTimeout = timeoutMs
                 try {
-                    if (conn.responseCode != 200 || conn.contentLengthLong > MAX_IMAGE) return null
-                    conn.inputStream.use { it.readNBytesCompat(MAX_IMAGE + 1) }
+                    if (conn.responseCode != 200 || conn.contentLengthLong > maxBytes) return null
+                    conn.inputStream.use { BoundedRead.read(it, maxBytes, deadline) }
                 } finally {
                     conn.disconnect()
                 }
             }.getOrNull() ?: return null
-            if (bytes.size > MAX_IMAGE) return null
             file.writeBytes(bytes)
         }
-        return BitmapFactory.decodeFile(file.path)
+        if (maxSide <= 0) return BitmapFactory.decodeFile(file.path)
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(file.path, bounds)
+        var sample = 1
+        while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= maxSide) sample *= 2
+        return BitmapFactory.decodeFile(file.path, BitmapFactory.Options().apply { inSampleSize = sample })
     }
 
     private fun circle(src: Bitmap, size: Int): Bitmap {
@@ -275,25 +391,15 @@ class Notifier(private val context: Context) {
         const val NOTIFICATION_ID = 1
         private const val MAX_IMAGE = 2 shl 20
 
+        /** The icon's size as a share of the avatar's, as the app's `Glyph` (`iconScale`). */
+        private const val ICON_SCALE = 0.5f
+
         /** Where picked avatar images are kept (not backed up, like the database). */
         fun localAvatars(context: Context) = LocalAvatars(File(context.noBackupFilesDir, "avatars"))
 
         fun channelId(botId: String) = "$CHANNEL_PREFIX$botId"
 
         /** The notification tag: `c<bot>:<collapse id>` when the message has one, else `m<message id>`. */
-        fun tag(botId: String, messageId: Long, collapseId: String) =
-            if (collapseId.isNotEmpty()) "c$botId:$collapseId" else "m$messageId"
+        fun tag(botId: String, messageId: Long, collapseId: String) = Banner.tag(botId, messageId, collapseId)
     }
-}
-
-/** InputStream.readNBytes is API 33; read at most [max] bytes. */
-private fun java.io.InputStream.readNBytesCompat(max: Int): ByteArray {
-    val out = java.io.ByteArrayOutputStream()
-    val buf = ByteArray(8192)
-    while (out.size() < max) {
-        val n = read(buf, 0, minOf(buf.size, max - out.size()))
-        if (n < 0) break
-        out.write(buf, 0, n)
-    }
-    return out.toByteArray()
 }

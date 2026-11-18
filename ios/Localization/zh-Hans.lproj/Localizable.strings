@@ -1,0 +1,4 @@
+/* Banner of a push that carries no text (HONK_PUSH_CONTENT=none) until the message is fetched. */
+"New notification" = "新通知";
+/* Body of a message whose end-to-end encrypted content could not be opened (no key, wrong key). */
+"Couldn't decrypt this notification" = "无法解密的通知";

@@ -20,10 +20,12 @@ function host(overrides: Record<string, unknown> = {}) {
       "honk.refresh": true,
       "honk.bot.create": (d: unknown) => ({ bot: { ...bot, id: "bQ7mN2pR", name: (d as { name: string }).name }, token: "bQ7mN2pR:secret-token" }),
       "honk.bot.token": "aZ3kQ9xT:abcdefghijklmnop",
+      "honk.bot.encryption.key": null,
       "honk.bot.delete": true,
       "honk.message.delete": true,
       "honk.avatar.save": (d: unknown) => ((d as { type: string }).type === "image/png" ? "local:a1b2.png" : "local:a1b2.jpg"),
       "honk.avatar.image": null,
+      "honk.devices.list": [{ id: "dev-this", name: "iPhone 15", platform: "ios", seenAt: Date.now(), current: true }],
       "honk.gateway.get": { url: "https://gw.test/", defaultURL: "https://gw.test/", custom: false },
       "honk.gateway.test": (d: unknown) => {
         const url = (d as { url: string }).url;
@@ -123,6 +125,35 @@ test("bot settings masks the stored token", async () => {
   await app.waitFor("text:aZ3kQ9xT:abcd••••••••nop");
 });
 
+test("bot settings turns end-to-end encryption on, shows the key, resets and turns it off", async () => {
+  let key: string | null = null;
+  const app = await open("./App.tsx", {
+    locale: "zh-Hans-CN",
+    host: host({
+      "honk.bot.encryption.key": () => key,
+      "honk.bot.encryption.enable": () => (key = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"),
+      "honk.bot.encryption.resetKey": () => (key = "Hh4dGxkYFhQSEA4MCggGBAIA_v38-vj29PLw7uzq6Obk4uA"),
+      "honk.bot.encryption.disable": () => ((key = null), true),
+    }),
+  });
+  await app.press("id:chat-aZ3kQ9xT");
+  await app.press("id:open-settings");
+  await app.press("label:端到端加密");
+  await app.waitFor("id:e2e-key");
+  expect(app.texts()).toContain("AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8");
+  await app.press("id:copy-key");
+  await app.waitFor("text:已复制");
+
+  app.onDialog(() => "重置");
+  await app.press("id:reset-key");
+  await app.waitFor("text:Hh4dGxkYFhQSEA4MCggGBAIA_v38-vj29PLw7uzq6Obk4uA");
+
+  app.onDialog(() => "关闭加密");
+  await app.press("label:端到端加密");
+  await app.waitUntil(() => app.host.calls().some((c) => c.name === "honk.bot.encryption.disable"));
+  expect(app.host.calls().find((c) => c.name === "honk.bot.encryption.disable")?.data).toEqual({ botId: "aZ3kQ9xT" });
+});
+
 test("a message turns to dust before it is deleted", async () => {
   const app = await open("./App.tsx", { locale: "zh-Hans-CN", host: host() });
   await app.press("id:chat-aZ3kQ9xT");
@@ -146,7 +177,7 @@ test("search filters the chat list", async () => {
   const app = await open("./App.tsx", { locale: "zh-Hans-CN",  host: host() });
   await app.waitFor("text:Berth 部署");
   await app.type("id:search", "告警");
-  await app.waitFor("text:没有匹配的会话");
+  await app.waitFor("text:没有匹配的结果");
   await app.clear("id:search");
   await app.type("id:search", "berth");
   await app.waitFor("text:Berth 部署");
@@ -178,7 +209,55 @@ test("the gateway page tests an address before switching", async () => {
   app.onDialog(() => "切换");
   await app.press("id:save-gateway");
   await app.waitUntil(() => app.host.calls().some((c) => c.name === "honk.gateway.set"));
-  expect(app.host.calls().find((c) => c.name === "honk.gateway.set")?.data).toEqual({ url: "https://mine.example/" });
+  expect(app.host.calls().find((c) => c.name === "honk.gateway.set")?.data).toEqual({ url: "https://mine.example/", registerKey: "" });
+});
+
+test("the gateway page sends the register key, and changing only the key asks nothing", async () => {
+  const app = await open("./App.tsx", {
+    locale: "zh-Hans-CN",
+    host: host({
+      "honk.gateway.get": { url: "https://gw.test/", defaultURL: "https://gw.test/", custom: false, registerKey: "" },
+      "honk.gateway.test": (d: unknown) => ({ ok: true, url: (d as { url: string }).url, version: "0.2.0", registerKeyRequired: true }),
+    }),
+  });
+  await app.press("id:tab-settings");
+  await app.press("id:gateway-row");
+  await app.press("id:test-gateway");
+  await app.waitFor("text:连接正常 · 网关版本 0.2.0 · 需要注册口令");
+  await app.type("id:register-key", "s3cret");
+  await app.press("id:save-gateway");
+  await app.waitUntil(() => app.host.calls().some((c) => c.name === "honk.gateway.set"));
+  expect(app.host.calls().find((c) => c.name === "honk.gateway.set")?.data).toEqual({ url: "https://gw.test/", registerKey: "s3cret" });
+  expect(app.dialogs().length).toBe(0);
+});
+
+test("settings deletes this device's data after a confirmation", async () => {
+  let deleted = 0;
+  const app = await open("./App.tsx", {
+    locale: "zh-Hans-CN",
+    host: host({ "honk.device.delete": () => { deleted++; return true; } }),
+  });
+  await app.press("id:tab-settings");
+  app.onDialog(() => "取消");
+  await app.press("id:delete-device-data");
+  expect(deleted).toBe(0);
+  expect(app.dialogs()[0]).toMatchObject({ title: "删除全部数据？" });
+  app.onDialog(() => "删除");
+  await app.press("id:delete-device-data");
+  await app.waitUntil(() => deleted === 1);
+});
+
+test("a failed deletion keeps the data and says so", async () => {
+  const app = await open("./App.tsx", {
+    locale: "zh-Hans-CN",
+    host: host({ "honk.device.delete": () => { throw new Error("连不上网关"); } }),
+  });
+  await app.press("id:tab-settings");
+  app.onDialog((d) => (d.title === "删除失败" ? "好" : "删除"));
+  await app.press("id:delete-device-data");
+  await app.waitUntil(() => app.dialogs().some((d) => d.title === "删除失败"));
+  expect(app.dialogs().find((d) => d.title === "删除失败")?.message).toContain("连不上网关");
+  expect(app.host.calls().filter((c) => c.name === "honk.chats").length > 0).toBe(true);
 });
 
 test("settings shows a failed registration and retries it", async () => {
@@ -408,3 +487,305 @@ test("a banner right after the last one left still shows", async () => {
   expect(app.texts().some((t) => t.includes("CPU 92%"))).toBe(true);
 });
 
+
+// Device groups.
+const group = [
+  { id: "dev-this", name: "iPhone 15", platform: "ios", seenAt: Date.now(), current: true },
+  { id: "dev-other", name: "Pixel 8", platform: "android", seenAt: Date.now() - 5 * 36e5, current: false },
+];
+
+test("settings lists the devices of the group and marks this one", async () => {
+  const app = await open("./App.tsx", { locale: "zh-Hans-CN", host: host({ "honk.devices.list": group }) });
+  await app.press("id:tab-settings");
+  await app.waitFor("text:Pixel 8");
+  expect(app.texts()).toContain("iPhone 15");
+  expect(app.texts()).toContain("这台设备");
+  expect(app.texts()).toContain("Android · 5 小时前");
+  expect(app.texts()).toContain("添加设备");
+  expect(app.texts()).toContain("已有设备？输入配对码");
+});
+
+test("removing another device asks first, then removes it", async () => {
+  const removed: unknown[] = [];
+  const app = await open("./App.tsx", {
+    locale: "zh-Hans-CN",
+    host: host({ "honk.devices.list": group, "honk.devices.remove": (d: unknown) => { removed.push(d); return true; } }),
+  });
+  await app.press("id:tab-settings");
+  await app.waitFor("text:Pixel 8");
+  app.onDialog(() => "取消");
+  await app.press("id:device-dev-other");
+  expect(removed.length).toBe(0);
+  expect(app.dialogs()[0]).toMatchObject({ title: "移除 Pixel 8？" });
+  app.onDialog(() => "移除");
+  await app.press("id:device-dev-other");
+  await app.waitUntil(() => removed.length === 1);
+  expect(removed[0]).toEqual({ deviceId: "dev-other" });
+  // This device has no remove row of its own: it leaves through the Data section.
+  expect(app.count("id:device-dev-this")).toBe(1);
+});
+
+test("leaving the group is offered only with other devices, and removes this device's own id", async () => {
+  const alone = await open("./App.tsx", { locale: "zh-Hans-CN", host: host() });
+  await alone.press("id:tab-settings");
+  await alone.waitFor("text:iPhone 15");
+  expect(alone.count("id:leave-group")).toBe(0);
+
+  const removed: unknown[] = [];
+  const app = await open("./App.tsx", {
+    locale: "zh-Hans-CN",
+    host: host({ "honk.devices.list": group, "honk.devices.remove": (d: unknown) => { removed.push(d); return true; } }),
+  });
+  await app.press("id:tab-settings");
+  await app.waitFor("text:Pixel 8");
+  expect(app.count("id:leave-group")).toBe(1);
+  expect(app.count("id:delete-device-data")).toBe(1);
+  app.onDialog(() => "移除");
+  await app.press("id:leave-group");
+  await app.waitUntil(() => removed.length === 1);
+  expect(removed[0]).toEqual({ deviceId: "dev-this" });
+  expect(app.dialogs()[0]).toMatchObject({ title: "从设备组移除这台设备？" });
+});
+
+test("delete all data names the other devices", async () => {
+  const app = await open("./App.tsx", { locale: "zh-Hans-CN", host: host({ "honk.devices.list": group }) });
+  await app.press("id:tab-settings");
+  await app.waitFor("text:Pixel 8");
+  app.onDialog(() => "取消");
+  await app.press("id:delete-device-data");
+  expect(app.dialogs()[0].message).toContain("其他 1 台设备");
+});
+
+test("a gateway without device groups still shows the settings", async () => {
+  const app = await open("./App.tsx", {
+    locale: "zh-Hans-CN",
+    host: host({ "honk.devices.list": () => { throw new Error("404 Not Found"); } }),
+  });
+  await app.press("id:tab-settings");
+  await app.waitFor("text:添加设备");
+  expect(app.count("id:leave-group")).toBe(0);
+});
+
+test("the add device page shows a pairing code, which copies", async () => {
+  const code = "000G-40R4-0M30-E209-185G-R38E-1W";
+  const app = await open("./App.tsx", {
+    locale: "zh-Hans-CN",
+    host: host({ "honk.devices.list": group, "honk.link.create": { code, expiresAt: Date.now() + 10 * 6e4 } }),
+  });
+  await app.press("id:tab-settings");
+  await app.press("id:add-device");
+  await app.waitFor(`text:${code}`);
+  expect(app.texts().some((t) => t.startsWith("10:00 后过期") || t.startsWith("9:59 后过期"))).toBe(true);
+  await app.press("id:copy-code");
+  expect(app.clipboard()).toBe(code);
+  await app.waitFor("text:已复制");
+});
+
+test("an expired pairing code offers a new one", async () => {
+  let made = 0;
+  const app = await open("./App.tsx", {
+    locale: "zh-Hans-CN",
+    host: host({
+      "honk.devices.list": group,
+      "honk.link.create": () => ({ code: `CODE${++made}-0000-0000-0000-0000-0000-00`, expiresAt: Date.now() - 1000 }),
+    }),
+  });
+  await app.press("id:tab-settings");
+  await app.press("id:add-device");
+  await app.waitFor("text:配对码已过期");
+  await app.press("id:regenerate-code");
+  await app.waitUntil(() => made === 2);
+});
+
+test("a failed pairing code request shows why", async () => {
+  const app = await open("./App.tsx", {
+    locale: "zh-Hans-CN",
+    host: host({ "honk.link.create": () => { throw new Error("连不上网关"); } }),
+  });
+  await app.press("id:tab-settings");
+  await app.press("id:add-device");
+  await app.waitFor("text:连不上网关");
+  expect(app.count("id:regenerate-code")).toBe(1);
+});
+
+test("the empty state offers to enter a pairing code, which joins the group", async () => {
+  const claimed: unknown[] = [];
+  const app = await open("./App.tsx", {
+    locale: "zh-Hans-CN",
+    host: host({
+      "honk.chats": [],
+      "honk.link.claim": (d: unknown) => { claimed.push(d); return true; },
+    }),
+  });
+  await app.waitFor("text:还没有 Bot");
+  await app.press("id:pair-existing");
+  await app.waitFor("text:输入配对码");
+  // Not a code yet: the button does nothing.
+  await app.type("id:pairing-input", "000G-40R4");
+  await app.press("id:join-group");
+  expect(claimed.length).toBe(0);
+  await app.type("id:pairing-input", " 0m30 e209 185g r38e 1w");
+  app.onDialog(() => "好");
+  await app.press("id:join-group");
+  await app.waitUntil(() => claimed.length === 1);
+  expect(claimed[0]).toEqual({ code: "000G-40R4 0m30 e209 185g r38e 1w" });
+  await app.waitUntil(() => app.dialogs().some((d) => d.title === "已加入设备组"));
+  await app.waitFor("text:还没有 Bot");
+});
+
+test("a wrong pairing code shows the host's reason", async () => {
+  const app = await open("./App.tsx", {
+    locale: "zh-Hans-CN",
+    host: host({ "honk.chats": [], "honk.link.claim": () => { throw new Error("配对码不对、已过期或已用过"); } }),
+  });
+  await app.press("id:pair-existing");
+  await app.type("id:pairing-input", "000G40R40M30E209185GR38E1W");
+  await app.press("id:join-group");
+  await app.waitFor("text:配对码不对、已过期或已用过");
+  expect(app.count("id:pair-error")).toBe(1);
+});
+
+test("the device section is in English too", async () => {
+  const app = await open("./App.tsx", { locale: "en-US", host: host({ "honk.devices.list": group }) });
+  await app.press("id:tab-settings");
+  await app.waitFor("text:Pixel 8");
+  expect(app.texts()).toContain("Devices");
+  expect(app.texts()).toContain("This device");
+  expect(app.texts()).toContain("Add device");
+  expect(app.texts()).toContain("Remove this device from the group");
+  expect(app.texts()).toContain("Delete all data");
+});
+
+test("search lists matching messages under the chats and opens the chat on one", async () => {
+  const hit = { id: 7, botId: "aZ3kQ9xT", title: "部署成功", body: "sub2api 已上线", html: "", data: "", level: "active", group: "", url: "", copy: "", icon: "", collapseId: "", date: Date.now(), read: true };
+  const app = await open("./App.tsx", { locale: "zh-Hans-CN", host: host({ "honk.search": [hit] }) });
+  await app.waitFor("text:Berth 部署");
+  await app.type("id:search", "部署");
+  await app.waitFor("id:messages-group");
+  expect(app.texts()).toContain("消息");
+  expect(app.host.calls().filter((c) => c.name === "honk.search").at(-1)?.data).toEqual({ query: "部署" });
+  await app.press("id:hit-7");
+  await app.waitFor("id:chat");
+  await app.waitUntil(() => app.host.calls().some((c) => c.name === "honk.messages"));
+  expect(app.host.calls().find((c) => c.name === "honk.messages")?.data).toEqual({ botId: "aZ3kQ9xT", around: 7, limit: 50 });
+  // The window holds an unread message: opening the chat marks it read, once.
+  await app.waitUntil(() => app.host.calls().some((c) => c.name === "honk.markRead"));
+  await app.wait(200);
+  expect(app.host.calls().filter((c) => c.name === "honk.markRead").length).toBe(1);
+  // The way back to the newest messages is there.
+  await app.waitFor("id:jump-latest");
+});
+
+test("a search hit window with nothing unread does not mark read", async () => {
+  const hit = { id: 7, botId: "aZ3kQ9xT", title: "部署成功", body: "sub2api 已上线", html: "", data: "", level: "active", group: "", url: "", copy: "", icon: "", collapseId: "", date: Date.now(), read: true };
+  const app = await open("./App.tsx", { locale: "zh-Hans-CN", host: host({ "honk.search": [hit], "honk.messages": [hit] }) });
+  await app.waitFor("text:Berth 部署");
+  await app.type("id:search", "部署");
+  await app.waitFor("id:hit-7");
+  await app.press("id:hit-7");
+  await app.waitFor("id:chat");
+  await app.waitUntil(() => app.host.calls().some((c) => c.name === "honk.messages"));
+  await app.wait(200);
+  expect(app.host.calls().some((c) => c.name === "honk.markRead")).toBe(false);
+});
+
+test("search results refresh when the store changes", async () => {
+  const hit = { id: 7, botId: "aZ3kQ9xT", title: "部署成功", body: "sub2api 已上线", html: "", data: "", level: "active", group: "", url: "", copy: "", icon: "", collapseId: "", date: Date.now(), read: true };
+  const app = await open("./App.tsx", { locale: "zh-Hans-CN", host: host({ "honk.search": [hit] }) });
+  await app.waitFor("text:Berth 部署");
+  await app.type("id:search", "部署");
+  await app.waitFor("id:hit-7");
+  const searches = () => app.host.calls().filter((c) => c.name === "honk.search").length;
+  const before = searches();
+  // Leaving a chat reloads the store.
+  await app.press("id:hit-7");
+  await app.waitFor("id:chat");
+  await app.press("id:back");
+  await app.waitUntil(() => searches() > before);
+});
+
+test("a search with no message hits shows no messages group", async () => {
+  const app = await open("./App.tsx", { locale: "zh-Hans-CN", host: host({ "honk.search": [] }) });
+  await app.waitFor("text:Berth 部署");
+  await app.type("id:search", "berth");
+  await app.waitFor("text:Berth 部署");
+  await app.wait(200);
+  expect(app.count("id:messages-group")).toBe(0);
+});
+
+test("settings keeps messages for a chosen period after confirming", async () => {
+  let days = 0;
+  const app = await open("./App.tsx", {
+    locale: "zh-Hans-CN",
+    host: host({ "honk.retention.get": () => days, "honk.retention.set": (d: unknown) => (days = (d as { days: number }).days) }),
+  });
+  await app.press("id:tab-settings");
+  await app.waitFor("text:永久");
+  // The period sheet, then the confirmation that older messages go.
+  app.onDialog((d) => (d.sheet ? "30 天" : "删除"));
+  await app.press("id:retention-row");
+  await app.waitUntil(() => app.host.calls().some((c) => c.name === "honk.retention.set"));
+  expect(app.host.calls().find((c) => c.name === "honk.retention.set")?.data).toEqual({ days: 30 });
+  await app.waitFor("text:30 天");
+});
+
+test("cancelling the retention confirmation changes nothing", async () => {
+  const app = await open("./App.tsx", { locale: "zh-Hans-CN", host: host({ "honk.retention.get": 0, "honk.retention.set": 90 }) });
+  await app.press("id:tab-settings");
+  app.onDialog((d) => (d.sheet ? "90 天" : "取消"));
+  await app.press("id:retention-row");
+  await app.wait(400);
+  expect(app.host.calls().some((c) => c.name === "honk.retention.set")).toBe(false);
+});
+
+test("exports all messages from settings and one chat from its settings", async () => {
+  const app = await open("./App.tsx", { locale: "zh-Hans-CN", host: host({ "honk.export": { count: 3, shared: true } }) });
+  await app.press("id:tab-settings");
+  await app.press("id:export-all");
+  await app.waitUntil(() => app.host.calls().some((c) => c.name === "honk.export"));
+  expect(app.host.calls().find((c) => c.name === "honk.export")?.data ?? null).toBeNull();
+  await app.press("id:tab-chats");
+  await app.press("id:chat-aZ3kQ9xT");
+  await app.press("id:open-settings");
+  await app.press("id:export-chat");
+  await app.waitUntil(() => app.host.calls().filter((c) => c.name === "honk.export").length === 2);
+  expect(app.host.calls().filter((c) => c.name === "honk.export")[1].data).toEqual({ botId: "aZ3kQ9xT" });
+});
+
+test("exporting nothing says so", async () => {
+  const app = await open("./App.tsx", { locale: "zh-Hans-CN", host: host({ "honk.export": { count: 0, shared: false } }) });
+  await app.press("id:tab-settings");
+  const seen: string[] = [];
+  app.onDialog((d) => (seen.push(d.title ?? ""), "好"));
+  await app.press("id:export-all");
+  await app.waitUntil(() => seen.length > 0);
+  expect(seen).toEqual(["没有可导出的消息"]);
+});
+
+test("importing reports what was added and what was skipped", async () => {
+  const app = await open("./App.tsx", {
+    locale: "zh-Hans-CN",
+    host: host({ "honk.import": { imported: 5, existing: 2, unknownBot: 1, invalid: 0 } }),
+  });
+  await app.press("id:tab-settings");
+  const seen: (string | null | undefined)[] = [];
+  app.onDialog((d) => (seen.push(d.title, d.message), "好"));
+  await app.press("id:import");
+  await app.waitUntil(() => seen.length > 0);
+  expect(seen[0]).toBe("导入完成");
+  expect(seen[1]).toContain("新增 5 条消息。");
+  expect(seen[1]).toContain("2 条已经在这台设备上。");
+  expect(seen[1]).toContain("1 条属于这台设备上没有的 Bot，已跳过。");
+  expect(seen[1]).not.toContain("无法读取");
+});
+
+test("cancelling the import picker says nothing", async () => {
+  const app = await open("./App.tsx", { locale: "zh-Hans-CN", host: host({ "honk.import": null }) });
+  await app.press("id:tab-settings");
+  const seen: string[] = [];
+  app.onDialog((d) => (seen.push(d.title ?? ""), "好"));
+  await app.press("id:import");
+  await app.waitUntil(() => app.host.calls().some((c) => c.name === "honk.import"));
+  await app.wait(200);
+  expect(seen).toEqual([]);
+});

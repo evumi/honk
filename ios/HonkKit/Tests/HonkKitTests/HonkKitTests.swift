@@ -143,6 +143,60 @@ func tempStore() throws -> LocalStore {
         #expect(try store.messages(botID: "123").count == 1)
     }
 
+    @Test func sendOptionsAreStoredAndApplyIsIdempotent() throws {
+        let store = try tempStore()
+        let m = QueuedMessage(id: 30, botID: "bot1", body: "**x**", url: "https://a.example/b", open: "url",
+                              image: "https://a.example/i.png", parseMode: "Markdown", silent: true, date: 9)
+        let first = try store.apply(m, notificationID: "n30")
+        try store.apply(m)
+        let got = try #require(try store.message(id: 30))
+        #expect(first.message == got)
+        #expect(got.open == "url" && got.image == "https://a.example/i.png" && got.parseMode == "Markdown" && got.silent)
+        // A silent message still counts as unread (badge and chat list).
+        #expect(try store.unreadTotal() == 1)
+        #expect(try store.chats().first { $0.bot.id == "bot1" }?.last?.silent == true)
+        let plain = try #require(try store.apply(QueuedMessage(id: 31, botID: "bot1", body: "p", date: 10)).message)
+        #expect(plain.open == "" && plain.image == "" && plain.parseMode == "" && !plain.silent)
+    }
+
+    @Test func decodesSendOptionsFromTheGateway() throws {
+        let json = #"{"message_id":5,"bot_id":"aZ3kQ9xT","kind":"message","body":"b","open":"url","image":"https://a/i.png","parse_mode":"Markdown","silent":true,"date":1}"#
+        let m = try JSONDecoder().decode(QueuedMessage.self, from: Data(json.utf8))
+        #expect(m.open == "url" && m.image == "https://a/i.png" && m.parseMode == "Markdown" && m.silent)
+        let old = try JSONDecoder().decode(QueuedMessage.self, from: Data(#"{"message_id":6,"bot_id":"aZ3kQ9xT","kind":"message"}"#.utf8))
+        #expect(old.open == "" && !old.silent)
+    }
+
+    @Test func migratesV2ToSendOptions() throws {
+        // A v2 file: short bot ids, no send options.
+        let path = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".sqlite").path
+        var db: OpaquePointer?
+        #expect(sqlite3_open(path, &db) == SQLITE_OK)
+        let v2 = """
+        CREATE TABLE bots (id TEXT PRIMARY KEY, name TEXT NOT NULL, avatar TEXT NOT NULL DEFAULT '',
+          default_level TEXT NOT NULL DEFAULT 'active', muted INTEGER NOT NULL DEFAULT 0, pinned INTEGER NOT NULL DEFAULT 0,
+          created_at INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL DEFAULT 0);
+        CREATE TABLE messages (id INTEGER PRIMARY KEY, bot_id TEXT NOT NULL, title TEXT NOT NULL DEFAULT '',
+          body TEXT NOT NULL DEFAULT '', html TEXT NOT NULL DEFAULT '', data TEXT NOT NULL DEFAULT '',
+          level TEXT NOT NULL DEFAULT '', group_key TEXT NOT NULL DEFAULT '', url TEXT NOT NULL DEFAULT '',
+          copy_text TEXT NOT NULL DEFAULT '', icon TEXT NOT NULL DEFAULT '', collapse_id TEXT NOT NULL DEFAULT '',
+          date INTEGER NOT NULL, read INTEGER NOT NULL DEFAULT 0, notif_id TEXT);
+        CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        INSERT INTO bots (id, name) VALUES ('aZ3kQ9xT', '部署');
+        INSERT INTO messages (id, bot_id, body, date) VALUES (1, 'aZ3kQ9xT', 'old', 1);
+        PRAGMA user_version = 2;
+        """
+        #expect(sqlite3_exec(db, v2, nil, nil, nil) == SQLITE_OK)
+        sqlite3_close(db)
+
+        let store = try LocalStore(path: path)
+        let old = try #require(try store.message(id: 1))
+        #expect(old.body == "old" && old.open == "" && old.image == "" && old.parseMode == "" && !old.silent)
+        try store.apply(QueuedMessage(id: 2, botID: "aZ3kQ9xT", body: "new", image: "https://a/i.png", silent: true))
+        #expect(try store.message(id: 2)?.silent == true)
+        _ = try LocalStore(path: path) // reopening does not migrate again
+    }
+
     @Test func twoConnectionsShareTheFile() throws {
         // The app and the extension each open the file.
         let path = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".sqlite").path
@@ -171,6 +225,17 @@ func tempStore() throws -> LocalStore {
         #expect(PushInfo(userInfo: ["kind": "message", "msg_id": 7, "bot_id": 1])?.botID == "1")
         #expect(PushInfo(userInfo: ["kind": "delete", "msg_id": "8", "bot_id": "1", "target_id": "7"])?.targetID == 7)
         #expect(PushInfo(userInfo: ["aps": [String: Any]()]) == nil)
+    }
+
+    @Test func notificationThreads() {
+        #expect(NotificationThread.identifier(botID: "aZ3kQ9xT", group: "") == "bot-aZ3kQ9xT")
+        #expect(NotificationThread.identifier(botID: "aZ3kQ9xT", group: "prod") == "bot-aZ3kQ9xT:prod")
+        // The gateway's thread-id: b<bot>:<group>, or b<bot> without a group.
+        #expect(NotificationThread.group(fromAPNsThread: "baZ3kQ9xT:prod", botID: "aZ3kQ9xT") == "prod")
+        #expect(NotificationThread.group(fromAPNsThread: "baZ3kQ9xT:a:b", botID: "aZ3kQ9xT") == "a:b")
+        #expect(NotificationThread.group(fromAPNsThread: "baZ3kQ9xT", botID: "aZ3kQ9xT") == "")
+        #expect(NotificationThread.group(fromAPNsThread: "", botID: "aZ3kQ9xT") == "")
+        #expect(NotificationThread.group(fromAPNsThread: "bOther:prod", botID: "aZ3kQ9xT") == "")
     }
 
     @Test func avatar() {
@@ -224,12 +289,35 @@ final class MockGateway: URLProtocol {
         let store = try tempStore()
         let api = APIClient(baseURL: URL(string: "https://gw.test/")!, secret: "s", session: MockGateway.session())
 
-        let out = try await SyncEngine(api: api, store: store).run()
+        let out = try await SyncEngine(api: api, store: store, opener: MessageOpener(keys: MemoryBotKeys())).run()
         #expect(out.applied == 2)
         #expect(store.syncCursor == 2)
         #expect(try store.message(id: 1)?.data == "d")
         #expect(MockGateway.requests.filter { $0.url!.path == "/v1/ack" }.count == 2)
         #expect(MockGateway.requests.first?.value(forHTTPHeaderField: "Authorization") == "Bearer s")
+    }
+
+    @Test func syncDecryptsSealedItems() async throws {
+        let keys = MemoryBotKeys()
+        let key = Seal.generateKey()
+        keys.save(key, botID: "bot1")
+        let ct = try sealed(["body": "sealed body"], key: key)
+        MockGateway.requests = []
+        MockGateway.handler = { req in
+            let url = req.url!.absoluteString
+            if url.contains("cursor=0") {
+                return (200, #"{"ok":true,"result":{"messages":[{"message_id":1,"bot_id":"bot1","kind":"message","ciphertext":"\#(ct)","date":1}],"cursor":1,"has_more":false}}"#)
+            }
+            if url.hasSuffix("v1/ack") { return (200, #"{"ok":true,"result":{"acked":1}}"#) }
+            return (404, #"{"ok":false,"error_code":404,"description":"Not Found"}"#)
+        }
+        let store = try tempStore()
+        let api = APIClient(baseURL: URL(string: "https://gw.test/")!, secret: "s", session: MockGateway.session())
+        let out = try await SyncEngine(api: api, store: store, opener: opener(keys)).run()
+        #expect(out.applied == 1)
+        #expect(try store.message(id: 1)?.body == "sealed body")
+        keys.remove(botID: "bot1")
+        #expect(keys.key(botID: "bot1") == nil)
     }
 
     @Test func getMeByToken() async throws {
@@ -266,6 +354,109 @@ final class MockGateway: URLProtocol {
         MockGateway.requests = []
         await LegacyBotIDs.renameBeforePush(store: store, tokens: MemoryTokens(), api: api)
         #expect(MockGateway.requests.isEmpty)
+    }
+
+    @Test func registerSendsTheRegisterKeyOnlyWhenSet() async throws {
+        MockGateway.requests = []
+        MockGateway.handler = { _ in (200, #"{"ok":true,"result":{"device":{"id":"d","platform":"ios","push_ok":true},"device_secret":"sec"}}"#) }
+        let api = APIClient(baseURL: URL(string: "https://gw.test/")!, secret: nil, session: MockGateway.session())
+        func body(_ i: Int) throws -> [String: String] {
+            let data = MockGateway.requests[i].httpBody ?? MockGateway.requests[i].httpBodyStream.map { s in
+                s.open(); defer { s.close() }
+                var d = Data(); var buf = [UInt8](repeating: 0, count: 1024)
+                while s.hasBytesAvailable { let n = s.read(&buf, maxLength: buf.count); if n <= 0 { break }; d.append(buf, count: n) }
+                return d
+            } ?? Data()
+            return try JSONDecoder().decode([String: String].self, from: data)
+        }
+        _ = try await api.registerDevice(pushToken: "t", registerKey: "s3cret")
+        _ = try await api.registerDevice(pushToken: "t")
+        _ = try await api.registerDevice(pushToken: "t", registerKey: "")
+        #expect(try body(0)["register_key"] == "s3cret")
+        #expect(try body(1)["register_key"] == nil)
+        #expect(try body(2)["register_key"] == nil)
+    }
+
+    @Test func deleteDeviceCallsTheGatewayWithTheDeviceSecret() async throws {
+        MockGateway.requests = []
+        MockGateway.handler = { req in
+            req.httpMethod == "DELETE" && req.url!.path == "/v1/devices/me"
+                ? (200, #"{"ok":true,"result":true}"#)
+                : (404, #"{"ok":false,"error_code":404,"description":"Not Found"}"#)
+        }
+        let api = APIClient(baseURL: URL(string: "https://gw.test/")!, secret: "s3cret", session: MockGateway.session())
+        try await api.deleteDevice()
+        #expect(MockGateway.requests.first?.value(forHTTPHeaderField: "Authorization") == "Bearer s3cret")
+
+        MockGateway.handler = { _ in (500, #"{"ok":false,"error_code":500,"description":"Internal Server Error"}"#) }
+        let error = await #expect(throws: APIError.self) { try await api.deleteDevice() }
+        #expect(error == .gateway(code: 500, description: "Internal Server Error"))
+        let anonymous = APIClient(baseURL: URL(string: "https://gw.test/")!, secret: nil, session: MockGateway.session())
+        await #expect(throws: APIError.notRegistered) { try await anonymous.deleteDevice() }
+    }
+
+    @Test func deviceGroupCalls() async throws {
+        MockGateway.requests = []
+        MockGateway.handler = { req in
+            switch (req.httpMethod!, req.url!.path) {
+            case ("GET", "/v1/devices"):
+                return (200, #"{"ok":true,"result":[{"id":"d1","name":"iPhone","platform":"ios","seen_at":5,"created_at":1,"push_ok":true,"current":true},{"id":"d2","name":"","platform":"android","seen_at":0,"created_at":2,"push_ok":true,"current":false}]}"#)
+            case ("DELETE", "/v1/devices/d2"), ("DELETE", "/v1/devices/me"): return (200, #"{"ok":true,"result":true}"#)
+            case ("POST", "/v1/links"): return (200, #"{"ok":true,"result":{"expires_in":600}}"#)
+            case ("POST", "/v1/links/claim"): return (200, #"{"ok":true,"result":{"bundle":"YnVuZGxl"}}"#)
+            default: return (404, #"{"ok":false,"error_code":404,"description":"Not Found"}"#)
+            }
+        }
+        let api = APIClient(baseURL: URL(string: "https://gw.test/")!, secret: "s", session: MockGateway.session())
+        let list = try await api.listDevices()
+        #expect(list == [.init(id: "d1", name: "iPhone", platform: "ios", seenAt: 5, current: true),
+                         .init(id: "d2", name: "", platform: "android", seenAt: 0, current: false)])
+        try await api.removeDevice(id: "d2")
+        try await api.deleteDevice()
+        try await api.deleteDevice(all: true)
+        #expect(try await api.createLink(linkID: "l", bundle: "b") == 600)
+        #expect(try await api.claimLink(linkID: "l") == "YnVuZGxl")
+        let paths = MockGateway.requests.map { "\($0.httpMethod!) \($0.url!.path)\($0.url!.query.map { "?" + $0 } ?? "")" }
+        #expect(paths == ["GET /v1/devices", "DELETE /v1/devices/d2", "DELETE /v1/devices/me", "DELETE /v1/devices/me?all=true",
+                          "POST /v1/links", "POST /v1/links/claim"])
+    }
+
+    @Test func infoSaysWhetherARegisterKeyIsRequired() async throws {
+        let api = APIClient(baseURL: URL(string: "https://gw.test/")!, secret: nil, session: MockGateway.session())
+        MockGateway.handler = { _ in (200, #"{"ok":true,"result":{"name":"honk","version":"1","api":2,"register_key_required":true}}"#) }
+        #expect(try await api.info().registerKeyRequired)
+        MockGateway.handler = { _ in (200, #"{"ok":true,"result":{"name":"honk","version":"1","api":2}}"#) }
+        #expect(try await api.info().registerKeyRequired == false)
+        #expect(try await api.info().push == nil, "an older gateway does not say how it pushes")
+        MockGateway.handler = { _ in (200, #"{"ok":true,"result":{"name":"honk","version":"1","api":2,"features":["relay"],"push":{"ios":"direct","android":"relay"}}}"#) }
+        let info = try await api.info()
+        #expect(info.features == ["relay"] && info.push == APIClient.PushRoutes(ios: "direct", android: "relay"))
+    }
+
+    @Test func queryPostsTheMessageAndDataAndReturnsTheAnswer() async throws {
+        MockGateway.requests = []
+        MockGateway.handler = { req in
+            req.httpMethod == "POST" && req.url!.path == "/v1/queries"
+                ? (200, #"{"ok":true,"result":{"data":"7"}}"#)
+                : (404, #"{"ok":false,"error_code":404,"description":"Not Found"}"#)
+        }
+        let api = APIClient(baseURL: URL(string: "https://gw.test/")!, secret: "s3cret", session: MockGateway.session())
+        #expect(try await api.query(messageID: 42, data: "plus") == "7")
+        let req = try #require(MockGateway.requests.first)
+        #expect(req.value(forHTTPHeaderField: "Authorization") == "Bearer s3cret")
+        let sent = req.httpBody ?? req.httpBodyStream.map { s -> Data in
+            s.open(); defer { s.close() }
+            var out = Data(); var buf = [UInt8](repeating: 0, count: 1024)
+            while s.hasBytesAvailable { let n = s.read(&buf, maxLength: buf.count); if n <= 0 { break }; out.append(buf, count: n) }
+            return out
+        }
+        let bytes = try #require(sent)
+        let body = try #require(JSONSerialization.jsonObject(with: bytes) as? [String: Any])
+        #expect((body["message_id"] as? NSNumber)?.int64Value == 42 && body["data"] as? String == "plus")
+
+        MockGateway.handler = { _ in (504, #"{"ok":false,"error_code":504,"description":"Gateway Timeout"}"#) }
+        let error = await #expect(throws: APIError.self) { try await api.query(messageID: 42, data: "x") }
+        #expect(error == .gateway(code: 504, description: "Gateway Timeout"))
     }
 
     @Test func gatewayError() async throws {
@@ -319,6 +510,23 @@ final class MockGateway: URLProtocol {
     }
 }
 
+@Suite struct RegisterKeyTests {
+    @Test func saveLoadAndClear() {
+        let store = RegisterKeyStore(service: "dev.evumi.honk.test.\(UUID().uuidString)", accessGroup: nil)
+        defer { store.clear() }
+        #expect(store.load() == nil)
+        store.save("s3cret")
+        #expect(store.load() == "s3cret")
+        store.save("other")
+        #expect(store.load() == "other")
+        store.save("")
+        #expect(store.load() == nil, "an empty key removes it")
+        store.save("again")
+        store.save(nil)
+        #expect(store.load() == nil)
+    }
+}
+
 @Suite struct LocalAvatarTests {
     func temp() -> LocalAvatars {
         LocalAvatars(dir: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true))
@@ -331,6 +539,17 @@ final class MockGateway: URLProtocol {
         #expect(Avatar("local:x.bmp") == .default)
         #expect(Avatar("local:x.webp") == .local("x.webp"))
         #expect(Avatar("preset:ship:#c2410c") == .preset(icon: "bell", color: "#c2410c"), "the ship is gone; its colour stays")
+    }
+
+    @Test func removeAllForgetsEveryImage() throws {
+        let avatars = temp()
+        let a = try avatars.save(Data([0xFF, 0xD8, 0xFF, 0xD9]))
+        #expect(avatars.data(for: a) != nil)
+        avatars.removeAll()
+        #expect(avatars.data(for: a) == nil)
+        avatars.removeAll() // nothing left: no harm
+        let b = try avatars.save(Data([0xFF, 0xD8, 0xFF, 0xD9]))
+        #expect(avatars.data(for: b) != nil, "saving works again")
     }
 
     @Test func savesReadsAndPrunes() throws {
@@ -364,6 +583,7 @@ final class MemoryTokens: BotTokenStoring, @unchecked Sendable {
     func token(botID: String) -> String? { map[botID] }
     func save(_ token: String, botID: String) { map[botID] = token }
     func remove(botID: String) { map[botID] = nil }
+    func ids() -> [String] { Array(map.keys) }
 }
 
 struct Offline: Error {}
@@ -464,5 +684,123 @@ let serverBots = [Bot(id: "aZ3kQ9xT", name: "部署", createdAt: 100), Bot(id: "
         #expect(out == .init())
         try store.replaceBots(others, keeping: out.pending)
         #expect(try store.botIDs() == ["cX1"])
+    }
+}
+
+@Suite struct BannerTextTests {
+    func message(title: String = "", body: String = "") -> StoredMessage {
+        StoredMessage(id: 1, botID: "b", title: title, body: body, html: "", data: "", level: "", group: "", url: "",
+                      copy: "", icon: "", open: "", image: "", parseMode: "", silent: false, collapseID: "", date: 1, read: false)
+    }
+
+    @Test func contentlessPushTakesEverythingFromTheMessage() {
+        let t = BannerText.choose(message: message(title: "部署成功", body: "sluice 已上线"), botName: "部署",
+                                  pushTitle: "", pushSubtitle: "", pushBody: "新通知", fallback: "新通知")
+        #expect(t == BannerText(botName: "部署", title: "部署成功", body: "sluice 已上线"))
+    }
+
+    @Test func fetchFailureOnContentlessPushShowsTheGenericText() {
+        let t = BannerText.choose(message: nil, botName: nil, pushTitle: "", pushSubtitle: "", pushBody: "", fallback: "新通知")
+        #expect(t == BannerText(botName: "Honk", title: "", body: "新通知"))
+        // The localised loc-key text from the push is kept as it is.
+        let k = BannerText.choose(message: nil, botName: "部署", pushTitle: "", pushSubtitle: "", pushBody: "New notification", fallback: "x")
+        #expect(k == BannerText(botName: "部署", title: "", body: "New notification"))
+    }
+
+    @Test func pushWithContentSurvivesAFailedFetch() {
+        let t = BannerText.choose(message: nil, botName: nil, pushTitle: "部署", pushSubtitle: "成功", pushBody: "已上线", fallback: "新通知")
+        #expect(t == BannerText(botName: "部署", title: "成功", body: "已上线"))
+    }
+
+    @Test func fetchedMessageWinsOverThePush() {
+        let t = BannerText.choose(message: message(title: "新标题", body: "完整正文"), botName: "本地名",
+                                  pushTitle: "旧名", pushSubtitle: "旧标题", pushBody: "截断…", fallback: "新通知")
+        #expect(t == BannerText(botName: "本地名", title: "新标题", body: "完整正文"))
+        // A message without a title keeps the push's; without a body, the push's body.
+        let u = BannerText.choose(message: message(), botName: nil, pushTitle: "旧名", pushSubtitle: "旧标题", pushBody: "旧正文", fallback: "新通知")
+        #expect(u == BannerText(botName: "旧名", title: "旧标题", body: "旧正文"))
+        let v = BannerText.choose(message: message(), botName: "", pushTitle: "", pushSubtitle: "", pushBody: "", fallback: "新通知")
+        #expect(v.body == "新通知" && v.botName == "Honk")
+    }
+}
+
+@Suite struct NotificationPlanTests {
+    func stored(copy: String = "", url: String = "", open: String = "") -> StoredMessage {
+        StoredMessage(id: 1, botID: "b", title: "", body: "x", html: "", data: "", level: "", group: "", url: url, copy: copy,
+                      icon: "", open: open, image: "", parseMode: "", silent: false, collapseID: "", date: 0, read: false)
+    }
+
+    @Test func fourCategories() {
+        #expect(NotificationPlan.categories.count == 4)
+        #expect(Set(NotificationPlan.categories.map(\.id)).count == 4)
+        for c in NotificationPlan.categories {
+            #expect(c.actions.last == .markRead, "mark as read is always there")
+            #expect(c.actions.contains(.copy) == c.id.contains(".copy"))
+            #expect(c.actions.contains(.openURL) == c.id.contains(".url"))
+        }
+    }
+
+    @Test func categoryFollowsTheMessage() {
+        #expect(NotificationPlan.categoryID(for: stored()) == "honk.msg")
+        #expect(NotificationPlan.categoryID(for: stored(copy: "c")) == "honk.msg.copy")
+        #expect(NotificationPlan.categoryID(for: stored(url: "https://a.example")) == "honk.msg.url")
+        #expect(NotificationPlan.categoryID(for: stored(copy: "c", url: "http://a.example")) == "honk.msg.copy.url")
+        #expect(NotificationPlan.categoryID(for: stored(url: "javascript:alert(1)")) == "honk.msg", "only http(s) links get a button")
+        #expect(NotificationPlan.categories.contains { $0.id == NotificationPlan.categoryID(for: stored(copy: "c", url: "https://a.example")) })
+    }
+
+    @Test func tapOpensTheChatUnlessOpenIsURL() {
+        #expect(NotificationPlan.tap(stored(url: "https://a.example"), botID: "b") == .chat(botID: "b"))
+        #expect(NotificationPlan.tap(stored(url: "https://a.example", open: "url"), botID: "b") == .url(URL(string: "https://a.example")!))
+        #expect(NotificationPlan.tap(stored(open: "url"), botID: "b") == .chat(botID: "b"), "no url: the chat")
+        #expect(NotificationPlan.tap(nil, botID: "b") == .chat(botID: "b"), "message not found: the chat")
+    }
+
+    @Test func actionOutcomes() {
+        let m = stored(copy: "ssh x", url: "https://a.example")
+        #expect(NotificationPlan.outcome(of: .copy, on: m, botID: "b") == .copy("ssh x"))
+        #expect(NotificationPlan.outcome(of: .openURL, on: m, botID: "b") == .open(URL(string: "https://a.example")!))
+        #expect(NotificationPlan.outcome(of: .markRead, on: nil, botID: "b") == .markRead(botID: "b"))
+        #expect(NotificationPlan.outcome(of: .copy, on: stored(), botID: "b") == .nothing)
+    }
+
+    @Test func silentMessagesDoNotNotify() {
+        #expect(NotificationPlan.shouldNotify(QueuedMessage(id: 1, botID: "b")))
+        #expect(!NotificationPlan.shouldNotify(QueuedMessage(id: 1, botID: "b", silent: true)))
+    }
+
+    @Test func imageRules() {
+        #expect(NotificationPlan.imageURL("https://a.example/i.png") != nil)
+        #expect(NotificationPlan.imageURL("http://a.example/i.png") == nil)
+        #expect(NotificationPlan.imageURL("") == nil)
+        let u = URL(string: "https://a.example/pic")!
+        #expect(NotificationPlan.imageExtension(contentType: "image/png; charset=binary", url: u) == "png")
+        #expect(NotificationPlan.imageExtension(contentType: "text/html", url: u) == nil)
+        #expect(NotificationPlan.imageExtension(contentType: nil, url: URL(string: "https://a.example/p.JPG")!) == "jpg")
+        #expect(NotificationPlan.maxImageBytes == 5 * 1024 * 1024)
+    }
+}
+
+@Suite struct MarkdownTextTests {
+    @Test func stripsTheMarks() {
+        let cases: [String: String] = [
+            "**粗** *斜* __粗__ _斜_": "粗 斜 粗 斜",
+            "`a*b*c` 和 **x**": "a*b*c 和 x",
+            "见 [文档](https://a.example/d)": "见 文档",
+            "# 标题\n- 一\n* 二\n1. 三": "标题\n• 一\n• 二\n1. 三",
+            "```\nx := a * b * c\n```\n结束": "x := a * b * c\n结束",
+            "snake_case_name 2 * 3 * 4": "snake_case_name 2 * 3 * 4",
+            "_a_ _b_": "a b",
+        ]
+        for (input, want) in cases { #expect(MarkdownText.strip(input) == want, "\(input)") }
+    }
+
+    @Test func markdownBannerOfAMessageWithoutPushText() {
+        var m = QueuedMessage(id: 1, botID: "b", body: "**128 个测试通过**", parseMode: "Markdown")
+        let stored = StoredMessage(id: 1, botID: "b", title: "", body: m.body, html: "", data: "", level: "", group: "", url: "",
+                                   copy: "", icon: "", open: "", image: "", parseMode: "Markdown", silent: false, collapseID: "", date: 1, read: false)
+        let t = BannerText.choose(message: stored, botName: "CI", pushTitle: "", pushSubtitle: "", pushBody: "新通知", fallback: "新通知")
+        #expect(t.body == "128 个测试通过")
+        m.parseMode = ""
     }
 }

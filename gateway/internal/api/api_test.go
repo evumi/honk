@@ -71,6 +71,7 @@ func setupWith(t *testing.T, opts Options) *env {
 	s := New(st, p, slog.New(slog.NewTextHandler(io.Discard, nil)), opts)
 	srv := httptest.NewServer(s.Handler())
 	t.Cleanup(srv.Close)
+	t.Cleanup(s.Close)
 	return &env{t: t, s: s, srv: srv, pusher: p}
 }
 
@@ -222,6 +223,13 @@ func TestBotAPIErrors(t *testing.T) {
 		{"http icon", "/bot" + token + "/sendMessage", map[string]string{"body": "x", "icon": "http://a/b.png"}, 400},
 		{"big data", "/bot" + token + "/sendMessage", map[string]string{"body": "x", "data": strings.Repeat("a", 1025)}, 400},
 		{"big html", "/bot" + token + "/sendMessage", map[string]string{"body": "x", "html": strings.Repeat("a", 33*1024)}, 400},
+		{"bad open", "/bot" + token + "/sendMessage", map[string]string{"body": "x", "open": "app"}, 400},
+		{"open url without url", "/bot" + token + "/sendMessage", map[string]string{"body": "x", "open": "url"}, 400},
+		{"http image", "/bot" + token + "/sendMessage", map[string]string{"body": "x", "image": "http://a/b.png"}, 400},
+		{"bad parse_mode", "/bot" + token + "/sendMessage", map[string]string{"body": "x", "parse_mode": "HTML"}, 400},
+		{"short ttl", "/bot" + token + "/sendMessage", map[string]string{"body": "x", "ttl": "30"}, 400},
+		{"long ttl", "/bot" + token + "/sendMessage", map[string]string{"body": "x", "ttl": "7200"}, 400},
+		{"bad silent", "/bot" + token + "/sendMessage", map[string]string{"body": "x", "silent": "maybe"}, 400},
 		{"no target", "/bot" + token + "/editMessageData", map[string]string{"data": "x"}, 400},
 		{"unknown method", "/bot" + token + "/sendSticker", map[string]string{}, 404},
 		{"not a bot path", "/foo/bar", nil, 404},
@@ -238,7 +246,9 @@ func TestBotAPIErrors(t *testing.T) {
 }
 
 func TestRateLimit(t *testing.T) {
-	e := setup(t) // burst 3
+	// Burst 3 refilling at 1/s: at setup's 100/s, a slow machine refills
+	// the bucket between requests and nothing is ever limited.
+	e := setupWith(t, Options{MessageTTL: time.Hour, SendRate: 1, SendBurst: 3})
 	_, token := e.register("ios")
 	var limited bool
 	for i := 0; i < 10; i++ {
@@ -425,5 +435,57 @@ func TestPruneLimiters(t *testing.T) {
 	e.s.mu.Unlock()
 	if kept {
 		t.Error("deleted bot's limiter kept")
+	}
+}
+
+func TestSendOptions(t *testing.T) {
+	e := setup(t) // MessageTTL is an hour
+	secret, token := e.register("ios")
+
+	sent := must[store.Message](t, e.do("POST", "/bot"+token+"/sendMessage", "", map[string]any{
+		"body": "**构建** 完成 [详情](https://a.example/b)", "parse_mode": "markdown", "url": "https://a.example/b",
+		"open": "url", "image": "https://a.example/i.png", "ttl": 600, "silent": true,
+	}))
+	if sent.OpenMode != "url" || sent.Image != "https://a.example/i.png" || sent.ParseMode != "Markdown" || !sent.Silent {
+		t.Fatalf("sent = %+v", sent)
+	}
+	n := e.pusher.last(t)
+	if n.Body != "构建 完成 详情" || !n.Quiet || !n.Silent() || time.Until(n.Expires) < 9*time.Minute || time.Until(n.Expires) > 10*time.Minute || n.Kind != "message" {
+		t.Errorf("push = %+v", n)
+	}
+	got := must[store.Message](t, e.do("GET", fmt.Sprintf("/v1/messages/%d", sent.ID), secret, nil))
+	if got.OpenMode != "url" || got.Image != sent.Image || got.ParseMode != "Markdown" || !got.Silent {
+		t.Errorf("fetched = %+v", got)
+	}
+	page := must[struct {
+		Messages []store.Message `json:"messages"`
+	}](t, e.do("GET", "/v1/sync?cursor=0", secret, nil))
+	if len(page.Messages) != 1 || page.Messages[0].OpenMode != "url" || !page.Messages[0].Silent {
+		t.Errorf("sync = %+v", page)
+	}
+
+	// Defaults: nothing extra is set and the push is a normal one.
+	must[store.Message](t, e.do("POST", "/bot"+token+"/sendMessage", "", map[string]any{"body": "plain", "open": "chat", "silent": false}))
+	n = e.pusher.last(t)
+	if n.Quiet || n.Silent() || !n.Expires.IsZero() || n.Body != "plain" {
+		t.Errorf("default push = %+v", n)
+	}
+}
+
+func TestStripMarkdown(t *testing.T) {
+	for in, want := range map[string]string{
+		"**粗** *斜* __粗__ _斜_":          "粗 斜 粗 斜",
+		"`a*b*c` 和 **x**":              "a*b*c 和 x",
+		"见 [文档](https://a.example/d)":  "见 文档",
+		"见 [文档](http://a.example/d)":   "见 [文档](http://a.example/d)",
+		"# 标题\n- 一\n* 二\n1. 三":         "标题\n• 一\n• 二\n1. 三",
+		"```\nx := a * b * c\n```\n结束": "x := a * b * c\n结束",
+		"snake_case_name 2 * 3 * 4":    "snake_case_name 2 * 3 * 4",
+		"_a_ _b_":                      "a b",
+	} {
+		in, want = strings.ReplaceAll(in, "\\n", "\n"), strings.ReplaceAll(want, "\\n", "\n")
+		if got := StripMarkdown(in); got != want {
+			t.Errorf("StripMarkdown(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

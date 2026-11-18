@@ -32,6 +32,33 @@ class LocalStore(private val sql: Sql) {
                 sql.exec("PRAGMA user_version = 2")
             }
         }
+        if ((scalar("PRAGMA user_version") ?: 0) < 3) {
+            transaction {
+                MIGRATE_SEND_OPTIONS.forEach { sql.exec(it) }
+                sql.exec("PRAGMA user_version = 3")
+            }
+        }
+        // v4: whether a message's card may query its bot (`allow_queries`).
+        if ((scalar("PRAGMA user_version") ?: 0) < 4) {
+            transaction {
+                sql.exec("ALTER TABLE messages ADD COLUMN allow_queries INTEGER NOT NULL DEFAULT 0")
+                sql.exec("PRAGMA user_version = 4")
+            }
+        }
+        // v5: whether a message is the stand-in for one that could not be decrypted, so real content can replace it.
+        if ((scalar("PRAGMA user_version") ?: 0) < 5) {
+            transaction {
+                sql.exec("ALTER TABLE messages ADD COLUMN placeholder INTEGER NOT NULL DEFAULT 0")
+                sql.exec("PRAGMA user_version = 5")
+            }
+        }
+        // v6: whether the gateway lists a bot as end-to-end encrypted.
+        if ((scalar("PRAGMA user_version") ?: 0) < 6) {
+            transaction {
+                sql.exec("ALTER TABLE bots ADD COLUMN encrypted INTEGER NOT NULL DEFAULT 0")
+                sql.exec("PRAGMA user_version = 6")
+            }
+        }
     }
 
     // applying queued items
@@ -62,13 +89,26 @@ class LocalStore(private val sql: Sql) {
         }
         sql.run(
             """
-            INSERT INTO messages (id, bot_id, title, body, html, data, level, group_key, url, copy_text, icon, collapse_id, date, notif_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET data = excluded.data, notif_id = COALESCE(messages.notif_id, excluded.notif_id)
+            INSERT INTO messages (id, bot_id, title, body, html, data, level, group_key, url, copy_text, icon, open_mode, image, parse_mode, silent, collapse_id, allow_queries, date, notif_id, placeholder)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+              title = CASE WHEN messages.placeholder = 1 AND excluded.placeholder = 0 THEN excluded.title ELSE messages.title END,
+              body = CASE WHEN messages.placeholder = 1 AND excluded.placeholder = 0 THEN excluded.body ELSE messages.body END,
+              html = CASE WHEN messages.placeholder = 1 AND excluded.placeholder = 0 THEN excluded.html ELSE messages.html END,
+              copy_text = CASE WHEN messages.placeholder = 1 AND excluded.placeholder = 0 THEN excluded.copy_text ELSE messages.copy_text END,
+              url = CASE WHEN messages.placeholder = 1 AND excluded.placeholder = 0 THEN excluded.url ELSE messages.url END,
+              icon = CASE WHEN messages.placeholder = 1 AND excluded.placeholder = 0 THEN excluded.icon ELSE messages.icon END,
+              open_mode = CASE WHEN messages.placeholder = 1 AND excluded.placeholder = 0 THEN excluded.open_mode ELSE messages.open_mode END,
+              image = CASE WHEN messages.placeholder = 1 AND excluded.placeholder = 0 THEN excluded.image ELSE messages.image END,
+              parse_mode = CASE WHEN messages.placeholder = 1 AND excluded.placeholder = 0 THEN excluded.parse_mode ELSE messages.parse_mode END,
+              data = CASE WHEN messages.placeholder = 0 AND excluded.placeholder = 1 THEN messages.data ELSE excluded.data END,
+              allow_queries = CASE WHEN messages.placeholder = 0 AND excluded.placeholder = 1 THEN messages.allow_queries ELSE excluded.allow_queries END,
+              placeholder = CASE WHEN messages.placeholder = 1 THEN excluded.placeholder ELSE 0 END,
+              notif_id = COALESCE(messages.notif_id, excluded.notif_id)
             """.trimIndent(),
             listOf(
                 m.id, m.botId, m.title, m.body, m.html, m.data, m.level, m.group, m.url, m.copy, m.icon,
-                m.collapseId, m.date, notificationId,
+                m.open, m.image, m.parseMode, m.silent, m.collapseId, m.allowQueries, m.date, notificationId, m.placeholder,
             ),
         )
         return ApplyResult(message = messageUnlocked(m.id), staleNotificationIds = stale)
@@ -171,14 +211,19 @@ class LocalStore(private val sql: Sql) {
 
     fun saveBot(b: Bot) = locked { upsert(b) }
 
+    /** Records whether the gateway lists the bot as encrypted (after this device turned it on or off). */
+    fun setEncrypted(botId: String, encrypted: Boolean) = locked {
+        sql.run("UPDATE bots SET encrypted = ? WHERE id = ?", listOf(encrypted, botId))
+    }
+
     private fun upsert(b: Bot) {
         sql.run(
             """
-            INSERT INTO bots (id, name, avatar, default_level, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO bots (id, name, avatar, default_level, created_at, updated_at, encrypted) VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET name = excluded.name, avatar = excluded.avatar,
-              default_level = excluded.default_level, updated_at = excluded.updated_at
+              default_level = excluded.default_level, updated_at = excluded.updated_at, encrypted = excluded.encrypted
             """.trimIndent(),
-            listOf(b.id, b.name, b.avatar, b.defaultLevel, b.createdAt, b.updatedAt),
+            listOf(b.id, b.name, b.avatar, b.defaultLevel, b.createdAt, b.updatedAt, b.encrypted),
         )
     }
 
@@ -215,18 +260,145 @@ class LocalStore(private val sql: Sql) {
         )
     }
 
+    /**
+     * A window of a bot's messages around [around], newest first: the message, up to `limit / 2` newer ones and
+     * the rest older. When the bot has no such message it is the newest [limit], as [messages].
+     */
+    fun messagesAround(botId: String, around: Long, limit: Int = 50): List<StoredMessage> = locked {
+        if (scalar("SELECT id FROM messages WHERE id = ? AND bot_id = ?", listOf(around, botId)) == null) {
+            return@locked sql.query(
+                "SELECT $MESSAGE_COLS FROM messages WHERE bot_id = ? ORDER BY id DESC LIMIT ?", listOf(botId, limit), ::readMessage,
+            )
+        }
+        val newer = sql.query(
+            "SELECT $MESSAGE_COLS FROM messages WHERE bot_id = ? AND id > ? ORDER BY id ASC LIMIT ?",
+            listOf(botId, around, limit / 2), ::readMessage,
+        )
+        val older = sql.query(
+            "SELECT $MESSAGE_COLS FROM messages WHERE bot_id = ? AND id <= ? ORDER BY id DESC LIMIT ?",
+            listOf(botId, around, limit - newer.size), ::readMessage,
+        )
+        newer.reversed() + older
+    }
+
+    /**
+     * Messages of every bot whose title or body contains [query] (case-insensitive for ASCII), newest first, older
+     * than [before] when given: one page of [limit]. `%`, `_` and `\` match literally. An empty query matches nothing.
+     */
+    fun search(query: String, before: Long? = null, limit: Int = 50): List<StoredMessage> {
+        val q = query.trim()
+        if (q.isEmpty()) return emptyList()
+        val pattern = likePattern(q)
+        return locked {
+            sql.query(
+                """
+                SELECT $MESSAGE_COLS FROM messages
+                WHERE id < ? AND (title LIKE ? ESCAPE '\' OR body LIKE ? ESCAPE '\') ORDER BY id DESC LIMIT ?
+                """.trimIndent(),
+                listOf(before ?: Long.MAX_VALUE, pattern, pattern, limit),
+                ::readMessage,
+            )
+        }
+    }
+
+    // retention
+
+    /** How long messages are kept, in days; 0 keeps them forever (the default). */
+    var retentionDays: Int
+        get() = locked {
+            sql.query("SELECT value FROM meta WHERE key = 'retention'") { it.text(0) }.firstOrNull()?.toIntOrNull()?.coerceAtLeast(0) ?: 0
+        }
+        set(value) = locked {
+            sql.run(
+                "INSERT INTO meta (key, value) VALUES ('retention', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                listOf(value.coerceAtLeast(0).toString()),
+            )
+        }
+
+    /**
+     * Deletes the messages older than the retention period (a day is 24 hours); returns their notification ids.
+     * Does nothing when messages are kept forever.
+     */
+    fun pruneExpired(now: Long = System.currentTimeMillis()): List<String> {
+        val days = retentionDays
+        if (days <= 0) return emptyList()
+        val cutoff = now - days * 86_400_000L
+        return locked {
+            transaction {
+                val ids = sql.query("SELECT notif_id FROM messages WHERE date < ? AND notif_id IS NOT NULL", listOf(cutoff)) {
+                    it.text(0)
+                }.filterNotNull()
+                sql.run("DELETE FROM messages WHERE date < ?", listOf(cutoff))
+                ids
+            }
+        }
+    }
+
+    // export and import
+
+    /** A bot's messages (every bot's when null), oldest first, for [MessageArchive]. */
+    fun exportMessages(botId: String? = null): List<StoredMessage> = locked {
+        if (botId != null) {
+            sql.query("SELECT $MESSAGE_COLS FROM messages WHERE bot_id = ? ORDER BY id", listOf(botId), ::readMessage)
+        } else {
+            sql.query("SELECT $MESSAGE_COLS FROM messages ORDER BY id", emptyList(), ::readMessage)
+        }
+    }
+
+    /** What [importMessages] did with the items it was given. */
+    data class ImportSummary(
+        val imported: Int = 0,
+        /** Already stored (the same message id), or replaced by a newer message with its collapse id. */
+        val existing: Int = 0,
+        /** Of a bot this device does not have: bots belong to the gateway's account, so they are not created here. */
+        val unknownBot: Int = 0,
+    )
+
+    /**
+     * Adds archived messages the way [apply] does, so importing the same file twice changes nothing. Only `message`
+     * items of bots stored here are imported; they arrive read and without a notification. Same as LocalStore.swift.
+     */
+    fun importMessages(items: List<QueuedMessage>): ImportSummary = locked {
+        transaction {
+            var imported = 0
+            var existing = 0
+            var unknownBot = 0
+            for (raw in items) {
+                if (raw.kind != QueuedMessage.Kind.MESSAGE) continue
+                val m = ContentLimits.sanitize(raw)
+                if (scalar("SELECT COUNT(*) FROM bots WHERE id = ?", listOf(m.botId)) != 1L) {
+                    unknownBot++
+                    continue
+                }
+                val stored = scalar("SELECT id FROM messages WHERE id = ? AND placeholder = 0", listOf(m.id)) != null
+                // A stored stand-in for an undecryptable message is repaired by the archived content.
+                val repair = !m.placeholder && scalar("SELECT id FROM messages WHERE id = ? AND placeholder = 1", listOf(m.id)) != null
+                val newer = m.collapseId.isNotEmpty() &&
+                    scalar("SELECT id FROM messages WHERE bot_id = ? AND collapse_id = ? AND id > ? LIMIT 1", listOf(m.botId, m.collapseId, m.id)) != null
+                if (stored || newer) {
+                    existing++
+                    continue
+                }
+                insert(m, null)
+                if (!repair) sql.run("UPDATE messages SET read = 1 WHERE id = ?", listOf(m.id))
+                imported++
+            }
+            ImportSummary(imported, existing, unknownBot)
+        }
+    }
+
     /** The chat list: pinned first, then by latest message. */
     fun chats(): List<ChatSummary> = locked {
         val rows = sql.query(
             """
             SELECT b.id, b.name, b.avatar, b.default_level, b.created_at, b.updated_at, b.muted, b.pinned,
                    (SELECT COUNT(*) FROM messages m WHERE m.bot_id = b.id AND m.read = 0),
-                   (SELECT MAX(id) FROM messages m WHERE m.bot_id = b.id)
+                   (SELECT MAX(id) FROM messages m WHERE m.bot_id = b.id), b.encrypted
             FROM bots b
             """.trimIndent(),
         ) { r ->
             ChatSummary(
-                bot = readBot(r),
+                bot = readBot(r, encryptedColumn = 10),
                 muted = r.long(6) != 0L,
                 pinned = r.long(7) != 0L,
                 last = null,
@@ -288,7 +460,8 @@ class LocalStore(private val sql: Sql) {
             val ids = sql.query("SELECT notif_id FROM messages WHERE notif_id IS NOT NULL") { it.text(0) }.filterNotNull()
             sql.exec("DELETE FROM messages")
             sql.exec("DELETE FROM bots")
-            sql.exec("DELETE FROM meta")
+            // The retention choice is about this phone, not the gateway: it stays.
+            sql.exec("DELETE FROM meta WHERE key <> 'retention'")
             ids
         }
     }
@@ -305,6 +478,23 @@ class LocalStore(private val sql: Sql) {
                 listOf(value.toString()),
             )
         }
+
+    /**
+     * Whether [name] may run now: true at most once per [interval] milliseconds, and the time is recorded when it
+     * is. Kept in `meta`, as LocalStore.swift does for the extension's key refresh.
+     */
+    fun claimSlot(name: String, interval: Long, now: Long = System.currentTimeMillis()): Boolean = locked {
+        transaction {
+            val key = "slot:$name"
+            val last = sql.query("SELECT value FROM meta WHERE key = ?", listOf(key)) { it.text(0) }.firstOrNull()?.toLongOrNull()
+            if (last != null && now >= last && now - last < interval) return@transaction false
+            sql.run(
+                "INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                listOf(key, now.toString()),
+            )
+            true
+        }
+    }
 
     fun close() = locked { sql.close() }
 
@@ -328,20 +518,35 @@ class LocalStore(private val sql: Sql) {
         sql.query(q, args) { if (it.isNull(0)) null else it.long(0) }.firstOrNull()
 
     companion object {
-        private const val BOT_COLS = "id, name, avatar, default_level, created_at, updated_at"
+        /** `%`, `_` and the escape character matched literally in a LIKE pattern (used with `ESCAPE '\'`). */
+        internal fun likePattern(q: String): String = buildString {
+            append('%')
+            for (ch in q) {
+                if (ch == '\\' || ch == '%' || ch == '_') append('\\')
+                append(ch)
+            }
+            append('%')
+        }
 
-        /** Reads [BOT_COLS] from the first six columns of a row. */
-        private fun readBot(r: Sql.Row) =
-            Bot(r.text(0).orEmpty(), r.text(1).orEmpty(), r.text(2).orEmpty(), r.text(3) ?: "active", r.long(4), r.long(5))
+        private const val BOT_COLS = "id, name, avatar, default_level, created_at, updated_at, encrypted"
+
+        /** Reads [BOT_COLS] from a row; [encryptedColumn] is where `encrypted` is when other columns come before it. */
+        private fun readBot(r: Sql.Row, encryptedColumn: Int = 6) =
+            Bot(
+                r.text(0).orEmpty(), r.text(1).orEmpty(), r.text(2).orEmpty(), r.text(3) ?: "active", r.long(4), r.long(5),
+                encrypted = r.long(encryptedColumn) != 0L,
+            )
 
         private const val MESSAGE_COLS =
-            "id, bot_id, title, body, html, data, level, group_key, url, copy_text, icon, collapse_id, date, read"
+            "id, bot_id, title, body, html, data, level, group_key, url, copy_text, icon, open_mode, image, parse_mode, silent, collapse_id, allow_queries, date, read"
 
         private fun readMessage(r: Sql.Row) = StoredMessage(
             id = r.long(0), botId = r.text(1).orEmpty(), title = r.text(2).orEmpty(), body = r.text(3).orEmpty(),
             html = r.text(4).orEmpty(), data = r.text(5).orEmpty(), level = r.text(6).orEmpty(),
             group = r.text(7).orEmpty(), url = r.text(8).orEmpty(), copy = r.text(9).orEmpty(),
-            icon = r.text(10).orEmpty(), collapseId = r.text(11).orEmpty(), date = r.long(12), read = r.long(13) != 0L,
+            icon = r.text(10).orEmpty(), open = r.text(11).orEmpty(), image = r.text(12).orEmpty(),
+            parseMode = r.text(13).orEmpty(), silent = r.long(14) != 0L, collapseId = r.text(15).orEmpty(),
+            allowQueries = r.long(16) != 0L, date = r.long(17), read = r.long(18) != 0L,
         )
 
         /** Version 1, the same tables as ios/HonkKit/Sources/HonkKit/LocalStore.swift. One statement per entry. */
@@ -380,6 +585,17 @@ class LocalStore(private val sql: Sql) {
             "CREATE INDEX messages_bot ON messages(bot_id, id)",
             "CREATE INDEX messages_collapse ON messages(bot_id, collapse_id) WHERE collapse_id <> ''",
             "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+        )
+
+        /**
+         * Version 3: the sendMessage options open, image, parse_mode and silent
+         * (the gateway's migrateSendOptions and LocalStore.swift have the same columns).
+         */
+        val MIGRATE_SEND_OPTIONS = listOf(
+            "ALTER TABLE messages ADD COLUMN open_mode TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE messages ADD COLUMN image TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE messages ADD COLUMN parse_mode TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE messages ADD COLUMN silent INTEGER NOT NULL DEFAULT 0",
         )
 
         /**

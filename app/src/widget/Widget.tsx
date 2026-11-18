@@ -11,9 +11,9 @@ import { cleanup, Clipboard, effect, Image, lifecycle, locale, openUrl, signal, 
 import { cards, on } from "../host";
 import type { Palette } from "../theme";
 import { widgetVars } from "../theme";
-import { countNodes, fill, parse, parseData, type ElementNode, type WidgetNode } from "./parse";
+import { countNodes, fill, parseData, type ElementNode, type WidgetNode } from "./parse";
 import { cascade, parseDecls, parseSheet, styleText, type Scheme, type Sheet } from "./css";
-import { cleanTree } from "./sanitize";
+import { cleanHTML, cleanTree } from "./sanitize";
 import { svgDataUrl, svgFit, svgMarkup, viewBoxRatio } from "./svg";
 import type { TreeEnv } from "./selector";
 
@@ -395,7 +395,7 @@ const parsed = new Map<string, WidgetNode[]>();
 function parseCached(html: string): WidgetNode[] {
   let nodes = parsed.get(html);
   if (!nodes) {
-    nodes = parse(html);
+    nodes = cleanHTML(html);
     if (parsed.size >= 200) parsed.delete(parsed.keys().next().value!);
     parsed.set(html, nodes);
   }
@@ -460,12 +460,12 @@ function staticCtx(nodes: WidgetNode[], data: Record<string, unknown>, palette: 
   return { ctx: { data, vars, p: palette, sheet, env, scheme: schemeOf(vars), computed: new Map(), raw }, root };
 }
 
-export function Widget(props: { html: string; data: string; palette: Palette }): JSX.Element {
+export function Widget(props: { html: string; data: string; palette: Palette; messageId?: number; allowQueries?: boolean }): JSX.Element {
   const nodes = parseCached(props.html);
   if (nodes.length === 0 || countNodes(nodes) > MAX_NODES) return <View />;
   const data = parseData(props.data);
   const base: Style = { color: props.palette.text, fontSize: 15, lineHeight: 21 };
-  if (scriptsOf(nodes)) return <ScriptedWidget nodes={nodes} data={data} rawData={props.data} base={base} palette={props.palette} />;
+  if (scriptsOf(nodes)) return <ScriptedWidget nodes={nodes} data={data} rawData={props.data} base={base} palette={props.palette} messageId={props.messageId ?? 0} allowQueries={props.allowQueries === true} />;
   // Read the palette inside the view, so the card is drawn again when the appearance changes.
   const draw = () => {
     const { ctx, root } = staticCtx(nodes, data, props.palette);
@@ -518,7 +518,7 @@ function readResult(json: unknown): CardResult {
 let cardSeq = 0;
 
 /** A card with scripts: the static card until the host's runtime answers, then the trees its script draws. */
-function ScriptedWidget(props: { nodes: WidgetNode[]; data: Record<string, unknown>; rawData: string; base: Style; palette: Palette }): JSX.Element {
+function ScriptedWidget(props: { nodes: WidgetNode[]; data: Record<string, unknown>; rawData: string; base: Style; palette: Palette; messageId: number; allowQueries: boolean }): JSX.Element {
   const key = `card-${++cardSeq}`;
   const tree = signal<WidgetNode[] | null>(null);
   let paths = new Map<ElementNode, number[]>();
@@ -543,6 +543,8 @@ function ScriptedWidget(props: { nodes: WidgetNode[]; data: Record<string, unkno
     theme: initialVars,
     language: untracked(locale),
     active: untracked(lifecycle) === "active",
+    messageId: props.messageId,
+    allowQueries: props.allowQueries,
   };
   cards.open(key, JSON.stringify(load)).then(apply).catch(() => {});
   const off = on("honk.card.changed", (p) => {

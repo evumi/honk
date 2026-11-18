@@ -25,4 +25,10 @@ val buildCardLib by tasks.registering(Exec::class) {
 tasks.test {
     dependsOn(buildCardLib)
     systemProperty("java.library.path", nativeDir.resolve("build").absolutePath)
+    // HostContractTest reads the host contract shared with the nsh app and HonkKit.
+    systemProperty("honk.contract", rootDir.resolve("../app/src/host.contract.json").absolutePath)
+    // DeviceLinkTest reads the pairing vectors shared with ios/HonkKit.
+    systemProperty("honk.linkVectors", rootDir.resolve("../docs/link-vectors.json").absolutePath)
+    // EncryptionTest reads the vector shared with the Go client and HonkKit.
+    systemProperty("honk.e2e.vector", rootDir.resolve("../app/src/e2e.vector.json").absolutePath)
 }

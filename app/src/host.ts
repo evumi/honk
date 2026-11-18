@@ -1,5 +1,8 @@
 // The contract with the native hosts (ios/App/NshBridge.swift and
-// android/app/src/main/kotlin/dev/evumi/honk/NshBridge.kt).
+// android/app/src/main/kotlin/dev/evumi/honk/NshBridge.kt). host.contract.json
+// holds sample arguments and results for every call and event; host.contract.test.ts
+// checks this file and demo.ts against it, HonkKit's and :core's tests check
+// the native side. Change them together.
 // Every call goes through `call`, which uses the demo backend when no host
 // embeds the app (`nsh run` on a desktop), so the UI can be tried alone.
 import { host } from "nsh";
@@ -17,6 +20,11 @@ export interface Bot {
   avatar: string;
   defaultLevel: Level;
   createdAt: number;
+  /**
+   * The gateway lists the bot as end-to-end encrypted. The key may still be missing on this device (a phone
+   * paired a moment ago): `encryption.key` is null then, and `encryption.enable` refuses to make a new one.
+   */
+  encrypted: boolean;
 }
 
 export interface Message {
@@ -31,7 +39,17 @@ export interface Message {
   url: string;
   copy: string;
   icon: string;
+  /** `url`: tapping the notification opens `url` instead of the chat. */
+  open: string;
+  /** An https image: in the notification and above the bubble's text. */
+  image: string;
+  /** `Markdown` when `body` is Markdown (the subset in `markup.ts`). */
+  parseMode: string;
+  /** Sent with `silent`: stored and counted, no notification. */
+  silent: boolean;
   collapseId: string;
+  /** The sender let the card's `request()` reach the bot (`allow_queries`). */
+  allowQueries: boolean;
   /** Unix milliseconds. */
   date: number;
   read: boolean;
@@ -48,7 +66,7 @@ export interface Chat {
 export interface Status {
   registered: boolean;
   /** Where registration with the gateway stands. */
-  registration?: "registered" | "registering" | "waitingForPushToken" | "failed";
+  registration?: "registered" | "registering" | "waitingForPushToken" | "failed" | "notRegistered";
   registrationError?: string;
   /** `apns`: real pushes; `simulator`: a Debug simulator build without APNs, which polls instead. */
   pushMode?: "apns" | "simulator";
@@ -59,10 +77,30 @@ export interface Status {
   appBuild?: string;
 }
 
+/** One device of this phone's group (the phones that share its bots). */
+export interface GroupDevice {
+  id: string;
+  /** The phone's name or model; may be empty. */
+  name: string;
+  platform: "ios" | "android";
+  /** Unix milliseconds of its last request to the gateway (written at most hourly). */
+  seenAt: number;
+  /** This phone. */
+  current: boolean;
+}
+
+/** A pairing code for another phone: 26 characters in groups of four, good until `expiresAt` (Unix milliseconds). */
+export interface PairingLink {
+  code: string;
+  expiresAt: number;
+}
+
 export interface Gateway {
   url: string;
   defaultURL: string;
   custom: boolean;
+  /** The register key saved for the gateway (it asks for one when set up with HONK_REGISTER_KEY); empty when none. */
+  registerKey?: string;
 }
 
 export interface GatewayTest {
@@ -70,26 +108,67 @@ export interface GatewayTest {
   url?: string;
   version?: string;
   error?: string;
+  /** The gateway only registers devices that send its register key. */
+  registerKeyRequired?: boolean;
+  /** How the gateway sends pushes to each platform; absent for a gateway that does not say. */
+  push?: PushRoutes;
+}
+
+/** `direct`: with the gateway's own APNs/FCM credentials; `relay`: through a push relay; `off`: not at all. */
+export type PushRoute = "direct" | "relay" | "off";
+
+export interface PushRoutes {
+  ios: PushRoute;
+  android: PushRoute;
+}
+
+/** Test hook (host.contract.test.ts): sees every host call before it is made, host or not. */
+export const spy: { call?: (name: string, args: unknown) => void } = {};
+
+/** How long messages are kept on this phone, in days; 0 keeps them forever. */
+export type Retention = 0 | 365 | 90 | 30;
+
+/** What an import did: messages added, ones already there, ones of bots this phone does not have, lines it could not read. */
+export interface ImportResult {
+  imported: number;
+  existing: number;
+  unknownBot: number;
+  invalid: number;
 }
 
 export function call<T>(name: string, args?: unknown): Promise<T> {
+  spy.call?.(name, args ?? null);
   if (!host.available()) return demo<T>(name, args);
   return host.call<T>(name, args ?? null);
 }
 
 /**
  * Card scripts (profile 2), run by the host in a QuickJS runtime per card
- * (native/card). Strings are JSON: `load` is honk_card_open's argument, and
+ * (native/card). Strings are JSON: `load` is honk_card_open's argument plus
+ * `messageId` (which the host reads, to send the card's request() to the
+ * message's bot; the nsh app never sees a request or its answer), and
  * every call answers with a result {tree, prevented, open?, copy?, stopped,
  * logs}. A card's later changes (timers, promises) come as the event
  * honk.card.changed {key, result}. Without a host there are none: the demo
  * rejects, and the card stays static.
  */
 export const cards = {
-  open: (key: string, load: string) => (host.available() ? host.call<string>("honk.card.open", { key, load }) : Promise.reject(new Error("no host"))),
-  click: (key: string, path: string) => host.call<string>("honk.card.click", { key, path }),
-  set: (key: string, state: string) => host.call<string>("honk.card.set", { key, state }),
-  close: (key: string) => (host.available() ? host.call<boolean>("honk.card.close", { key }) : Promise.resolve(true)),
+  open: (key: string, load: string) => {
+    spy.call?.("honk.card.open", { key, load });
+    return host.available() ? host.call<string>("honk.card.open", { key, load }) : Promise.reject(new Error("no host"));
+  },
+  click: (key: string, path: string) => {
+    spy.call?.("honk.card.click", { key, path });
+    return host.available() ? host.call<string>("honk.card.click", { key, path }) : Promise.reject(new Error("no host"));
+  },
+  set: (key: string, state: string) => {
+    spy.call?.("honk.card.set", { key, state });
+    return host.available() ? host.call<string>("honk.card.set", { key, state }) : Promise.reject(new Error("no host"));
+  },
+  close: (key: string) => {
+    spy.call?.("honk.card.close", { key });
+    return host.available() ? host.call<boolean>("honk.card.close", { key }) : Promise.resolve(true);
+  },
 };
 
 /**
@@ -105,6 +184,7 @@ export function on(event: string, listener: (payload: unknown) => void): () => v
 
 /** Tells the host the app shows its own banner for `honk.incoming` (until then it shows the system's). */
 export function listenIncoming(): Promise<boolean> {
+  spy.call?.("honk.incoming.listen", null);
   if (!host.available()) return Promise.resolve(false);
   return host.call<boolean>("honk.incoming.listen", null).catch(() => false);
 }
@@ -113,6 +193,20 @@ export const api = {
   status: () => call<Status>("honk.status"),
   chats: () => call<Chat[]>("honk.chats"),
   messages: (botId: BotId, before?: number) => call<Message[]>("honk.messages", { botId, before, limit: 50 }),
+  /** A window of a chat around one message (a search result), newest first: about 25 newer and 25 older. */
+  messagesAround: (botId: BotId, around: number) => call<Message[]>("honk.messages", { botId, around, limit: 50 }),
+  /** Messages of every chat whose title or body contains `query`, newest first, 50 at a time (`before`: the last id of the page before). */
+  search: (query: string, before?: number) => call<Message[]>("honk.search", { query, before }),
+  retention: () => call<Retention>("honk.retention.get"),
+  /** Keeps messages that long and deletes the older ones at once; resolves with the stored value. */
+  setRetention: (days: Retention) => call<Retention>("honk.retention.set", { days }),
+  /**
+   * Offers one chat's messages (all chats' without `botId`) as a JSON Lines file in the system share sheet; resolves
+   * when it is gone. `count` 0: there was nothing to export, and no sheet.
+   */
+  exportMessages: (botId?: BotId) => call<{ count: number; shared: boolean }>("honk.export", botId ? { botId } : null),
+  /** Picks a JSON Lines file and adds its messages; `null` when the user cancels. */
+  importMessages: () => call<ImportResult | null>("honk.import"),
   markRead: (botId: BotId) => call<boolean>("honk.markRead", { botId }),
   focus: (botId: BotId | null) => call<boolean>("honk.focus", { botId }),
   refresh: () => call<boolean>("honk.refresh"),
@@ -123,17 +217,61 @@ export const api = {
   token: (botId: BotId) => call<string | null>("honk.bot.token", { botId }),
   resetToken: (botId: BotId) => call<string>("honk.bot.resetToken", { botId }),
   deleteBot: (botId: BotId) => call<boolean>("honk.bot.delete", { botId }),
+  /**
+   * End-to-end encryption of a bot's messages. The key (base64url, 32 bytes)
+   * lives in the device's keychain / keystore; the gateway only learns that the
+   * bot is encrypted and refuses its plaintext sends from then on.
+   */
+  encryption: {
+    /** The bot's key, or null when encryption is off for it. */
+    key: (botId: BotId) => call<string | null>("honk.bot.encryption.key", { botId }),
+    /** Generates a key (or keeps the existing one), tells the gateway, and returns it. */
+    enable: (botId: BotId) => call<string>("honk.bot.encryption.enable", { botId }),
+    /** Tells the gateway to accept plaintext again and forgets the key. */
+    disable: (botId: BotId) => call<boolean>("honk.bot.encryption.disable", { botId }),
+    /** A new key: senders must switch to it; messages already received stay readable. */
+    resetKey: (botId: BotId) => call<string>("honk.bot.encryption.resetKey", { botId }),
+  },
   setMuted: (botId: BotId, muted: boolean) => call<boolean>("honk.bot.setMuted", { botId, muted }),
   setPinned: (botId: BotId, pinned: boolean) => call<boolean>("honk.bot.setPinned", { botId, pinned }),
   deleteMessage: (messageId: number) => call<boolean>("honk.message.delete", { messageId }),
   clearChat: (botId: BotId) => call<boolean>("honk.chat.clear", { botId }),
+  /**
+   * Deletes all data: this device's registration and every other device of
+   * its group, the bots (their tokens stop working at once) and queued
+   * messages on the gateway, then clears everything on this phone. Rejects,
+   * leaving the phone as it was, when the gateway cannot be reached. The
+   * device registers again when a bot is created next or the app starts again.
+   */
+  deleteDevice: () => call<boolean>("honk.device.delete"),
+  /** The devices of this phone's group, this one included. Rejects on a gateway without device groups. */
+  devices: () => call<GroupDevice[]>("honk.devices.list"),
+  /**
+   * Removes a device from the group. Removing this phone's own id leaves the
+   * group: the gateway forgets this phone and it clears its local data; the
+   * other devices keep the bots.
+   */
+  removeDevice: (deviceId: string) => call<boolean>("honk.devices.remove", { deviceId }),
+  /** Makes a pairing code for another phone to join this group; good for 10 minutes, once. */
+  createLink: () => call<PairingLink>("honk.link.create"),
+  /**
+   * Joins this phone's group to the one that made `code` (any case, with or
+   * without dashes): takes over its bots' tokens and queued messages. Rejects
+   * with the reason when the code is wrong, expired or used.
+   */
+  claimLink: (code: string) => call<boolean>("honk.link.claim", { code }),
   openNotificationSettings: () => call<boolean>("honk.notifications.open"),
   /** Asks for a push token again and registers; resolves with the new status. */
   retryRegistration: () => call<Status>("honk.register.retry"),
   gateway: () => call<Gateway>("honk.gateway.get"),
   testGateway: (url: string) => call<GatewayTest>("honk.gateway.test", { url }),
-  /** `null`: back to the build's default gateway. Clears this device's bots and messages. */
-  setGateway: (url: string | null) => call<{ url: string; registered: boolean }>("honk.gateway.set", { url }),
+  /**
+   * `null`: back to the build's default gateway. Clears this device's bots and
+   * messages when the gateway changes. `registerKey` is what that gateway asks
+   * for when registering a device, if anything; missing or empty: none.
+   */
+  setGateway: (url: string | null, registerKey?: string) =>
+    call<{ url: string; registered: boolean }>("honk.gateway.set", { url, registerKey }),
   /**
    * Keeps a picked image (base64 JPEG or PNG) on this phone and resolves with
    * the avatar that names it, `local:<file>`. The gateway stores only that

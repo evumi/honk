@@ -17,35 +17,44 @@ const (
 // Message is one queued item. For an edit or delete, TargetID and/or
 // CollapseID say which message it applies to, and Data is the new state.
 type Message struct {
-	ID         int64  `json:"message_id"`
-	BotID      string `json:"bot_id"` // the bot's public id
-	BotKey     int64  `json:"-"`      // the bot's row id
-	DeviceID   string `json:"-"`
-	Kind       string `json:"kind"`
-	TargetID   int64  `json:"target_id,omitempty"`
-	Title      string `json:"title,omitempty"`
-	Body       string `json:"body,omitempty"`
-	HTML       string `json:"html,omitempty"`
-	Data       string `json:"data,omitempty"`
-	Level      string `json:"level,omitempty"`
-	Group      string `json:"group,omitempty"`
-	URL        string `json:"url,omitempty"`
-	Copy       string `json:"copy,omitempty"`
-	Icon       string `json:"icon,omitempty"`
+	ID       int64  `json:"message_id"`
+	BotID    string `json:"bot_id"` // the bot's public id
+	BotKey   int64  `json:"-"`      // the bot's row id
+	OwnerID  string `json:"-"`
+	Kind     string `json:"kind"`
+	TargetID int64  `json:"target_id,omitempty"`
+	Title    string `json:"title,omitempty"`
+	Body     string `json:"body,omitempty"`
+	HTML     string `json:"html,omitempty"`
+	Data     string `json:"data,omitempty"`
+	Level    string `json:"level,omitempty"`
+	Group    string `json:"group,omitempty"`
+	URL      string `json:"url,omitempty"`
+	Copy     string `json:"copy,omitempty"`
+	Icon     string `json:"icon,omitempty"`
+	// Ciphertext is the end-to-end sealed content; the gateway never reads it.
+	// When set, Title/Body/HTML/Copy/Icon/URL/Image are empty (an edit: Data too).
+	Ciphertext string `json:"ciphertext,omitempty"`
+	OpenMode   string `json:"open,omitempty"`       // "url": tapping the notification opens URL
+	Image      string `json:"image,omitempty"`      // https image for the notification and the bubble
+	ParseMode  string `json:"parse_mode,omitempty"` // "Markdown": Body is Markdown
+	Silent     bool   `json:"silent,omitempty"`     // stored and counted, but no banner
 	CollapseID string `json:"id,omitempty"`
-	CreatedAt  int64  `json:"date"`
-	ExpiresAt  int64  `json:"-"`
+	// AllowQueries lets the card's request() call reach the bot.
+	AllowQueries bool  `json:"allow_queries,omitempty"`
+	CreatedAt    int64 `json:"date"`
+	ExpiresAt    int64 `json:"-"`
 }
 
 // msgSelect reads messages with their bot's public id.
-const msgSelect = `SELECT m.id, b.public_id, m.bot_id, m.device_id, m.kind, m.target_id, m.title, m.body, m.html, m.data, m.level,
-	m.group_key, m.url, m.copy_text, m.icon, m.collapse_id, m.created_at, m.expires_at
+const msgSelect = `SELECT m.id, b.public_id, m.bot_id, m.owner_id, m.kind, m.target_id, m.title, m.body, m.html, m.data, m.level,
+	m.group_key, m.url, m.copy_text, m.icon, m.ciphertext, m.open_mode, m.image, m.parse_mode, m.silent, m.collapse_id, m.allow_queries, m.created_at, m.expires_at
 	FROM messages m JOIN bots b ON b.id = m.bot_id`
 
 func scanMessage(row interface{ Scan(...any) error }) (Message, error) {
 	var m Message
-	err := row.Scan(&m.ID, &m.BotID, &m.BotKey, &m.DeviceID, &m.Kind, &m.TargetID, &m.Title, &m.Body, &m.HTML, &m.Data,
-		&m.Level, &m.Group, &m.URL, &m.Copy, &m.Icon, &m.CollapseID, &m.CreatedAt, &m.ExpiresAt)
+	err := row.Scan(&m.ID, &m.BotID, &m.BotKey, &m.OwnerID, &m.Kind, &m.TargetID, &m.Title, &m.Body, &m.HTML, &m.Data,
+		&m.Level, &m.Group, &m.URL, &m.Copy, &m.Icon, &m.Ciphertext, &m.OpenMode, &m.Image, &m.ParseMode, &m.Silent, &m.CollapseID, &m.AllowQueries, &m.CreatedAt, &m.ExpiresAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return m, ErrNotFound
 	}
@@ -54,10 +63,10 @@ func scanMessage(row interface{ Scan(...any) error }) (Message, error) {
 
 func insert(ctx context.Context, tx *sql.Tx, m *Message) error {
 	res, err := tx.ExecContext(ctx, `
-		INSERT INTO messages (bot_id, device_id, kind, target_id, title, body, html, data, level, group_key, url, copy_text, icon, collapse_id, created_at, expires_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		m.BotKey, m.DeviceID, m.Kind, m.TargetID, m.Title, m.Body, m.HTML, m.Data, m.Level, m.Group, m.URL, m.Copy, m.Icon,
-		m.CollapseID, m.CreatedAt, m.ExpiresAt)
+		INSERT INTO messages (bot_id, owner_id, device_id, kind, target_id, title, body, html, data, level, group_key, url, copy_text, icon, ciphertext, open_mode, image, parse_mode, silent, collapse_id, allow_queries, created_at, expires_at)
+		VALUES (?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		m.BotKey, m.OwnerID, m.Kind, m.TargetID, m.Title, m.Body, m.HTML, m.Data, m.Level, m.Group, m.URL, m.Copy, m.Icon,
+		m.Ciphertext, m.OpenMode, m.Image, m.ParseMode, m.Silent, m.CollapseID, m.AllowQueries, m.CreatedAt, m.ExpiresAt)
 	if err != nil {
 		return err
 	}
@@ -69,7 +78,7 @@ func insert(ctx context.Context, tx *sql.Tx, m *Message) error {
 // id from the same bot replaces the earlier ones still in the queue.
 func (s *Store) AddMessage(ctx context.Context, bot Bot, m Message, ttl time.Duration) (Message, error) {
 	now := s.now()
-	m.BotID, m.BotKey = bot.ID, bot.Key
+	m.BotID, m.BotKey, m.OwnerID = bot.ID, bot.Key, bot.OwnerID
 	m.Kind = KindMessage
 	m.TargetID = 0
 	m.CreatedAt = now.UnixMilli()
@@ -121,16 +130,23 @@ func resolve(ctx context.Context, tx *sql.Tx, botID int64, t Target) (Target, er
 
 // EditData queues a change to a message's data and updates the queued copy if
 // it is still there.
-func (s *Store) EditData(ctx context.Context, bot Bot, deviceID string, t Target, data string, ttl time.Duration) (Message, error) {
-	return s.change(ctx, KindEdit, bot, deviceID, t, data, ttl)
+func (s *Store) EditData(ctx context.Context, bot Bot, t Target, data string, ttl time.Duration) (Message, error) {
+	return s.change(ctx, KindEdit, bot, t, data, "", ttl)
+}
+
+// EditCiphertext queues an end-to-end encrypted edit. The gateway cannot read
+// the new data, so the queued copy of the message is left alone; the device
+// applies the edit after the message, in queue order.
+func (s *Store) EditCiphertext(ctx context.Context, bot Bot, t Target, ciphertext string, ttl time.Duration) (Message, error) {
+	return s.change(ctx, KindEdit, bot, t, "", ciphertext, ttl)
 }
 
 // DeleteMessage queues a delete and drops the queued copy if it is still there.
-func (s *Store) DeleteMessage(ctx context.Context, bot Bot, deviceID string, t Target, ttl time.Duration) (Message, error) {
-	return s.change(ctx, KindDelete, bot, deviceID, t, "", ttl)
+func (s *Store) DeleteMessage(ctx context.Context, bot Bot, t Target, ttl time.Duration) (Message, error) {
+	return s.change(ctx, KindDelete, bot, t, "", "", ttl)
 }
 
-func (s *Store) change(ctx context.Context, kind string, bot Bot, deviceID string, t Target, data string, ttl time.Duration) (Message, error) {
+func (s *Store) change(ctx context.Context, kind string, bot Bot, t Target, data, ciphertext string, ttl time.Duration) (Message, error) {
 	now := s.now()
 	botID := bot.Key
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -145,18 +161,22 @@ func (s *Store) change(ctx context.Context, kind string, bot Bot, deviceID strin
 	if t.MessageID > 0 {
 		var q string
 		var args []any
-		if kind == KindEdit {
+		if kind == KindEdit && ciphertext != "" {
+			q = ""
+		} else if kind == KindEdit {
 			q, args = `UPDATE messages SET data = ? WHERE id = ? AND bot_id = ? AND kind = 'message'`, []any{data, t.MessageID, botID}
 		} else {
 			// Earlier edits of a deleted message are moot too.
 			q, args = `DELETE FROM messages WHERE bot_id = ? AND (id = ? OR (kind = 'edit' AND target_id = ?))`, []any{botID, t.MessageID, t.MessageID}
 		}
-		if _, err := tx.ExecContext(ctx, q, args...); err != nil {
-			return Message{}, err
+		if q != "" {
+			if _, err := tx.ExecContext(ctx, q, args...); err != nil {
+				return Message{}, err
+			}
 		}
 	}
 	m := Message{
-		BotID: bot.ID, BotKey: botID, DeviceID: deviceID, Kind: kind, TargetID: t.MessageID, CollapseID: t.CollapseID, Data: data,
+		BotID: bot.ID, BotKey: botID, OwnerID: bot.OwnerID, Kind: kind, TargetID: t.MessageID, CollapseID: t.CollapseID, Data: data, Ciphertext: ciphertext,
 		CreatedAt: now.UnixMilli(), ExpiresAt: now.Add(ttl).UnixMilli(),
 	}
 	if err := insert(ctx, tx, &m); err != nil {
@@ -165,17 +185,18 @@ func (s *Store) change(ctx context.Context, kind string, bot Bot, deviceID strin
 	return m, tx.Commit()
 }
 
-// GetMessage returns a queued item of the device.
-func (s *Store) GetMessage(ctx context.Context, deviceID string, id int64) (Message, error) {
+// GetMessage returns a queued item of the device group.
+func (s *Store) GetMessage(ctx context.Context, ownerID string, id int64) (Message, error) {
 	return scanMessage(s.db.QueryRowContext(ctx,
-		msgSelect+` WHERE m.id = ? AND m.device_id = ? AND m.expires_at > ?`, id, deviceID, s.ms()))
+		msgSelect+` WHERE m.id = ? AND m.owner_id = ? AND m.expires_at > ?`, id, ownerID, s.ms()))
 }
 
-// Sync returns the device's queued items after cursor, oldest first.
-func (s *Store) Sync(ctx context.Context, deviceID string, cursor int64, limit int) ([]Message, error) {
+// Sync returns the group's queued items after cursor, oldest first. The cursor
+// is the client's own: two devices of a group read the same queue at their own pace.
+func (s *Store) Sync(ctx context.Context, ownerID string, cursor int64, limit int) ([]Message, error) {
 	rows, err := s.db.QueryContext(ctx,
-		msgSelect+` WHERE m.device_id = ? AND m.id > ? AND m.expires_at > ? ORDER BY m.id LIMIT ?`,
-		deviceID, cursor, s.ms(), limit)
+		msgSelect+` WHERE m.owner_id = ? AND m.id > ? AND m.expires_at > ? ORDER BY m.id LIMIT ?`,
+		ownerID, cursor, s.ms(), limit)
 	if err != nil {
 		return nil, err
 	}
@@ -191,24 +212,69 @@ func (s *Store) Sync(ctx context.Context, deviceID string, cursor int64, limit i
 	return out, rows.Err()
 }
 
-// Ack marks every item up to and including upTo as stored on the device.
-func (s *Store) Ack(ctx context.Context, deviceID string, upTo int64) (int64, error) {
-	res, err := s.db.ExecContext(ctx,
-		`UPDATE messages SET acked_at = ? WHERE device_id = ? AND id <= ? AND acked_at IS NULL`, s.ms(), deviceID, upTo)
+// ClearResync clears the device's resync flag: it is syncing from cursor 0.
+func (s *Store) ClearResync(ctx context.Context, deviceID string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE devices SET resync = 0 WHERE id = ? AND resync <> 0`, deviceID)
+	return err
+}
+
+// Ack raises the device's watermark to upTo: it has stored every item up to
+// and including that id. The watermark never goes down, and is capped at the
+// last id ever issued, so a bogus value cannot cover items that do not exist
+// yet. It returns how many of the group's items the ack newly covers.
+func (s *Store) Ack(ctx context.Context, d Device, upTo int64) (int64, error) {
+	var seq int64
+	err := s.db.QueryRowContext(ctx, `SELECT COALESCE((SELECT seq FROM sqlite_sequence WHERE name = 'messages'), 0)`).Scan(&seq)
+	if err != nil {
+		return 0, err
+	}
+	upTo = min(upTo, seq)
+	var n int64
+	err = s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM messages WHERE owner_id = ? AND id > (SELECT acked_up_to FROM devices WHERE id = ?) AND id <= ?`,
+		d.OwnerID, d.ID, upTo).Scan(&n)
+	if err != nil {
+		return 0, err
+	}
+	_, err = s.db.ExecContext(ctx, `UPDATE devices SET acked_up_to = ? WHERE id = ? AND acked_up_to < ?`, upTo, d.ID, upTo)
+	return n, err
+}
+
+// Cleanup deletes expired items and items that every device of the group has
+// acked and that are older than ackedKeep. A device that never syncs holds the
+// items back until they expire.
+func (s *Store) Cleanup(ctx context.Context, ackedKeep time.Duration) (int64, error) {
+	now := s.now()
+	res, err := s.db.ExecContext(ctx, `
+		DELETE FROM messages WHERE expires_at <= ?1 OR (
+		  created_at <= ?2 AND id <= (SELECT MIN(acked_up_to) FROM devices WHERE owner_id = messages.owner_id))`,
+		now.UnixMilli(), now.Add(-ackedKeep).UnixMilli())
 	if err != nil {
 		return 0, err
 	}
 	return res.RowsAffected()
 }
 
-// Cleanup deletes expired items and items acked longer than ackedKeep ago.
-func (s *Store) Cleanup(ctx context.Context, ackedKeep time.Duration) (int64, error) {
-	now := s.now()
-	res, err := s.db.ExecContext(ctx,
-		`DELETE FROM messages WHERE expires_at <= ? OR (acked_at IS NOT NULL AND acked_at <= ?)`,
-		now.UnixMilli(), now.Add(-ackedKeep).UnixMilli())
-	if err != nil {
-		return 0, err
+// PushStillWanted reports whether a push for item msgID is still worth
+// retrying: the device exists, still has this push token and a usable one, the
+// item is still queued for its group, and the device's watermark has not
+// reached it.
+func (s *Store) PushStillWanted(ctx context.Context, deviceID, token string, msgID int64) (bool, error) {
+	var cur, owner string
+	var pushOK bool
+	var acked int64
+	err := s.db.QueryRowContext(ctx, `SELECT push_token, push_ok, owner_id, acked_up_to FROM devices WHERE id = ?`, deviceID).
+		Scan(&cur, &pushOK, &owner, &acked)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
 	}
-	return res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if cur != token || !pushOK || msgID <= acked {
+		return false, nil
+	}
+	var n int
+	err = s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM messages WHERE id = ? AND owner_id = ? AND expires_at > ?`,
+		msgID, owner, s.ms()).Scan(&n)
+	return n > 0, err
 }

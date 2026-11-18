@@ -130,6 +130,11 @@ public struct LocalAvatars: Sendable {
         return "data:" + (Self.types[ext] ?? "image/jpeg") + ";base64," + d.base64EncodedString()
     }
 
+    /// Deletes every kept image (the device's data was deleted).
+    public func removeAll() {
+        try? FileManager.default.removeItem(at: dir)
+    }
+
     /// Deletes images no bot uses any more. Ones younger than `grace` stay: a
     /// picked image is saved before the bot that will use it is created.
     public func prune(keeping avatars: Set<String>, grace: TimeInterval = 3600, now: Date = Date()) {
@@ -167,14 +172,21 @@ public struct ImageCache: Sendable {
         return dir.appendingPathComponent(String(h, radix: 16))
     }
 
-    /// The image's bytes, from the cache or the network (2 MB at most).
+    /// Forgets every downloaded image.
+    public func removeAll() {
+        try? FileManager.default.removeItem(at: dir)
+    }
+
+    /// The most an avatar or icon download may weigh.
+    static let maxBytes = 2 << 20
+
+    /// The image's bytes, from the cache or the network (2 MB at most, `timeout` seconds in all).
     public func data(for url: URL, timeout: TimeInterval = 5) async -> Data? {
         let f = file(for: url)
         if let d = try? Data(contentsOf: f) { return d }
         var req = URLRequest(url: url, timeoutInterval: timeout)
         req.cachePolicy = .reloadIgnoringLocalCacheData
-        guard let (d, res) = try? await session.data(for: req),
-              (res as? HTTPURLResponse)?.statusCode == 200, d.count <= 2 << 20 else { return nil }
+        guard let (d, _) = await CappedDownload.fetch(req, session: session, maxBytes: Self.maxBytes, deadline: timeout) else { return nil }
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         try? d.write(to: f, options: .atomic)
         return d

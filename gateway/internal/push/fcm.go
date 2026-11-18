@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"strconv"
+	"time"
 
 	"golang.org/x/oauth2/google"
 )
@@ -21,6 +23,8 @@ const fcmScope = "https://www.googleapis.com/auth/firebase.messaging"
 type FCM struct {
 	client   *http.Client
 	endpoint string
+	// Bare sends no bot name, title, body or group (HONK_PUSH_CONTENT=none).
+	Bare bool
 }
 
 // NewFCM reads a service account JSON file.
@@ -47,31 +51,38 @@ func NewFCM(ctx context.Context, credentialsFile string) (*FCM, error) {
 
 func fcmMessage(n Notification) map[string]any {
 	data := map[string]string{
-		"kind":     n.Kind,
-		"msg_id":   strconv.FormatInt(n.MessageID, 10),
-		"bot_id":   n.BotID,
-		"bot_name": n.BotName,
+		"kind":   n.Kind,
+		"msg_id": strconv.FormatInt(n.MessageID, 10),
+		"bot_id": n.BotID,
+	}
+	if !n.Bare {
+		data["bot_name"] = n.BotName
 	}
 	if n.TargetID > 0 {
 		data["target_id"] = strconv.FormatInt(n.TargetID, 10)
 	}
-	if n.CollapseID != "" {
+	if n.CollapseID != "" && !n.Bare {
 		data["id"] = n.CollapseID
 	}
 	priority := "HIGH"
 	if !n.Silent() {
-		data["title"] = truncate(n.Title, 200)
-		data["body"] = truncate(n.Body, maxBannerBody)
-		data["group"] = n.Group
+		if !n.Bare {
+			data["title"] = truncate(n.Title, 200)
+			data["body"] = truncate(n.Body, maxBannerBody)
+			data["group"] = n.Group
+		}
 		data["level"] = n.Level
 		if n.Level == "passive" {
 			priority = "NORMAL"
 		}
 	} else {
 		priority = "NORMAL"
+		if n.Quiet {
+			data["silent"] = "1"
+		}
 	}
-	android := map[string]any{"priority": priority, "ttl": "86400s"}
-	if k := collapseKey(n.BotID, n.CollapseID); k != "" && !n.Silent() {
+	android := map[string]any{"priority": priority, "ttl": strconv.FormatInt(int64(n.pushTTL()/time.Second), 10) + "s"}
+	if k := n.key(); k != "" && !n.Silent() {
 		android["collapse_key"] = k
 	}
 	return map[string]any{"message": map[string]any{"token": n.Token, "data": data, "android": android}}
@@ -79,6 +90,7 @@ func fcmMessage(n Notification) map[string]any {
 
 // Push implements Pusher.
 func (f *FCM) Push(ctx context.Context, n Notification) error {
+	n.Bare = n.Bare || f.Bare
 	body, err := json.Marshal(fcmMessage(n))
 	if err != nil {
 		return err
@@ -90,7 +102,7 @@ func (f *FCM) Push(ctx context.Context, n Notification) error {
 	req.Header.Set("Content-Type", "application/json")
 	res, err := f.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("fcm: %w", err)
+		return &RetryableError{Err: fmt.Errorf("fcm: %w", err)}
 	}
 	defer res.Body.Close()
 	if res.StatusCode == http.StatusOK {
@@ -98,7 +110,14 @@ func (f *FCM) Push(ctx context.Context, n Notification) error {
 		return nil
 	}
 	raw, _ := io.ReadAll(io.LimitReader(res.Body, 64<<10))
-	return fcmError(res.StatusCode, raw)
+	err = fcmError(res.StatusCode, raw)
+	if secs, e := strconv.Atoi(res.Header.Get("Retry-After")); e == nil && secs > 0 {
+		var re *RetryableError
+		if errors.As(err, &re) {
+			re.After = time.Duration(secs) * time.Second
+		}
+	}
+	return err
 }
 
 func fcmError(status int, raw []byte) error {
@@ -120,5 +139,9 @@ func fcmError(status int, raw []byte) error {
 	if status == http.StatusNotFound && e.Error.Status == "NOT_FOUND" {
 		return ErrTokenGone
 	}
-	return fmt.Errorf("fcm: %d %s %s", status, e.Error.Status, e.Error.Message)
+	err := fmt.Errorf("fcm: %d %s %s", status, e.Error.Status, e.Error.Message)
+	if retryableStatus(status) {
+		return &RetryableError{Err: err}
+	}
+	return err
 }

@@ -13,6 +13,9 @@ interface BotTokenStore {
     fun save(botId: String, token: String)
     fun remove(botId: String)
 
+    /** The ids of the bots that have a token here; used to drop the tokens of bots the gateway no longer lists. */
+    fun ids(): List<String> = emptyList()
+
     /** Removes every bot's token (the device moved to another gateway). */
     fun removeAll()
 }
@@ -22,6 +25,12 @@ class DeviceRegistrar(
     private val gatewayUrl: String,
     private val credentials: CredentialStore,
     private val transport: Transport = HttpTransport(),
+    /** Sent as `register_key` when registering, for a gateway that asks for one. */
+    private val registerKey: String? = null,
+    /** The phone's name or model, which the device group's list shows. */
+    private val deviceName: String? = null,
+    /** Called when the gateway no longer knows the device (401): the app drops the group key with the credentials. */
+    private val onForgotten: () -> Unit = {},
 ) {
     enum class Result { UNCHANGED, UPDATED, REGISTERED }
 
@@ -39,9 +48,10 @@ class DeviceRegistrar(
             } catch (e: ApiException) {
                 if (!e.isUnauthorized) throw e
                 credentials.clear()
+                onForgotten()
             }
         }
-        val reg = ApiClient(gatewayUrl, null, transport).registerDevice(pushToken)
+        val reg = ApiClient(gatewayUrl, null, transport).registerDevice(pushToken, registerKey = registerKey, name = deviceName)
         credentials.save(Credentials(reg.device.id, reg.deviceSecret, pushToken))
         return Result.REGISTERED
     }

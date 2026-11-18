@@ -35,6 +35,7 @@ jobs:
               - '.github/workflows/ci.yml'
             ios:
               - 'ios/HonkKit/**'
+              - 'app/src/host.contract.json'
               - '.github/workflows/ci.yml'
             app:
               - 'app/**'
@@ -143,6 +144,8 @@ jobs:
         with:
           packages: 'platforms;android-35 build-tools;35.0.0 cmake;3.22.1'
       - uses: gradle/actions/setup-gradle@v4
+      # AvatarIcons.kt is generated from the app's preset icons.
+      - run: node ../scripts/gen-android-icons.mjs --check
       - name: Install nsh
         run: curl -fsSL https://nsh.dev/install.sh | NSH_VERSION=v0.5.1 sh && echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - run: NSH_VERSION=v0.5.1 ../scripts/fetch-nsh-android.sh

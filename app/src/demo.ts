@@ -101,16 +101,16 @@ const trendCard = `<div style="padding:4px 0">
 </div>`;
 
 const bots: Bot[] = [
-  { id: "Bx7kQ2mT", name: L("Berth 部署", "Berth Deploys"), avatar: "preset:box:#1c1c1e", defaultLevel: "active", createdAt: now - 864e5 * 5 },
-  { id: "aR4nW9pZ", name: L("服务器告警", "Server Alerts"), avatar: "preset:alert:#c2410c", defaultLevel: "timeSensitive", createdAt: now - 864e5 * 4 },
-  { id: "Kc3vH8sL", name: L("CI 构建", "CI Builds"), avatar: "preset:check:#2f6f3e", defaultLevel: "active", createdAt: now - 864e5 * 3 },
-  { id: "Ev5tR2nD", name: L("Evumi 报告", "Evumi Reports"), avatar: "preset:chart:#6366f1", defaultLevel: "active", createdAt: now - 864e5 * 2 },
+  { id: "Bx7kQ2mT", name: L("Berth 部署", "Berth Deploys"), avatar: "preset:box:#1c1c1e", defaultLevel: "active", createdAt: now - 864e5 * 5, encrypted: false },
+  { id: "aR4nW9pZ", name: L("服务器告警", "Server Alerts"), avatar: "preset:alert:#c2410c", defaultLevel: "timeSensitive", createdAt: now - 864e5 * 4, encrypted: false },
+  { id: "Kc3vH8sL", name: L("CI 构建", "CI Builds"), avatar: "preset:check:#2f6f3e", defaultLevel: "active", createdAt: now - 864e5 * 3, encrypted: false },
+  { id: "Ev5tR2nD", name: L("Evumi 报告", "Evumi Reports"), avatar: "preset:chart:#6366f1", defaultLevel: "active", createdAt: now - 864e5 * 2, encrypted: false },
 ];
 
 let nextId = 100;
 const msg = (botId: string, minutesAgo: number, m: Partial<Message>): Message => ({
   id: nextId++, botId, title: "", body: "", html: "", data: "", level: "active", group: "", url: "", copy: "",
-  icon: "", collapseId: "", date: now - minutesAgo * 6e4, read: false, ...m,
+  icon: "", open: "", image: "", parseMode: "", silent: false, collapseId: "", allowQueries: false, date: now - minutesAgo * 6e4, read: false, ...m,
 });
 
 const messages: Message[] = [
@@ -126,6 +126,18 @@ const messages: Message[] = [
   }),
   msg("Bx7kQ2mT", 25, { title: L("每日部署汇总", "Daily deploy summary"), body: L("今天共 6 次部署，5 次成功，1 次回滚。", "6 deploys today: 5 succeeded, 1 rolled back.") }),
   // Added after the first cards, so the ids above stay as tests know them.
+  // parse_mode=Markdown, an https link in a plain body, and an image.
+  msg("Kc3vH8sL", 20, {
+    title: L("main #483 构建完成", "main #483 built"), parseMode: "Markdown", url: "https://example.com/builds/483", open: "url",
+    body: L(
+      "**128 个测试通过**，耗时 *3 分 12 秒*\n\n- 产物：`app-release.apk`\n- 日志：[查看详情](https://example.com/builds/483)\n\n```\nmake test\n```",
+      "**128 tests passed** in *3m 12s*\n\n- Artifact: `app-release.apk`\n- Log: [details](https://example.com/builds/483)\n\n```\nmake test\n```",
+    ),
+  }),
+  msg("aR4nW9pZ", 15, {
+    title: L("hk-edge-02 已恢复", "hk-edge-02 recovered"), image: "https://picsum.photos/seed/honk/640/360",
+    body: L("负载回落到 1.2，详见 https://status.example.com/hk-edge-02。", "Load back to 1.2, see https://status.example.com/hk-edge-02."),
+  }),
   msg("Kc3vH8sL", 50, {
     title: L("main #483 失败", "main #483 failed"), body: L("2 个测试失败，点开看是哪些。", "2 tests failed; open to see which."), html: ciCard,
     data: JSON.stringify({
@@ -147,7 +159,16 @@ const messages: Message[] = [
   }),
 ];
 const DEFAULT_GATEWAY = "https://honk.example.com/";
+// The device group: this phone and, in the demo, one other.
+const groupDevices = [
+  { id: "demo-this", name: "iPhone", platform: "ios" as const, seenAt: Date.now(), current: true },
+  { id: "demo-other", name: "Pixel 8", platform: "android" as const, seenAt: Date.now() - 5 * 36e5, current: false },
+];
+let linkCode = "";
+const CODE_CHARS = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+
 let gateway = DEFAULT_GATEWAY;
+let registerKey = "";
 
 function normalize(u: string): string | null {
   let t = u.trim();
@@ -156,6 +177,9 @@ function normalize(u: string): string | null {
   if (!/^https?:\/\/[^/\s?#]+/i.test(t) || /[?#]/.test(t)) return null;
   return t.endsWith("/") ? t : t + "/";
 }
+
+/** How long messages are kept, in days (0: forever); the demo prunes at once, as the hosts do. */
+let retentionDays = 0;
 
 const localAvatars = new Map<string, string>();
 const flags = new Map<string, { muted: boolean; pinned: boolean }>();
@@ -179,6 +203,14 @@ function demoToken(botId: string): string {
   return `${botId}:${randomString(LETTERS + "0123456789-_", 32)}`;
 }
 
+/** The demo's per-bot end-to-end keys (no gateway here; the real ones live in the keychain / keystore). */
+const keys = new Map<string, string>();
+
+/** A key shaped like the app's: 32 bytes as 43 unpadded base64url characters. */
+function demoKey(): string {
+  return randomString(LETTERS + "0123456789-_", 42) + "A";
+}
+
 function chats(): Chat[] {
   return bots
     .map((bot) => {
@@ -198,26 +230,101 @@ export async function demo<T>(name: string, args: unknown): Promise<T> {
       case "honk.register.retry":
         return { registered: true, registration: "registered", pushMode: "apns", gatewayURL: gateway, notifications: "authorized" };
       case "honk.gateway.get":
-        return { url: gateway, defaultURL: DEFAULT_GATEWAY, custom: gateway !== DEFAULT_GATEWAY };
+        return { url: gateway, defaultURL: DEFAULT_GATEWAY, custom: gateway !== DEFAULT_GATEWAY, registerKey };
       case "honk.gateway.test": {
         const url = normalize(String(a.url ?? ""));
         if (!url) return { ok: false, error: L("地址无效：需要 http:// 或 https:// 开头的网址", "Not a valid address: it needs http:// or https://") };
         if (url.includes("bad")) return { ok: false, error: L("无法连接到这个地址", "Can't reach this address") };
-        return { ok: true, url, version: "0.1.0" };
+        return {
+          ok: true, url, version: "0.1.0", registerKeyRequired: url.includes("locked"),
+          push: url.includes("off") ? { ios: "off", android: "off" } : url.includes("relay") ? { ios: "relay", android: "relay" } : { ios: "direct", android: "direct" },
+        };
       }
       case "honk.gateway.set": {
-        gateway = a.url ? normalize(String(a.url)) ?? gateway : DEFAULT_GATEWAY;
+        const target = a.url ? normalize(String(a.url)) ?? gateway : DEFAULT_GATEWAY;
+        registerKey = String(a.registerKey ?? "");
+        if (target === gateway) return { url: gateway, registered: true };
+        gateway = target;
         bots.splice(0, bots.length);
         messages.splice(0, messages.length);
         return { url: gateway, registered: true };
       }
+      case "honk.devices.list":
+        return groupDevices.map((d) => ({ ...d }));
+      case "honk.devices.remove": {
+        const i = groupDevices.findIndex((d) => d.id === a.deviceId);
+        if (i < 0) return true; // already gone
+        if (groupDevices[i].current) {
+          // Leaving the group: this phone starts over on its own.
+          groupDevices.splice(0, groupDevices.length, { id: "demo-this", name: "iPhone", platform: "ios", seenAt: Date.now(), current: true });
+          bots.splice(0, bots.length);
+          messages.splice(0, messages.length);
+          tokens.clear();
+          flags.clear();
+        } else {
+          groupDevices.splice(i, 1);
+        }
+        return true;
+      }
+      case "honk.link.create": {
+        const raw = Array.from({ length: 26 }, () => CODE_CHARS[Math.floor(Math.random() * 32)]).join("");
+        linkCode = raw;
+        return { code: raw.match(/.{1,4}/g)!.join("-"), expiresAt: Date.now() + 10 * 6e4 };
+      }
+      case "honk.link.claim": {
+        const code = String(a.code ?? "").toUpperCase().replace(/[\s-]/g, "");
+        if (code.length !== 26 || (linkCode !== "" && code !== linkCode && code !== "000G40R40M30E209185GR38E1W")) {
+          throw new Error(L("配对码不对、已过期或已用过", "The pairing code is wrong, expired or already used"));
+        }
+        linkCode = "";
+        if (!groupDevices.some((d) => d.id === "demo-other")) {
+          groupDevices.push({ id: "demo-other", name: "Pixel 8", platform: "android", seenAt: Date.now(), current: false });
+        }
+        return true;
+      }
+      case "honk.device.delete":
+        groupDevices.splice(0, groupDevices.length, { id: "demo-this", name: "iPhone", platform: "ios", seenAt: Date.now(), current: true });
+        bots.splice(0, bots.length);
+        messages.splice(0, messages.length);
+        tokens.clear();
+        flags.clear();
+        localAvatars.clear();
+        return true;
       case "honk.chats":
         return chats();
-      case "honk.messages":
+      case "honk.messages": {
+        const own = messages.filter((m) => m.botId === a.botId).sort((x, y) => y.id - x.id);
+        const limit = a.limit ?? 50;
+        if (a.around != null && own.some((m) => m.id === a.around)) {
+          // About half newer, the rest older, as the hosts' window.
+          const newer = own.filter((m) => m.id > a.around).slice(-Math.floor(limit / 2));
+          return [...newer, ...own.filter((m) => m.id <= a.around).slice(0, limit - newer.length)];
+        }
+        return own.filter((m) => a.around != null || a.before == null || m.id < a.before).slice(0, limit);
+      }
+      case "honk.search": {
+        const q = String(a.query ?? "").trim().toLowerCase();
+        if (!q) return [];
         return messages
-          .filter((m) => m.botId === a.botId && (a.before == null || m.id < a.before))
+          .filter((m) => (a.before == null || m.id < a.before) && `${m.title}\n${m.body}`.toLowerCase().includes(q))
           .sort((x, y) => y.id - x.id)
-          .slice(0, a.limit ?? 50);
+          .slice(0, 50);
+      }
+      case "honk.retention.get":
+        return retentionDays;
+      case "honk.retention.set": {
+        retentionDays = Number(a.days) || 0;
+        if (retentionDays > 0) {
+          const cutoff = Date.now() - retentionDays * 86_400_000;
+          for (let i = messages.length - 1; i >= 0; i--) if (messages[i].date < cutoff) messages.splice(i, 1);
+        }
+        return retentionDays;
+      }
+      // There is no share sheet or file picker without a host: exporting counts what it would write, importing is cancelled.
+      case "honk.export":
+        return { count: messages.filter((m) => a.botId == null || m.botId === a.botId).length, shared: false };
+      case "honk.import":
+        return null;
       case "honk.markRead":
         messages.forEach((m) => m.botId === a.botId && (m.read = true));
         return true;
@@ -230,7 +337,7 @@ export async function demo<T>(name: string, args: unknown): Promise<T> {
       case "honk.avatar.image":
         return localAvatars.get(a.avatar) ?? null;
       case "honk.bot.create": {
-        const bot: Bot = { id: demoBotId(), name: a.name, avatar: a.avatar, defaultLevel: a.defaultLevel, createdAt: Date.now() };
+        const bot: Bot = { id: demoBotId(), name: a.name, avatar: a.avatar, defaultLevel: a.defaultLevel, createdAt: Date.now(), encrypted: false };
         bots.push(bot);
         const token = demoToken(bot.id);
         tokens.set(bot.id, token);
@@ -247,6 +354,26 @@ export async function demo<T>(name: string, args: unknown): Promise<T> {
         const t = demoToken(a.botId);
         tokens.set(a.botId, t);
         return t;
+      }
+      case "honk.bot.encryption.key":
+        return keys.get(a.botId) ?? null;
+      case "honk.bot.encryption.enable": {
+        // The real hosts refuse when the bot is encrypted at the gateway but its key has not reached this device.
+        if (!keys.has(a.botId)) keys.set(a.botId, demoKey());
+        const bot = bots.find((b) => b.id === a.botId);
+        if (bot) bot.encrypted = true;
+        return keys.get(a.botId)!;
+      }
+      case "honk.bot.encryption.resetKey": {
+        const k = demoKey();
+        keys.set(a.botId, k);
+        return k;
+      }
+      case "honk.bot.encryption.disable": {
+        keys.delete(a.botId);
+        const bot = bots.find((b) => b.id === a.botId);
+        if (bot) bot.encrypted = false;
+        return true;
       }
       case "honk.bot.delete":
         bots.splice(bots.findIndex((b) => b.id === a.botId), 1);

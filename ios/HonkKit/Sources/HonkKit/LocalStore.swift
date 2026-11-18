@@ -14,7 +14,13 @@ public struct StoredMessage: Codable, Equatable, Sendable {
     public var url: String
     public var copy: String
     public var icon: String
+    public var open: String
+    public var image: String
+    public var parseMode: String
+    public var silent: Bool
     public var collapseID: String
+    /// The sender let the card's `request()` reach the bot.
+    public var allowQueries: Bool = false
     public var date: Int64
     public var read: Bool
 }
@@ -75,6 +81,10 @@ public final class LocalStore: @unchecked Sendable {
     private func migrate() throws {
         try migrateV1()
         try migrateV2()
+        try migrateSendOptions()
+        try migrateWidgetQueries()
+        try migratePlaceholder()
+        try migrateEncrypted()
     }
 
     private func migrateV1() throws {
@@ -170,6 +180,59 @@ public final class LocalStore: @unchecked Sendable {
         }
     }
 
+    /// v3: the sendMessage options open, image, parse_mode and silent (the
+    /// gateway's migrateSendOptions has the same columns).
+    private func migrateSendOptions() throws {
+        guard try scalar("PRAGMA user_version") ?? 0 < 3 else { return }
+        try transaction {
+            guard try scalar("PRAGMA user_version") ?? 0 < 3 else { return }
+            try exec("""
+            ALTER TABLE messages ADD COLUMN open_mode TEXT NOT NULL DEFAULT '';
+            ALTER TABLE messages ADD COLUMN image TEXT NOT NULL DEFAULT '';
+            ALTER TABLE messages ADD COLUMN parse_mode TEXT NOT NULL DEFAULT '';
+            ALTER TABLE messages ADD COLUMN silent INTEGER NOT NULL DEFAULT 0;
+            PRAGMA user_version = 3;
+            """)
+        }
+    }
+
+    /// v4: whether a message's card may query its bot (`allow_queries`).
+    private func migrateWidgetQueries() throws {
+        guard try scalar("PRAGMA user_version") ?? 0 < 4 else { return }
+        try transaction {
+            guard try scalar("PRAGMA user_version") ?? 0 < 4 else { return }
+            try exec("""
+            ALTER TABLE messages ADD COLUMN allow_queries INTEGER NOT NULL DEFAULT 0;
+            PRAGMA user_version = 4;
+            """)
+        }
+    }
+
+    /// v5: whether a message is the stand-in for one that could not be decrypted, so real content can replace it.
+    private func migratePlaceholder() throws {
+        guard try scalar("PRAGMA user_version") ?? 0 < 5 else { return }
+        try transaction {
+            guard try scalar("PRAGMA user_version") ?? 0 < 5 else { return }
+            try exec("""
+            ALTER TABLE messages ADD COLUMN placeholder INTEGER NOT NULL DEFAULT 0;
+            PRAGMA user_version = 5;
+            """)
+        }
+    }
+
+    /// v6: whether the gateway lists a bot as end-to-end encrypted (the app shows "waiting for the key" when the
+    /// flag is on and this device has no key yet).
+    private func migrateEncrypted() throws {
+        guard try scalar("PRAGMA user_version") ?? 0 < 6 else { return }
+        try transaction {
+            guard try scalar("PRAGMA user_version") ?? 0 < 6 else { return }
+            try exec("""
+            ALTER TABLE bots ADD COLUMN encrypted INTEGER NOT NULL DEFAULT 0;
+            PRAGMA user_version = 6;
+            """)
+        }
+    }
+
     // MARK: applying queued items
 
     /// Applies an item from the gateway. Safe to call twice with the same item
@@ -199,11 +262,24 @@ public final class LocalStore: @unchecked Sendable {
             }
         }
         try run("""
-            INSERT INTO messages (id, bot_id, title, body, html, data, level, group_key, url, copy_text, icon, collapse_id, date, notif_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET data = excluded.data, notif_id = COALESCE(messages.notif_id, excluded.notif_id)
-            """, [m.id, m.botID, m.title, m.body, m.html, m.data, m.level, m.group, m.url, m.copy, m.icon, m.collapseID,
-                  m.date, notificationID])
+            INSERT INTO messages (id, bot_id, title, body, html, data, level, group_key, url, copy_text, icon, open_mode, image, parse_mode, silent, collapse_id, allow_queries, date, notif_id, placeholder)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+              title = CASE WHEN messages.placeholder = 1 AND excluded.placeholder = 0 THEN excluded.title ELSE messages.title END,
+              body = CASE WHEN messages.placeholder = 1 AND excluded.placeholder = 0 THEN excluded.body ELSE messages.body END,
+              html = CASE WHEN messages.placeholder = 1 AND excluded.placeholder = 0 THEN excluded.html ELSE messages.html END,
+              copy_text = CASE WHEN messages.placeholder = 1 AND excluded.placeholder = 0 THEN excluded.copy_text ELSE messages.copy_text END,
+              url = CASE WHEN messages.placeholder = 1 AND excluded.placeholder = 0 THEN excluded.url ELSE messages.url END,
+              icon = CASE WHEN messages.placeholder = 1 AND excluded.placeholder = 0 THEN excluded.icon ELSE messages.icon END,
+              open_mode = CASE WHEN messages.placeholder = 1 AND excluded.placeholder = 0 THEN excluded.open_mode ELSE messages.open_mode END,
+              image = CASE WHEN messages.placeholder = 1 AND excluded.placeholder = 0 THEN excluded.image ELSE messages.image END,
+              parse_mode = CASE WHEN messages.placeholder = 1 AND excluded.placeholder = 0 THEN excluded.parse_mode ELSE messages.parse_mode END,
+              data = CASE WHEN messages.placeholder = 0 AND excluded.placeholder = 1 THEN messages.data ELSE excluded.data END,
+              allow_queries = CASE WHEN messages.placeholder = 0 AND excluded.placeholder = 1 THEN messages.allow_queries ELSE excluded.allow_queries END,
+              placeholder = CASE WHEN messages.placeholder = 1 THEN excluded.placeholder ELSE 0 END,
+              notif_id = COALESCE(messages.notif_id, excluded.notif_id)
+            """, [m.id, m.botID, m.title, m.body, m.html, m.data, m.level, m.group, m.url, m.copy, m.icon, m.open, m.image, m.parseMode,
+                  m.silent ? 1 : 0, m.collapseID, m.allowQueries, m.date, notificationID, m.placeholder ? 1 : 0])
         result.message = try message(id: m.id)
         return result
     }
@@ -298,12 +374,21 @@ public final class LocalStore: @unchecked Sendable {
         try locked { try query("SELECT \(Self.botCols) FROM bots ORDER BY created_at, id", [], Self.readBot) }
     }
 
-    private static let botCols = "id, name, avatar, default_level, created_at, updated_at"
+    private static let botCols = "id, name, avatar, default_level, created_at, updated_at, encrypted"
 
-    /// Reads `botCols` from the first six columns of a row.
-    private static func readBot(_ r: Row) -> Bot {
-        Bot(id: r.text(0) ?? "", name: r.text(1) ?? "", avatar: r.text(2) ?? "", defaultLevel: r.text(3) ?? "active",
-            createdAt: r.int(4), updatedAt: r.int(5))
+    /// Reads `botCols` from a row; `encryptedColumn` is where `encrypted` is when the query has other columns before it.
+    private static func readBot(_ r: Row) -> Bot { readBot(r, encryptedColumn: 6) }
+
+    private static func readBot(_ r: Row, encryptedColumn: Int32) -> Bot {
+        var b = Bot(id: r.text(0) ?? "", name: r.text(1) ?? "", avatar: r.text(2) ?? "", defaultLevel: r.text(3) ?? "active",
+                    createdAt: r.int(4), updatedAt: r.int(5))
+        b.encrypted = r.int(encryptedColumn) != 0
+        return b
+    }
+
+    /// Records whether the gateway lists the bot as encrypted (after this device turned it on or off).
+    public func setEncrypted(botID: String, _ encrypted: Bool) throws {
+        try locked { try run("UPDATE bots SET encrypted = ? WHERE id = ?", [encrypted, botID]) }
     }
 
     /// The ids of the stored bots.
@@ -317,10 +402,10 @@ public final class LocalStore: @unchecked Sendable {
 
     private func upsert(_ b: Bot) throws {
         try run("""
-            INSERT INTO bots (id, name, avatar, default_level, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO bots (id, name, avatar, default_level, created_at, updated_at, encrypted) VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET name = excluded.name, avatar = excluded.avatar,
-              default_level = excluded.default_level, updated_at = excluded.updated_at
-            """, [b.id, b.name, b.avatar, b.defaultLevel, b.createdAt, b.updatedAt])
+              default_level = excluded.default_level, updated_at = excluded.updated_at, encrypted = excluded.encrypted
+            """, [b.id, b.name, b.avatar, b.defaultLevel, b.createdAt, b.updatedAt, b.encrypted])
     }
 
     public func bot(id: String) throws -> Bot? {
@@ -352,13 +437,14 @@ public final class LocalStore: @unchecked Sendable {
 
     // MARK: reading
 
-    private static let messageCols = "id, bot_id, title, body, html, data, level, group_key, url, copy_text, icon, collapse_id, date, read"
+    private static let messageCols = "id, bot_id, title, body, html, data, level, group_key, url, copy_text, icon, open_mode, image, parse_mode, silent, collapse_id, allow_queries, date, read"
 
     private static func readMessage(_ r: Row) -> StoredMessage {
         StoredMessage(id: r.int(0), botID: r.text(1) ?? "", title: r.text(2) ?? "", body: r.text(3) ?? "", html: r.text(4) ?? "",
                       data: r.text(5) ?? "", level: r.text(6) ?? "", group: r.text(7) ?? "", url: r.text(8) ?? "",
-                      copy: r.text(9) ?? "", icon: r.text(10) ?? "", collapseID: r.text(11) ?? "", date: r.int(12),
-                      read: r.int(13) != 0)
+                      copy: r.text(9) ?? "", icon: r.text(10) ?? "", open: r.text(11) ?? "", image: r.text(12) ?? "", parseMode: r.text(13) ?? "",
+                      silent: r.int(14) != 0, collapseID: r.text(15) ?? "", allowQueries: r.int(16) != 0,
+                      date: r.int(17), read: r.int(18) != 0)
     }
 
     public func message(id: Int64) throws -> StoredMessage? {
@@ -373,17 +459,144 @@ public final class LocalStore: @unchecked Sendable {
         }
     }
 
+    /// A window of a bot's messages around `around`, newest first: the message,
+    /// up to `limit / 2` newer ones and the rest older. When the bot has no such
+    /// message it is the newest `limit`, as `messages(botID:)`.
+    public func messages(botID: String, around: Int64, limit: Int = 50) throws -> [StoredMessage] {
+        try locked {
+            guard try scalar("SELECT id FROM messages WHERE id = ? AND bot_id = ?", [around, botID]) != nil else {
+                return try query("SELECT \(Self.messageCols) FROM messages WHERE bot_id = ? ORDER BY id DESC LIMIT ?",
+                                 [botID, limit], Self.readMessage)
+            }
+            let newer = try query("SELECT \(Self.messageCols) FROM messages WHERE bot_id = ? AND id > ? ORDER BY id ASC LIMIT ?",
+                                  [botID, around, limit / 2], Self.readMessage)
+            let older = try query("SELECT \(Self.messageCols) FROM messages WHERE bot_id = ? AND id <= ? ORDER BY id DESC LIMIT ?",
+                                  [botID, around, limit - newer.count], Self.readMessage)
+            return newer.reversed() + older
+        }
+    }
+
+    /// `%`, `_` and the escape character matched literally in a LIKE pattern (used with `ESCAPE '\'`).
+    static func likePattern(_ q: String) -> String {
+        var out = "%"
+        for ch in q {
+            if ch == "\\" || ch == "%" || ch == "_" { out.append("\\") }
+            out.append(ch)
+        }
+        return out + "%"
+    }
+
+    /// Messages of every bot whose title or body contains `query` (case-insensitive for ASCII), newest first,
+    /// older than `before` when given: one page of `limit`. An empty query matches nothing.
+    public func search(_ query: String, before: Int64? = nil, limit: Int = 50) throws -> [StoredMessage] {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return [] }
+        let pattern = Self.likePattern(q)
+        return try locked {
+            try self.query("""
+                SELECT \(Self.messageCols) FROM messages
+                WHERE id < ? AND (title LIKE ? ESCAPE '\\' OR body LIKE ? ESCAPE '\\') ORDER BY id DESC LIMIT ?
+                """, [before ?? Int64.max, pattern, pattern, limit], Self.readMessage)
+        }
+    }
+
+    // MARK: retention
+
+    /// How long messages are kept, in days; 0 keeps them forever (the default).
+    public var retentionDays: Int {
+        (try? locked { try query("SELECT value FROM meta WHERE key = 'retention'") { $0.text(0) }.first ?? nil })
+            .flatMap { $0 }.flatMap { Int($0) }.map { max(0, $0) } ?? 0
+    }
+
+    public func setRetentionDays(_ days: Int) throws {
+        try locked {
+            try run("INSERT INTO meta (key, value) VALUES ('retention', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    [String(max(0, days))])
+        }
+    }
+
+    /// Deletes the messages older than the retention period (a day is 24 hours); returns their notification ids.
+    /// Does nothing when messages are kept forever.
+    @discardableResult
+    public func pruneExpired(now: Int64 = Int64(Date().timeIntervalSince1970 * 1000)) throws -> [String] {
+        let days = retentionDays
+        guard days > 0 else { return [] }
+        let cutoff = now - Int64(days) * 86_400_000
+        return try locked {
+            try transaction {
+                let ids = try query("SELECT notif_id FROM messages WHERE date < ? AND notif_id IS NOT NULL", [cutoff]) {
+                    $0.text(0)
+                }.compactMap { $0 }
+                try run("DELETE FROM messages WHERE date < ?", [cutoff])
+                return ids
+            }
+        }
+    }
+
+    // MARK: export and import
+
+    /// A bot's messages (every bot's when nil), oldest first, for `MessageArchive`.
+    public func exportMessages(botID: String? = nil) throws -> [StoredMessage] {
+        try locked {
+            if let botID {
+                return try query("SELECT \(Self.messageCols) FROM messages WHERE bot_id = ? ORDER BY id", [botID], Self.readMessage)
+            }
+            return try query("SELECT \(Self.messageCols) FROM messages ORDER BY id", [], Self.readMessage)
+        }
+    }
+
+    /// What `importMessages` did with the items it was given.
+    public struct ImportSummary: Equatable, Sendable {
+        public var imported = 0
+        /// Already stored (the same message id), or replaced by a newer message with its collapse id.
+        public var existing = 0
+        /// Of a bot this device does not have: bots belong to the gateway's account, so they are not created here.
+        public var unknownBot = 0
+    }
+
+    /// Adds archived messages the way `apply` does, so importing the same file twice changes nothing. Only
+    /// `message` items of bots stored here are imported; they arrive read and without a notification.
+    public func importMessages(_ items: [QueuedMessage]) throws -> ImportSummary {
+        try locked {
+            try transaction {
+                var summary = ImportSummary()
+                for raw in items where raw.kind == .message {
+                    let m = ContentLimits.sanitize(raw)
+                    guard try scalar("SELECT COUNT(*) FROM bots WHERE id = ?", [m.botID]) == 1 else {
+                        summary.unknownBot += 1
+                        continue
+                    }
+                    let stored = try scalar("SELECT id FROM messages WHERE id = ? AND placeholder = 0", [m.id]) != nil
+                    // A stored stand-in for an undecryptable message is repaired by the archived content.
+                    let repair = try !m.placeholder && scalar("SELECT id FROM messages WHERE id = ? AND placeholder = 1", [m.id]) != nil
+                    var newer: Int64?
+                    if !m.collapseID.isEmpty {
+                        newer = try scalar("SELECT id FROM messages WHERE bot_id = ? AND collapse_id = ? AND id > ? LIMIT 1",
+                                           [m.botID, m.collapseID, m.id])
+                    }
+                    if stored || newer != nil {
+                        summary.existing += 1
+                        continue
+                    }
+                    _ = try insert(m, notificationID: nil)
+                    if !repair { try run("UPDATE messages SET read = 1 WHERE id = ?", [m.id]) }
+                    summary.imported += 1
+                }
+                return summary
+            }
+        }
+    }
+
     /// The chat list: pinned first, then by latest message.
     public func chats() throws -> [ChatSummary] {
         try locked {
             let bots = try query("""
                 SELECT b.id, b.name, b.avatar, b.default_level, b.created_at, b.updated_at, b.muted, b.pinned,
                        (SELECT COUNT(*) FROM messages m WHERE m.bot_id = b.id AND m.read = 0),
-                       (SELECT MAX(id) FROM messages m WHERE m.bot_id = b.id)
+                       (SELECT MAX(id) FROM messages m WHERE m.bot_id = b.id), b.encrypted
                 FROM bots b
                 """) { r in
-                (ChatSummary(bot: Bot(id: r.text(0) ?? "", name: r.text(1) ?? "", avatar: r.text(2) ?? "",
-                                      defaultLevel: r.text(3) ?? "active", createdAt: r.int(4), updatedAt: r.int(5)),
+                (ChatSummary(bot: Self.readBot(r, encryptedColumn: 10),
                              muted: r.int(6) != 0, pinned: r.int(7) != 0, last: nil, unread: Int(r.int(8))),
                  r.isNull(9) ? nil : r.int(9))
             }
@@ -454,7 +667,8 @@ public final class LocalStore: @unchecked Sendable {
         try locked {
             try transaction {
                 let ids = try query("SELECT notif_id FROM messages WHERE notif_id IS NOT NULL") { $0.text(0) }.compactMap { $0 }
-                try exec("DELETE FROM messages; DELETE FROM bots; DELETE FROM meta;")
+                // The retention choice is about this phone, not the gateway: it stays.
+                try exec("DELETE FROM messages; DELETE FROM bots; DELETE FROM meta WHERE key <> 'retention';")
                 return ids
             }
         }
@@ -471,6 +685,22 @@ public final class LocalStore: @unchecked Sendable {
         try locked {
             try run("INSERT INTO meta (key, value) VALUES ('cursor', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                     [String(c)])
+        }
+    }
+
+    /// Whether `name` may run now: true at most once per `interval` milliseconds, and the time is recorded when it
+    /// is. Kept in `meta`, so the app and the extension share the budget (the extension uses it to retry the
+    /// key refresh no more than every few minutes).
+    public func claimSlot(_ name: String, interval: Int64, now: Int64 = Int64(Date().timeIntervalSince1970 * 1000)) throws -> Bool {
+        try locked {
+            try transaction {
+                let key = "slot:" + name
+                let last = try query("SELECT value FROM meta WHERE key = ?", [key]) { $0.text(0) }.first.flatMap { $0 }.flatMap { Int64($0) }
+                if let last, now >= last, now - last < interval { return false }
+                try run("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                        [key, String(now)])
+                return true
+            }
         }
     }
 

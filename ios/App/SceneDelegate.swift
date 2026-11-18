@@ -20,6 +20,10 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         HonkService.shared.startPolling()
     }
 
+    func sceneDidEnterBackground(_ scene: UIScene) {
+        BackgroundRefresh.schedule()
+    }
+
     func sceneWillResignActive(_ scene: UIScene) {
         HonkService.shared.stopPolling()
     }

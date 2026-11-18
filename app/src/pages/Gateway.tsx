@@ -1,7 +1,7 @@
 import { signal, Text, View } from "nsh";
 import { AlertDialog, Input, NavPage } from "nsh/base";
 import { FormBody, Row, Section } from "../components";
-import { api, type Gateway, type GatewayTest } from "../host";
+import { api, type Gateway, type GatewayTest, type PushRoute } from "../host";
 import { loadStatus, nav, reload } from "../store";
 import { palette } from "../theme";
 import { tr } from "../i18n";
@@ -13,16 +13,21 @@ export function GatewayPage() {
   const p = palette;
   const current = signal<Gateway | null>(null);
   const draft = signal("");
+  const keyDraft = signal("");
   const check = signal<Check>({ state: "idle" });
   const busy = signal(false);
 
   void api.gateway().then((g) => {
     current.set(g);
     draft.set(g.url);
+    keyDraft.set(g.registerKey ?? "");
   });
 
   const normalized = () => draft().trim();
-  const changed = () => current() != null && normalized() !== "" && normalized() !== current()!.url;
+  const key = () => keyDraft().trim();
+  const urlChanged = () => current() != null && normalized() !== "" && normalized() !== current()!.url;
+  const keyChanged = () => current() != null && normalized() !== "" && key() !== (current()!.registerKey ?? "");
+  const changed = () => urlChanged() || keyChanged();
 
   const test = async () => {
     if (!normalized()) return;
@@ -43,10 +48,10 @@ export function GatewayPage() {
     return action === "ok";
   };
 
-  const apply = async (url: string | null) => {
+  const apply = async (url: string | null, registerKey?: string) => {
     busy.set(true);
     try {
-      await api.setGateway(url);
+      await api.setGateway(url, registerKey);
       await Promise.all([reload(), loadStatus()]);
       nav.setRoutes([{ name: "home" }]);
     } catch (e) {
@@ -62,7 +67,8 @@ export function GatewayPage() {
     await test();
     const c = check();
     if (c.state !== "done" || !c.result.ok) return;
-    if (await confirmSwitch(c.result.url ?? normalized())) await apply(normalized());
+    // The same gateway with another register key clears nothing: no question.
+    if (!urlChanged() || (await confirmSwitch(c.result.url ?? normalized()))) await apply(normalized(), key());
   };
 
   const restore = async () => {
@@ -71,10 +77,23 @@ export function GatewayPage() {
     if (await confirmSwitch(g.defaultURL)) await apply(null);
   };
 
+  const routeLabel = (r: PushRoute) => (r === "direct" ? tr("直连") : r === "relay" ? tr("经中继") : tr("关闭"));
+
+  /** The push mode per platform of the gateway that was just tested (none for one that does not say). */
+  const pushRoutes = () => {
+    const c = check();
+    return c.state === "done" && c.result.ok ? c.result.push : undefined;
+  };
+  const anyOff = () => pushRoutes()?.ios === "off" || pushRoutes()?.android === "off";
+
   const status = () => {
     const c = check();
     if (c.state === "checking") return { text: tr("正在连接…"), color: p().hint };
-    if (c.state === "done" && c.result.ok) return { text: tr("连接正常 · 网关版本 {version}", { version: c.result.version || tr("未知") }), color: p().good };
+    if (c.state === "done" && c.result.ok) {
+      const text = tr("连接正常 · 网关版本 {version}", { version: c.result.version || tr("未知") });
+      if (c.result.registerKeyRequired && !key()) return { text: `${text} · ${tr("需要注册口令")}`, color: p().destructive };
+      return { text, color: p().good };
+    }
     if (c.state === "done") return { text: c.result.error ?? tr("无法连接"), color: p().destructive };
     return null;
   };
@@ -134,6 +153,42 @@ export function GatewayPage() {
                 </View>
               )}
             </If>
+            <If when={pushRoutes()}>
+              {(r) => (
+                <View style={{ paddingTop: 10, paddingBottom: 10, paddingLeft: 16, paddingRight: 16, gap: 6, borderTopWidth: 0.5, borderTopColor: p().separator }}>
+                  <Text testID="gateway-push-ios" style={{ fontSize: 15, color: r().ios === "off" ? p().destructive : p().hint }}>
+                    {tr("iOS 推送：{mode}", { mode: routeLabel(r().ios) })}
+                  </Text>
+                  <Text testID="gateway-push-android" style={{ fontSize: 15, color: r().android === "off" ? p().destructive : p().hint }}>
+                    {tr("Android 推送：{mode}", { mode: routeLabel(r().android) })}
+                  </Text>
+                  <If when={anyOff()}>
+                    <Text testID="gateway-push-off" style={{ fontSize: 15, color: p().destructive }}>
+                      {tr("推送关闭的平台，只能在打开 App 时收到通知。")}
+                    </Text>
+                  </If>
+                </View>
+              )}
+            </If>
+          </Section>
+
+          <Section
+            title={tr("注册口令")}
+            p={p()}
+            footer={tr("网关设置了注册口令（HONK_REGISTER_KEY）时，填在这里，注册这台设备时会带上；没有就留空。")}
+          >
+            <View style={{ height: 48, paddingLeft: 16, paddingRight: 16, justifyContent: "center" }}>
+              <Input
+                testID="register-key"
+                value={keyDraft()}
+                onChange={({ value }) => keyDraft.set(value)}
+                placeholder={tr("可选")}
+                autoCapitalize="none"
+                autoCorrect={false}
+                returnKeyType="done"
+                style={{ fontSize: 16, color: p().text }}
+              />
+            </View>
           </Section>
 
           <Section title={tr("当前")} p={p()} footer={tr("切换后这台设备会在新网关上重新注册，本机的 Bot 和消息会被清除。")}>
