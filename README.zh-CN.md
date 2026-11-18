@@ -81,6 +81,7 @@ docker run -p 8080:8080 -v honk-data:/data \
 | `HONK_SEND_RATE` / `HONK_SEND_BURST` | `5` / `20` | 每个 bot 每秒最多发几条 / 突发上限 |
 | `HONK_REGISTER_PER_HOUR` | `10` | 每个 IP 每小时最多注册几台设备（突发 5） |
 | `HONK_MAX_BOTS_PER_DEVICE` | `100` | 每个设备组最多几个 bot（名字沿用分组之前的叫法）；会超出上限的配对会被拒绝 |
+| `HONK_WEBHOOK_ALLOW_PRIVATE` | `false` | 允许 bot 用 `setWebhook` 把地址设在回环、内网和链路本地地址上（默认拒绝，防止 bot 让网关去访问你的内网） |
 | `HONK_APNS_KEY_FILE` | | APNs `.p8` key 文件路径；不设就不推 iOS |
 | `HONK_APNS_KEY_ID` / `HONK_APNS_TEAM_ID` / `HONK_APNS_TOPIC` | | 设置了 key 文件时必填；topic 就是 bundle ID |
 | `HONK_APNS_SANDBOX` | `false` | 用 APNs 开发环境，开发版构建要设为 true |
@@ -135,6 +136,7 @@ APNs 和 FCM 只接受带已发布 App 凭据签名的推送，自建网关手�
 | `url` | | 消息的链接，http(s)：在会话里点这条消息时打开 |
 | `copy` | | 长按菜单里「复制」用的文字 |
 | `icon` | | 这条消息的头像，必须是 https；不填用 bot 头像 |
+| `allow_queries` | | `true` 时卡片里的 `request()` 可以把查询发给这个 bot；默认 `false` |
 | `dry_run` | | `true` 时只校验：不入队、不推送，返回 `{"dry_run":true,"html":清理后的卡片,"input_size","raw_size","compressed_size","removed":[…]}`，即清理后卡片的大小（上限 32768 和 4096）和白名单删掉的内容（如 `"onclick on <div>"`、`"<iframe>"`）。计入限流 |
 | `open` | | `chat`（默认）或 `url`：`url` 表示点通知直接打开消息的 `url`，不进会话（要同时给 `url`） |
 | `image` | | https 图片，最多 2048 字符：附在通知上，会话气泡里也显示。设备自己下载（≤ 5 MB，10 秒超时） |
@@ -161,6 +163,15 @@ curl https://honk.example.com/bot$TOKEN/sendMessage \
 ### getMe
 
 返回这个 bot 的信息，可以用来测试 token 是否有效。
+
+### 卡片回调：setWebhook、getUpdates、answerWidgetQuery
+
+用 `allow_queries=true` 发出的卡片，可以在点击处理函数里调 `request(data)`（1–64 字节）。App 把它发给网关，网关把它作为更新 `{"update_id":N,"widget_query":{"id","message_id","data"}}` 交给 bot，并把 App 的请求挂住最多 15 秒。字段名和 Telegram 的 `WidgetQuery`、`answerWidgetQuery` 一致。bot 用下面两种方式之一收更新，不能同时用：
+
+- `setWebhook`：`url`（只能是 https；`url` 为空表示删除）和可选的 `secret_token`（会放在请求头 `X-Honk-Bot-Api-Secret-Token` 里带回来）。网关把更新以 JSON POST 过去，5 秒超时，不跟随重定向。解析后落在回环、内网、链路本地等内部地址的主机会被拒绝（设置时检查一次，每次连接前再检查一次），除非设了 `HONK_WEBHOOK_ALLOW_PRIVATE=true`。`deleteWebhook` 删除；`getWebhookInfo` 返回 `url`、`has_custom_certificate`、`pending_update_count`。
+- `getUpdates`：`offset`、`limit`（1–100）、`timeout`（0–50 秒，长轮询）。更新只放在内存里，15 秒后丢弃；小于 `offset` 的更新视为已确认并丢掉。设了 webhook 时返回 `409 Conflict`。
+
+`answerWidgetQuery`：`widget_query_id` 和 `data`（0–1024 字节），要在 15 秒内调。答案只回给发起请求的那台设备；已超时、已回答过或属于别的 bot 的 query 返回 `400`。
 
 ### 旧 token
 
@@ -208,7 +219,7 @@ App 把内联 SVG（`svg`、`g`、各种图形、`text`/`tspan`、渐变、`symb
 - 精简 DOM：`getElementById`、`querySelector`、`textContent`、`innerHTML`、`classList`、`style`、`dataset`、`createElement`、`addEventListener('click', …)`
 - 定时器，以及 4 KB 的 `localStorage`
 
-脚本画出来的内容，App 同样按白名单过滤后再显示。消息允许查询（`allow_queries`）时，`request(data)`（1–64 字节，只能在点击处理函数里调，每次点击一次）把查询发给 bot，返回的 Promise 以 bot 的答案兑现；否则以 `WidgetRequestError` 拒绝（`NOT_ALLOWED`、`INVALID_DATA`、`TOO_MANY_REQUESTS`，15 秒无答案为 `TIMEOUT`）。旧版 App 和桌面演示（没有宿主）显示填好 `{{key}}` 的静态卡片，所以关键信息要写在 HTML 里。例子：
+脚本画出来的内容，App 同样按白名单过滤后再显示。消息用 `allow_queries` 发出时，`request(data)`（1–64 字节，只能在点击处理函数里调，每次点击一次）把查询发给 bot，返回的 Promise 以 bot 的答案（最多 1 KB）兑现：App 自己把它发给网关，bot 用 `answerWidgetQuery` 回答（见上面的 Bot API）。否则或出错时以 `WidgetRequestError` 拒绝，`code` 是 `NOT_ALLOWED`（消息不允许查询）、`INVALID_DATA`、`TOO_MANY_REQUESTS`、`TIMEOUT`（15 秒没有答案）、`NETWORK`、`RATE_LIMITED`（每秒超过 1 次）或 `REQUEST_FAILED`。旧版 App 和桌面演示（没有宿主）显示填好 `{{key}}` 的静态卡片，所以关键信息要写在 HTML 里。例子：
 
 ```html
 <p id="n">{{count}}</p><button id="b">+1</button>
