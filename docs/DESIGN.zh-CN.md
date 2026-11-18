@@ -270,7 +270,7 @@ Gradle 工程，minSdk 26，compileSdk / targetSdk 35。只支持有 GMS 的设�
   - `onDeletedMessages`：FCM 丢了积压的消息，整体同步。
 - `Notifier`：
   - 每个 bot 一个 NotificationChannel（`bot-<id>`，放在 “Bots” 分组里），用户可以在系统设置里分别调整；删除 bot 时删掉对应的 channel。
-  - MessagingStyle，发送者是代表 bot 的 `Person`，头像是 bot 头像（https 头像下载并缓存，5 秒超时、最大 2MB；`local:` 头像读 `noBackupFilesDir/avatars` 里的文件，规则同 iOS，见 `core/LocalAvatars.kt`；预设头像画成色块加 bot 名称首字）。每个 bot 推一个长期会话快捷方式，Android 11+ 会把它显示在“对话”区。
+  - MessagingStyle，发送者是代表 bot 的 `Person`，头像是 bot 头像（https 头像下载并缓存，5 秒超时、最大 2MB；`local:` 头像读 `noBackupFilesDir/avatars` 里的文件，规则同 iOS，见 `core/LocalAvatars.kt`；预设头像画成色块加和 App 一样的图标：路径数据 `core/AvatarIcons.kt` 由 `scripts/gen-android-icons.mjs` 从 `app/src/components.tsx` 的 `ICONS` 生成，`core/SvgPath.kt` 把它解析成直线和三次曲线（圆弧、二次曲线都转成三次曲线），`Notifier.drawIcon` 用 `android.graphics.Path` 按 `Glyph` 的画法描边：24 格、半个头像大小、线宽 1.8、圆头圆角、白色。改了图标要重新运行脚本，CI 检查生成物是最新的）。每个 bot 推一个长期会话快捷方式，Android 11+ 会把它显示在“对话”区。
   - 通知 tag：有 collapse id 时是 `c<bot>:<collapse id>`，同 id 的新消息原地替换旧通知；否则是 `m<msg_id>`。tag 存在本地库的 `notif_id` 里，删除、替换、标记已读时据此撤掉通知。
   - `level=passive` 或 bot 静音时不响铃、不弹横幅（`setSilent`）。正在看的会话来消息时不发通知，直接标为已读。
 - `MainActivity`：全屏 `NshView`，按 `assets/nsh/capabilities.json` 授权后 `loadAssetBundle("nsh")`；debug 构建可以用 intent extra `nshDevUrl` 连 `nsh dev` 热更新。Android 13+ 首次启动申请 `POST_NOTIFICATIONS`，被拒后在设置页里引导去系统设置。点击通知：发 `honk.open` 进入会话（消息的 `url` 在会话里点消息打开）。App 调用 `honk.incoming.listen` 之后，App 在前台时（不在该会话里）通知安静地进通知栏（不响铃、不弹出），并发 `honk.incoming`，由 App 显示站内横幅。
@@ -299,12 +299,14 @@ Gradle 工程，minSdk 26，compileSdk / targetSdk 35。只支持有 GMS 的设�
 
 App 用 TSX 写，跑在 QuickJS 上。页面：
 
-- 会话列表（`Home`，带底部标签栏）
-- 会话详情（`Chat`）
+- 会话列表（`Home`，带底部标签栏）：搜索框同时筛会话和消息，有匹配的消息时在会话下多一组「消息」
+- 会话详情（`Chat`）：可以带一个消息 id 打开，停在那条消息上
 - 新建 Bot（`NewBot`）
 - 创建成功（`BotCreated`）
 - Bot 设置（`BotSettings`）
 - 添加设备（`AddDevice`：配对码、复制、倒计时）和输入配对码（`Pair`）；设置页的「设备」区列出设备组，「数据」区分成「从设备组移除这台设备」（组里还有其他设备时才有）和「删除全部数据」
+
+页面内容在宽窗口（iPad、折叠屏）上保持一列，最宽 600 点、居中（`App.tsx` 的根容器），两侧是页面背景色。
 
 没有宿主时（例如在桌面上 `nsh run`）自动使用 `src/demo.ts` 的内存数据，方便单独调界面。
 
@@ -316,7 +318,11 @@ App 用 TSX 写，跑在 QuickJS 上。页面：
 | --- | --- | --- |
 | `honk.status` | | `{registered, registration, registrationError?, pushMode, gatewayURL, notifications, appVersion, appBuild}`（设置页底部显示版本号） |
 | `honk.chats` | | `Chat[]`：`{bot, muted, pinned, unread, last}` |
-| `honk.messages` | `{botId, before?, limit?}` | `Message[]`，新的在前 |
+| `honk.messages` | `{botId, before?, around?, limit?}` | `Message[]`，新的在前。`around` 是消息 id：返回以它为中心的一段（它、最多 `limit / 2` 条更新的、其余更旧的）；不是这个 bot 的消息就退回最新一页 |
+| `honk.search` | `{query, before?}` | `Message[]`：所有会话里标题或正文含 `query` 的消息，新的在前，一次 50 条，`before` 是上一页最后一条的 id。LIKE 匹配（ASCII 不分大小写），`%`、`_`、`\` 按字面匹配 |
+| `honk.retention.get` / `honk.retention.set` | `{days}`（0 永久，365、90、30） | 当前的保留天数。设置后立即清理一次 |
+| `honk.export` | `{botId?}`（没有就是全部会话） | `{count, shared}`：消息写成 JSON Lines 文件，用系统分享面板交给用户（iOS `UIActivityViewController`，iPad 上是弹出框；Android `ACTION_SEND` 经 `FileProvider`，文件在 `cache/exports`）。没有消息时 `count` 是 0，不弹面板 |
+| `honk.import` | | 弹出系统文件选择器（iOS `UIDocumentPickerViewController`，Android `ACTION_OPEN_DOCUMENT`），导入所选文件；取消返回 `null`，否则 `{imported, existing, unknownBot, invalid}`。文件最大 64 MB |
 | `honk.markRead` / `honk.focus` | `{botId}` | |
 | `honk.refresh` | | 拉 bot 列表并同步 |
 | `honk.bot.create` | `{name, avatar, defaultLevel}` | `{bot, token}` |
@@ -348,6 +354,13 @@ App 用 TSX 写，跑在 QuickJS 上。页面：
 - `honk.card.changed {key, result}`：卡片脚本的定时器改变了画面
 
 静音和置顶只存在本地，不上传网关。
+
+### 搜索、保留期限、导出与导入（只在设备端）
+
+- **搜索**：本地库 `LocalStore.search` 对 `title`、`body` 做 `LIKE ? ESCAPE '\'`，一页 50 条，按消息 id 倒序，`before` 翻页。首页在搜索框有内容时，把匹配的会话和匹配的消息放进同一个列表，消息在「消息」标题下面；到底再请求下一页。点一条消息进入会话，用 `honk.messages` 的 `around` 加载那一段，滚到那条；这时会话底部一直有“回到最新消息”按钮（这一段只有它前后各约 25 条），也不标记已读。
+- **保留期限**：设置里选永久（默认）、1 年、90 天、30 天，存在本地 `meta` 表的 `retention` 键（天数，没有或 0 是永久），没有新的迁移。`LocalStore.pruneExpired` 删掉 `date` 早于「现在 − 天数」的消息并返回它们的通知 id；App 启动时和每次刷新（同步前、同步后）都清理，改选更短的期限时先弹确认。只影响本机，不影响网关。切换网关 / 删除设备数据时 `reset` 保留这个选择。
+- **导出**：`MessageArchive`（HonkKit 和 `:core`，规则相同）把消息写成 JSON Lines，每行一条，字段和 App API 的消息对象一致（`message_id`、`bot_id`、`kind`（总是 `message`）、`title`、`body`、`html`、`data`、`level`、`group`、`url`、`copy`、`icon`、`id`（collapse id）、`date`），空字段省略，键按字母序。单个会话从 Bot 设置导出，全部从设置页导出。文件名 `honk-<bot 名或 all>-<日期>.jsonl`。
+- **导入**：`MessageArchive.decode` 逐行解析（读不了的行只计数），`LocalStore.importMessages` 在一个事务里按 `apply` 的 insert 路径写入：**本机没有的 bot 的消息跳过**（bot 属于网关账号，导入不凭空建 bot，建了下次刷新也会被网关列表清掉）；消息 id 已存在、或本机已有同一 collapse id 的更新消息的，算“已有”，所以重复导入同一个文件没有变化；新写入的消息直接是已读、没有通知 id。换网关后消息 id 可能和新网关上的撞车，导入时同样按“已有”跳过，不覆盖。
 
 ### 卡片渲染（profile v1）
 

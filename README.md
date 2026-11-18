@@ -37,6 +37,16 @@ To switch phones or add one, open Settings → Devices → Add device on the old
 
 Settings → Devices lists the group (name, platform, last seen, this device); a device can be removed from there. Data has two buttons: "Remove this device from the group" (this phone leaves, the bots stay with the others) and "Delete all data" (the whole group's devices, bots and queue on the gateway, then this phone). A device whose push token has been rejected and that has made no request for `HONK_DEVICE_GC` (90 days) is deleted by the gateway, together with the bots and queue when it was the last device of its group.
 
+## Messages on the phone
+
+Everything below happens on the device; the gateway is not involved.
+
+- **Search**: the search box on the chat list also finds messages (title and body) and lists them under the matching chats; tapping one opens the chat at that message.
+- **Retention**: Settings keeps messages forever (default), 1 year, 90 days or 30 days. Older ones are deleted from the phone at start and on every sync; the gateway is not affected.
+- **Export and import**: Bot settings exports one chat, Settings all of them, as a JSON Lines file (one message per line, the fields of the App API's message objects with `bot_id`) through the system share sheet. Settings imports such a file again. Importing twice changes nothing; messages of bots this phone does not have are skipped.
+- **iPad**: the iOS app runs on iPad, with its pages in a centred column at most 600 points wide.
+- Android notifications show the same preset avatar icons as the app.
+
 ## Running the gateway
 
 Hosting your own gateway: see [docs/SELF-HOSTING.md](docs/SELF-HOSTING.md) (Docker Compose, reverse proxy and TLS, backups, upgrades).
