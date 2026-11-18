@@ -688,35 +688,51 @@ type BotPatch struct {
 	KeyWrapped   *string
 }
 
-// UpdateBot changes a bot's name, avatar or default level.
+// UpdateBot changes the patched fields of a bot. It writes only those columns
+// in one UPDATE, so two devices of a group patching different fields at the same
+// time cannot overwrite each other (a read-modify-write of every column lost
+// encrypted / key_wrapped that way). A wrapped key without encryption is stale
+// and is cleared by the same statement.
 func (s *Store) UpdateBot(ctx context.Context, ownerID string, botID string, p BotPatch) (Bot, error) {
-	b, err := s.GetBot(ctx, ownerID, botID)
-	if err != nil {
-		return b, err
-	}
+	sets := []string{"updated_at = ?"}
+	args := []any{s.ms()}
 	if p.Name != nil {
-		b.Name = *p.Name
+		sets, args = append(sets, "name = ?"), append(args, *p.Name)
 	}
 	if p.Avatar != nil {
-		b.Avatar = *p.Avatar
+		sets, args = append(sets, "avatar = ?"), append(args, *p.Avatar)
 	}
 	if p.DefaultLevel != nil {
-		b.DefaultLevel = *p.DefaultLevel
+		sets, args = append(sets, "default_level = ?"), append(args, *p.DefaultLevel)
 	}
 	if p.Encrypted != nil {
-		b.Encrypted = *p.Encrypted
+		sets, args = append(sets, "encrypted = ?"), append(args, *p.Encrypted)
 	}
-	if p.KeyWrapped != nil {
-		b.KeyWrapped = *p.KeyWrapped
+	// SQLite evaluates every right-hand side against the old row, so the new
+	// state of encrypted is spelled out.
+	enc := "encrypted"
+	if p.Encrypted != nil {
+		enc = "?"
 	}
-	if !b.Encrypted {
-		b.KeyWrapped = "" // a wrapped key without encryption is stale
+	switch {
+	case p.KeyWrapped != nil:
+		if p.Encrypted != nil {
+			sets, args = append(sets, "key_wrapped = CASE WHEN ? THEN ? ELSE '' END"), append(args, *p.Encrypted, *p.KeyWrapped)
+		} else {
+			sets, args = append(sets, "key_wrapped = CASE WHEN "+enc+" THEN ? ELSE '' END"), append(args, *p.KeyWrapped)
+		}
+	case p.Encrypted != nil && !*p.Encrypted:
+		sets = append(sets, "key_wrapped = ''")
 	}
-	b.UpdatedAt = s.ms()
-	_, err = s.db.ExecContext(ctx,
-		`UPDATE bots SET name = ?, avatar = ?, default_level = ?, encrypted = ?, key_wrapped = ?, updated_at = ? WHERE public_id = ? AND owner_id = ?`,
-		b.Name, b.Avatar, b.DefaultLevel, b.Encrypted, b.KeyWrapped, b.UpdatedAt, botID, ownerID)
-	return b, err
+	args = append(args, botID, ownerID)
+	res, err := s.db.ExecContext(ctx, "UPDATE bots SET "+strings.Join(sets, ", ")+" WHERE public_id = ? AND owner_id = ?", args...)
+	if err != nil {
+		return Bot{}, err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return Bot{}, ErrNotFound
+	}
+	return s.GetBot(ctx, ownerID, botID)
 }
 
 // ResetBotToken replaces a bot's token; the old one stops working at once.
