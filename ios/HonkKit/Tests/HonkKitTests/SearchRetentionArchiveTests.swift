@@ -81,7 +81,8 @@ import Testing
     @Test func linesMatchTheAppAPIAndRoundTrip() throws {
         let store = try tempStore()
         try store.apply(QueuedMessage(id: 1, botID: "bot1", title: "部署", body: "完成 \"ok\"\n第二行", html: "<b>x</b>", data: #"{"a":1}"#,
-                                      level: "active", group: "g", url: "https://x.test/a", copy: "c", icon: "bell", collapseID: "dep", date: 10))
+                                      level: "active", group: "g", url: "https://x.test/a", copy: "c", icon: "bell", open: "url",
+                                      image: "https://x.test/i.png", parseMode: "Markdown", silent: true, collapseID: "dep", date: 10))
         try store.apply(QueuedMessage(id: 2, botID: "bot2", body: "plain", date: 20))
         let data = try MessageArchive.encode(try store.exportMessages())
         let lines = String(decoding: data, as: UTF8.self).split(separator: "\n")
@@ -93,6 +94,14 @@ import Testing
         #expect(back.invalid == 0)
         #expect(back.messages.count == 2)
         #expect(back.messages[0].collapseID == "dep" && back.messages[0].body == "完成 \"ok\"\n第二行")
+        let m = back.messages[0]
+        #expect(m.open == "url" && m.image == "https://x.test/i.png" && m.parseMode == "Markdown" && m.silent)
+        #expect(back.messages[1].silent == false && back.messages[1].open == "")
+        // Importing keeps them.
+        let target = try tempStore()
+        _ = try target.importMessages(back.messages)
+        let kept = try #require(try target.message(id: 1))
+        #expect(kept.open == "url" && kept.image == "https://x.test/i.png" && kept.parseMode == "Markdown" && kept.silent)
     }
 
     @Test func badLinesAreCounted() {

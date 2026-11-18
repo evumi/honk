@@ -33,8 +33,10 @@ object MessageArchive {
             // Empty fields are left out, as the gateway does.
             for ((k, v) in listOf(
                 "body" to m.body, "copy" to m.copy, "data" to m.data, "group" to m.group, "html" to m.html, "icon" to m.icon,
-                "id" to m.collapseId, "level" to m.level, "title" to m.title, "url" to m.url,
+                "id" to m.collapseId, "image" to m.image, "level" to m.level, "open" to m.open, "parse_mode" to m.parseMode,
+                "title" to m.title, "url" to m.url,
             )) if (v.isNotEmpty()) fields[k] = JsonPrimitive(v)
+            if (m.silent) fields["silent"] = JsonPrimitive(true)
             append(JsonObject(fields).toString()).append('\n')
         }
     }

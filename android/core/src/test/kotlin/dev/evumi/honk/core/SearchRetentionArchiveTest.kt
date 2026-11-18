@@ -84,7 +84,8 @@ class SearchRetentionArchiveTest {
         store.apply(
             QueuedMessage(
                 1, "b1", title = "部署", body = "完成 \"ok\"\n第二行", html = "<b>x</b>", data = """{"a":1}""", level = "active",
-                group = "g", url = "https://x.test/a", copy = "c", icon = "bell", collapseId = "dep", date = 10,
+                group = "g", url = "https://x.test/a", copy = "c", icon = "bell", open = "url", image = "https://x.test/i.png",
+                parseMode = "Markdown", silent = true, collapseId = "dep", date = 10,
             ),
         )
         store.apply(QueuedMessage(2, "b2", body = "plain", date = 20))
@@ -99,6 +100,14 @@ class SearchRetentionArchiveTest {
         assertEquals(2, back.messages.size)
         assertEquals("dep", back.messages[0].collapseId)
         assertEquals("完成 \"ok\"\n第二行", back.messages[0].body)
+        val m = back.messages[0]
+        assertTrue(m.open == "url" && m.image == "https://x.test/i.png" && m.parseMode == "Markdown" && m.silent)
+        assertTrue(!back.messages[1].silent && back.messages[1].open == "")
+        // Importing keeps them.
+        val target = tempStore()
+        target.importMessages(back.messages)
+        val kept = target.message(1)!!
+        assertTrue(kept.open == "url" && kept.image == "https://x.test/i.png" && kept.parseMode == "Markdown" && kept.silent)
     }
 
     @Test fun badLinesAreCounted() {

@@ -30,6 +30,10 @@ public enum MessageArchive {
         var url: String?
         var copy: String?
         var icon: String?
+        var open: String?
+        var image: String?
+        var parse_mode: String?
+        var silent: Bool?
         var id: String?
         var date: Int64
     }
@@ -44,7 +48,8 @@ public enum MessageArchive {
         for m in messages {
             let line = Line(message_id: m.id, bot_id: m.botID, title: opt(m.title), body: opt(m.body), html: opt(m.html),
                             data: opt(m.data), level: opt(m.level), group: opt(m.group), url: opt(m.url), copy: opt(m.copy),
-                            icon: opt(m.icon), id: opt(m.collapseID), date: m.date)
+                            icon: opt(m.icon), open: opt(m.open), image: opt(m.image), parse_mode: opt(m.parseMode),
+                            silent: m.silent ? true : nil, id: opt(m.collapseID), date: m.date)
             out.append(try encoder.encode(line))
             out.append(0x0A)
         }
