@@ -29,7 +29,9 @@ public struct BannerText: Equatable, Sendable {
             return BannerText(botName: name, title: pushSubtitle, body: pushBody.isEmpty ? fallback : pushBody)
         }
         let title = message.title.isEmpty ? pushSubtitle : message.title
-        let body = [message.body, pushBody].first { !$0.isEmpty } ?? fallback
+        // A Markdown body shows without its marks, as the gateway strips them in a push with text.
+        let text = message.parseMode == "Markdown" ? MarkdownText.strip(message.body) : message.body
+        let body = [text, pushBody].first { !$0.isEmpty } ?? fallback
         return BannerText(botName: name, title: title, body: body)
     }
 }

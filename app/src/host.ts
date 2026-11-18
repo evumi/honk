@@ -34,6 +34,14 @@ export interface Message {
   url: string;
   copy: string;
   icon: string;
+  /** `url`: tapping the notification opens `url` instead of the chat. */
+  open: string;
+  /** An https image: in the notification and above the bubble's text. */
+  image: string;
+  /** `Markdown` when `body` is Markdown (the subset in `markup.ts`). */
+  parseMode: string;
+  /** Sent with `silent`: stored and counted, no notification. */
+  silent: boolean;
   collapseId: string;
   /** Unix milliseconds. */
   date: number;

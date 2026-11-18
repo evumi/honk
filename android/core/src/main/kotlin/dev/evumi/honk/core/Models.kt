@@ -60,6 +60,14 @@ data class QueuedMessage(
     val url: String = "",
     val copy: String = "",
     val icon: String = "",
+    /** `url`: tapping the notification opens [url] instead of the chat. */
+    val open: String = "",
+    /** An https image for the notification and the bubble. */
+    val image: String = "",
+    /** `Markdown` when [body] is Markdown. */
+    @SerialName("parse_mode") val parseMode: String = "",
+    /** Stored and counted, but with no banner. */
+    val silent: Boolean = false,
     /** The sender's replaceable id (`id` in the bot API). */
     @SerialName("id") val collapseId: String = "",
     /** Unix milliseconds. */
@@ -95,6 +103,10 @@ data class StoredMessage(
     val url: String,
     val copy: String,
     val icon: String,
+    val open: String,
+    val image: String,
+    val parseMode: String,
+    val silent: Boolean,
     val collapseId: String,
     val date: Long,
     val read: Boolean,
@@ -148,6 +160,8 @@ data class PushInfo(
     val body: String = "",
     val group: String = "",
     val level: String = "",
+    /** A message sent with `silent`: store it, show no notification. */
+    val silent: Boolean = false,
 ) {
     companion object {
         fun parse(data: Map<String, String>): PushInfo? {
@@ -165,6 +179,7 @@ data class PushInfo(
                 body = data["body"].orEmpty(),
                 group = data["group"].orEmpty(),
                 level = data["level"].orEmpty(),
+                silent = data["silent"] == "1",
             )
         }
     }

@@ -90,7 +90,7 @@ By default a relayed push carries **no content** (`HONK_PUSH_CONTENT=none`): no 
 Protocol (Telegram's `{"ok":…}` envelope):
 
 - `POST /v1/relay/gateways` registers a gateway without any account and returns `relay_id` and `relay_key` once; the gateway keeps them in its `meta` table. Limited per client IP like device registration.
-- `POST /v1/relay/push` with `Authorization: Bearer <relay_key>` and JSON `platform`, `token`, `kind`, `msg_id`, `target_id`, `bot_id`, `level`, `collapse_key` (and `bot_name`, `title`, `body`, `group` for `full`). Body at most 8 KB.
+- `POST /v1/relay/push` with `Authorization: Bearer <relay_key>` and JSON `platform`, `token`, `kind`, `msg_id`, `target_id`, `bot_id`, `level`, `collapse_key`, `silent` (a silent message) and `ttl` (seconds the push may wait for an offline device) when set (and `bot_name`, `title`, `body`, `group` for `full`). Body at most 8 KB.
 - Answers: 200 sent; 410 the token is gone (the gateway marks it, as for a direct push); 429 with `parameters.retry_after` (retried by the push queue); 401 unknown or blocked key (not retried; an unknown key makes the gateway register again, at most once an hour, a blocked one does not); 503 the relay has no credentials for the platform (not retried); 5xx and network errors are retried.
 
 Serving a relay: set `HONK_RELAY_SERVE=true` next to your own credentials. It sends through its direct credentials only and never forwards to another relay. Each relayed gateway and each push token is rate limited; a gateway that sends over 100 dead tokens in an hour, more than half of its pushes, is slowed down and logged, and a relay can be blocked with `UPDATE relays SET blocked = 1 WHERE id = '…'`. `/v1/info` reports `features: ["relay"]`, and every gateway reports `push: {"ios","android"}` as `direct`, `relay` or `off`; the app's Gateway page shows it when you test a gateway.
@@ -99,7 +99,17 @@ Serving a relay: set `HONK_RELAY_SERVE=true` next to your own credentials. It se
 
 `/bot<token>/<method>`, parameters in the query string, a form or JSON. Responses use Telegram's envelope: `{"ok":true,"result":…}` or `{"ok":false,"error_code":400,"description":"…"}`.
 
-- `sendMessage`: `body` (required, 4096 characters; the banner text and the fallback for clients without cards), `title`, `html` (card: 32 KB raw, 4 KB after zlib), `data` (1 KB, fills `{{key}}` placeholders), `level` (`passive` \| `active` \| `timeSensitive`), `group`, `id` (a later message with the same id replaces this one), `url`, `copy`, `icon` (https).
+- `sendMessage`: `body` (required, 4096 characters; the banner text and the fallback for clients without cards), `title`, `html` (card: 32 KB raw, 4 KB after zlib), `data` (1 KB, fills `{{key}}` placeholders), `level` (`passive` \| `active` \| `timeSensitive`), `group`, `id` (a later message with the same id replaces this one), `url`, `copy`, `icon` (https), `open`, `image`, `ttl`, `silent`, `parse_mode`:
+
+  | Parameter | Behaviour |
+  | --- | --- |
+  | `open` | `chat` (default) or `url`: with `url`, tapping the notification opens the message's `url` instead of the chat (needs `url`) |
+  | `image` | https URL, up to 2048 characters: attached to the notification and shown above the text in the chat. The device downloads it (5 MB, 10 s) |
+  | `ttl` | seconds, 60 up to `HONK_MESSAGE_TTL`: how long the message stays in the queue; also the APNs `apns-expiration` and the FCM `ttl` |
+  | `silent` | `true`: no banner and no notification; the message goes to the chat and the unread count and badge, through a silent push |
+  | `parse_mode` | `Markdown`: the body is rendered as Markdown (`**bold**`, `*italic*`, `` `code` ``, fenced code blocks, `[text](https://…)` links, `-` and `1.` lists); the banner shows the text without the marks |
+
+  Without `parse_mode`, `https://` links in the body can be tapped. Notifications have a "Copy" button when the message has `copy`, an "Open link" button when it has `url`, and always "Mark as read".
 - `sendMessage` also takes `dry_run` (`true`): validate only. Nothing is queued or pushed; the result is `{"dry_run":true,"html":<cleaned card>,"input_size","raw_size","compressed_size","removed":[…]}` with the sizes of the cleaned card (limits 32768 and 4096) and what the whitelist removed (`"onclick on <div>"`, `"<iframe>"`). It counts against the rate limit.
 - `editMessageData`: `message_id` or `id`, and `data`. Updates the card silently.
 - `deleteMessage`: `message_id` or `id`. Removes the message and its notification.

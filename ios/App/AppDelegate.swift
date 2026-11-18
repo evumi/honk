@@ -12,6 +12,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationC
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         UNUserNotificationCenter.current().delegate = self
         BackgroundRefresh.register()
+        UNUserNotificationCenter.current().setNotificationCategories(Self.notificationCategories())
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { _, _ in
             DispatchQueue.main.async { application.registerForRemoteNotifications() }
         }
@@ -45,7 +46,19 @@ final class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationC
         Task { await HonkService.shared.pushTokenUnavailable(error) }
     }
 
-    // MARK: background pushes (edits and deletes)
+    /// The four categories of `NotificationPlan` with their buttons.
+    private static func notificationCategories() -> Set<UNNotificationCategory> {
+        let chinese = Locale.preferredLanguages.first?.hasPrefix("zh") == true
+        return Set(NotificationPlan.categories.map { category in
+            let actions = category.actions.map { a in
+                UNNotificationAction(identifier: a.rawValue, title: NotificationPlan.title(a, chinese: chinese),
+                                     options: a == .openURL ? [.foreground] : [])
+            }
+            return UNNotificationCategory(identifier: category.id, actions: actions, intentIdentifiers: [], options: [])
+        })
+    }
+
+    // MARK: background pushes (edits, deletes and silent messages)
 
     func application(_ application: UIApplication, didReceiveRemoteNotification userInfo: [AnyHashable: Any],
                      fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
@@ -54,14 +67,10 @@ final class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationC
             return
         }
         Task {
-            let ok: Bool
-            if info.kind == .message {
-                // The extension already stored it; just refresh what is on screen.
-                HonkService.shared.changed()
-                ok = true
-            } else {
-                ok = await HonkService.shared.handleSilentPush(info)
-            }
+            // A silent message has no extension run: apply it here (a message the
+            // extension already stored applies again without change). It posts
+            // no notification, but counts in the badge.
+            let ok = await HonkService.shared.handleSilentPush(info)
             completionHandler(ok ? .newData : .failed)
         }
     }
@@ -94,14 +103,35 @@ final class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationC
         defer { completionHandler() }
         guard let info = PushInfo(userInfo: response.notification.request.content.userInfo) else { return }
         Task { @MainActor in
-            // A tap opens the chat; the message's url is one tap away in there.
+            let service = HonkService.shared
             // A notification from before the bot got its short id names the old one.
-            let botID = HonkService.shared.store.currentBotID(info.botID)
-            if let open = self.openChat {
-                open(botID)
+            let botID = service.store.currentBotID(info.botID)
+            let message = (try? service.store.message(id: info.messageID)) ?? nil
+            let outcome: NotificationPlan.Outcome
+            if let action = NotificationPlan.Action(rawValue: response.actionIdentifier) {
+                outcome = NotificationPlan.outcome(of: action, on: message, botID: botID)
+            } else if response.actionIdentifier == UNNotificationDefaultActionIdentifier {
+                switch NotificationPlan.tap(message, botID: botID) {
+                case let .url(url): outcome = .open(url)
+                case let .chat(id): outcome = .nothing; self.show(chat: id)
+                }
             } else {
-                self.pendingOpen = botID
+                outcome = .nothing
             }
+            switch outcome {
+            case let .copy(text): UIPasteboard.general.string = text
+            case let .open(url): UIApplication.shared.open(url)
+            case let .markRead(id): service.markRead(botID: id)
+            case .nothing: break
+            }
+        }
+    }
+
+    private func show(chat botID: String) {
+        if let open = openChat {
+            open(botID)
+        } else {
+            pendingOpen = botID
         }
     }
 

@@ -77,8 +77,11 @@ func fcmMessage(n Notification) map[string]any {
 		}
 	} else {
 		priority = "NORMAL"
+		if n.Quiet {
+			data["silent"] = "1"
+		}
 	}
-	android := map[string]any{"priority": priority, "ttl": "86400s"}
+	android := map[string]any{"priority": priority, "ttl": strconv.FormatInt(int64(n.pushTTL()/time.Second), 10) + "s"}
 	if k := n.key(); k != "" && !n.Silent() {
 		android["collapse_key"] = k
 	}

@@ -110,7 +110,7 @@ const bots: Bot[] = [
 let nextId = 100;
 const msg = (botId: string, minutesAgo: number, m: Partial<Message>): Message => ({
   id: nextId++, botId, title: "", body: "", html: "", data: "", level: "active", group: "", url: "", copy: "",
-  icon: "", collapseId: "", date: now - minutesAgo * 6e4, read: false, ...m,
+  icon: "", open: "", image: "", parseMode: "", silent: false, collapseId: "", date: now - minutesAgo * 6e4, read: false, ...m,
 });
 
 const messages: Message[] = [
@@ -126,6 +126,18 @@ const messages: Message[] = [
   }),
   msg("Bx7kQ2mT", 25, { title: L("每日部署汇总", "Daily deploy summary"), body: L("今天共 6 次部署，5 次成功，1 次回滚。", "6 deploys today: 5 succeeded, 1 rolled back.") }),
   // Added after the first cards, so the ids above stay as tests know them.
+  // parse_mode=Markdown, an https link in a plain body, and an image.
+  msg("Kc3vH8sL", 20, {
+    title: L("main #483 构建完成", "main #483 built"), parseMode: "Markdown", url: "https://example.com/builds/483", open: "url",
+    body: L(
+      "**128 个测试通过**，耗时 *3 分 12 秒*\n\n- 产物：`app-release.apk`\n- 日志：[查看详情](https://example.com/builds/483)\n\n```\nmake test\n```",
+      "**128 tests passed** in *3m 12s*\n\n- Artifact: `app-release.apk`\n- Log: [details](https://example.com/builds/483)\n\n```\nmake test\n```",
+    ),
+  }),
+  msg("aR4nW9pZ", 15, {
+    title: L("hk-edge-02 已恢复", "hk-edge-02 recovered"), image: "https://picsum.photos/seed/honk/640/360",
+    body: L("负载回落到 1.2，详见 https://status.example.com/hk-edge-02。", "Load back to 1.2, see https://status.example.com/hk-edge-02."),
+  }),
   msg("Kc3vH8sL", 50, {
     title: L("main #483 失败", "main #483 failed"), body: L("2 个测试失败，点开看是哪些。", "2 tests failed; open to see which."), html: ciCard,
     data: JSON.stringify({

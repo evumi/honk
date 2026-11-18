@@ -106,7 +106,12 @@ type relayPushRequest struct {
 	Title       string `json:"title"`
 	Body        string `json:"body"`
 	Group       string `json:"group"`
+	Silent      bool   `json:"silent"`
+	TTL         int    `json:"ttl"` // seconds; 0 is the default
 }
+
+// maxRelayTTL is FCM's longest ttl, four weeks, in seconds.
+const maxRelayTTL = 28 * 24 * 3600
 
 func (q relayPushRequest) check() string {
 	switch {
@@ -124,6 +129,10 @@ func (q relayPushRequest) check() string {
 		return "bot_id is not a bot id"
 	case len(q.CollapseKey) > 64:
 		return "collapse_key is longer than 64 bytes"
+	case q.TTL < 0 || q.TTL > maxRelayTTL:
+		return "ttl must be between 0 and 2419200 seconds"
+	case q.Silent && q.Kind != store.KindMessage:
+		return "silent only applies to a message"
 	case len(q.BotName) > 256 || len(q.Title) > 1024 || len(q.Body) > 8192 || len(q.Group) > 256:
 		return "banner text is too long"
 	}
@@ -207,7 +216,11 @@ func (s *Server) relayPush(w http.ResponseWriter, r *http.Request) {
 		BotID: q.BotID, Level: q.Level, CollapseKey: q.CollapseKey,
 		BotName: q.BotName, Title: q.Title, Body: q.Body, Group: q.Group,
 		// A push that arrived without banner text is sent without it.
-		Bare: q.BotName == "" && q.Title == "" && q.Body == "",
+		Bare:  q.BotName == "" && q.Title == "" && q.Body == "",
+		Quiet: q.Silent,
+	}
+	if q.TTL > 0 {
+		n.Expires = time.Now().Add(time.Duration(q.TTL) * time.Second)
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()

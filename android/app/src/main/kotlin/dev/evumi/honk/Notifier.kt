@@ -14,6 +14,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Typeface
+import android.net.Uri
 import android.os.Build
 import android.text.SpannableStringBuilder
 import android.text.Spanned
@@ -29,6 +30,7 @@ import dev.evumi.honk.core.Avatar
 import dev.evumi.honk.core.Banner
 import dev.evumi.honk.core.Bot
 import dev.evumi.honk.core.LocalAvatars
+import dev.evumi.honk.core.NotificationPlan
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
@@ -58,6 +60,10 @@ class Notifier(private val context: Context) {
         val level: String,
         val date: Long,
         val muted: Boolean,
+        val url: String = "",
+        val copy: String = "",
+        val open: String = "",
+        val image: String = "",
     )
 
     private val manager = NotificationManagerCompat.from(context)
@@ -130,7 +136,8 @@ class Notifier(private val context: Context) {
     fun show(c: Content) {
         if (!canPost()) return
         ensureChannel(c.botId, c.botName)
-        val icon = avatarBitmap(Avatar.parse(c.avatar), c.botName)?.let(IconCompat::createWithBitmap)
+        val avatar = avatarBitmap(Avatar.parse(c.avatar), c.botName)
+        val icon = avatar?.let(IconCompat::createWithBitmap)
         val bot = Person.Builder()
             .setName(c.botName)
             .setKey(channelId(c.botId))
@@ -145,8 +152,14 @@ class Notifier(private val context: Context) {
             }
             append(c.body)
         }
-        val style = NotificationCompat.MessagingStyle(me)
-            .addMessage(NotificationCompat.MessagingStyle.Message(text, c.date, bot))
+        // With a picture the notification is a BigPictureStyle (the avatar becomes the large icon);
+        // without, a MessagingStyle conversation.
+        val picture = NotificationPlan.imageUrl(c.image)?.let { picture(it) }
+        val style: NotificationCompat.Style = if (picture != null) {
+            NotificationCompat.BigPictureStyle().bigPicture(picture).bigLargeIcon(null as Bitmap?).setSummaryText(text)
+        } else {
+            NotificationCompat.MessagingStyle(me).addMessage(NotificationCompat.MessagingStyle.Message(text, c.date, bot))
+        }
         pushShortcut(c.botId, c.botName, bot, icon)
 
         // passive and muted bots: no sound or heads-up, like iOS's passive level.
@@ -165,7 +178,11 @@ class Notifier(private val context: Context) {
             .setGroup(if (c.group.isEmpty()) channelId(c.botId) else "${channelId(c.botId)}:${c.group}")
             .setSilent(quiet)
             .setPriority(if (quiet) NotificationCompat.PRIORITY_LOW else NotificationCompat.PRIORITY_HIGH)
-            .setContentIntent(openIntent(c.botId, c.messageId))
+            .setContentIntent(tapIntent(c))
+            .apply {
+                if (picture != null) setLargeIcon(avatar)
+                NotificationPlan.actions(c.copy, c.url).forEach { addAction(action(it, c)) }
+            }
             .build()
         try {
             manager.notify(c.tag, NOTIFICATION_ID, n)
@@ -181,6 +198,45 @@ class Notifier(private val context: Context) {
     /** Removes every notification of the app. */
     fun cancelAll() {
         manager.cancelAll()
+    }
+
+    /** `open=url` opens the link straight from the notification; otherwise the chat. */
+    private fun tapIntent(c: Content): PendingIntent =
+        when (val tap = NotificationPlan.tap(c.open, c.url, c.botId)) {
+            is NotificationPlan.Tap.Url -> viewIntent(tap.url, c.messageId)
+            is NotificationPlan.Tap.Chat -> openIntent(c.botId, c.messageId)
+        }
+
+    // An activity started by the notification itself: from a broadcast receiver Android 12+ would refuse it.
+    private fun viewIntent(url: String, messageId: Long): PendingIntent =
+        PendingIntent.getActivity(
+            context,
+            messageId.toInt() * 4 + 1,
+            Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+
+    private fun action(a: NotificationPlan.Action, c: Content): NotificationCompat.Action {
+        val (label, pending) = when (a) {
+            NotificationPlan.Action.COPY -> context.getString(R.string.action_copy) to receiverIntent(a, c, 2)
+            NotificationPlan.Action.OPEN_URL -> context.getString(R.string.action_open_link) to viewIntent(c.url, c.messageId)
+            NotificationPlan.Action.MARK_READ -> context.getString(R.string.action_mark_read) to receiverIntent(a, c, 3)
+        }
+        return NotificationCompat.Action.Builder(0, label, pending).build()
+    }
+
+    private fun receiverIntent(a: NotificationPlan.Action, c: Content, slot: Int): PendingIntent {
+        val intent = Intent(context, NotificationActionReceiver::class.java)
+            .setAction(a.id)
+            .putExtra(NotificationActionReceiver.EXTRA_BOT_ID, c.botId)
+            .putExtra(NotificationActionReceiver.EXTRA_MESSAGE_ID, c.messageId)
+            .putExtra(NotificationActionReceiver.EXTRA_TAG, c.tag)
+        return PendingIntent.getBroadcast(
+            context,
+            c.messageId.toInt() * 4 + slot,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
     }
 
     private fun openIntent(botId: String, messageId: Long): PendingIntent {
@@ -241,26 +297,35 @@ class Notifier(private val context: Context) {
         return bmp
     }
 
-    private fun image(url: String): Bitmap? {
+    /** The message's picture for the notification: https, 5 MB at most, 10 s timeout, scaled down to 1024 px. */
+    private fun picture(url: String): Bitmap? =
+        image(url, NotificationPlan.MAX_IMAGE_BYTES, NotificationPlan.IMAGE_TIMEOUT_MS, 1024)
+
+    private fun image(url: String, maxBytes: Int = MAX_IMAGE, timeoutMs: Int = 5000, maxSide: Int = 0): Bitmap? {
         val dir = File(context.cacheDir, "avatars").apply { mkdirs() }
         val name = MessageDigest.getInstance("SHA-256").digest(url.toByteArray()).joinToString("") { "%02x".format(it) }
         val file = File(dir, name)
         if (!file.exists()) {
             val bytes = runCatching {
                 val conn = URL(url).openConnection() as HttpURLConnection
-                conn.connectTimeout = 5000
-                conn.readTimeout = 5000
+                conn.connectTimeout = timeoutMs
+                conn.readTimeout = timeoutMs
                 try {
-                    if (conn.responseCode != 200 || conn.contentLengthLong > MAX_IMAGE) return null
-                    conn.inputStream.use { it.readNBytesCompat(MAX_IMAGE + 1) }
+                    if (conn.responseCode != 200 || conn.contentLengthLong > maxBytes) return null
+                    conn.inputStream.use { it.readNBytesCompat(maxBytes + 1) }
                 } finally {
                     conn.disconnect()
                 }
             }.getOrNull() ?: return null
-            if (bytes.size > MAX_IMAGE) return null
+            if (bytes.size > maxBytes) return null
             file.writeBytes(bytes)
         }
-        return BitmapFactory.decodeFile(file.path)
+        if (maxSide <= 0) return BitmapFactory.decodeFile(file.path)
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(file.path, bounds)
+        var sample = 1
+        while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= maxSide) sample *= 2
+        return BitmapFactory.decodeFile(file.path, BitmapFactory.Options().apply { inSampleSize = sample })
     }
 
     private fun circle(src: Bitmap, size: Int): Bitmap {
