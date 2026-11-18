@@ -76,3 +76,13 @@ export function curlExample(gateway: string, token: string): string {
 export function badgeText(n: number): string {
   return n > 99 ? "99+" : String(n);
 }
+
+/**
+ * A device joined the group: a successfully fetched list holds an id a successfully fetched baseline
+ * lacks. A failed fetch (null) never counts, so an unknown baseline cannot make this phone look new.
+ */
+export function deviceJoined(baseline: { id: string }[] | null, list: { id: string }[] | null): boolean {
+  if (!baseline || !list) return false;
+  const known = new Set(baseline.map((d) => d.id));
+  return list.some((d) => !known.has(d.id));
+}
