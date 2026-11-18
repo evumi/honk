@@ -1,7 +1,7 @@
 {
   "about": "Device groups: honk.devices.list/remove (removing this device's own id leaves the group; honk.device.delete deletes the whole group's data), honk.link.create/claim (pairing). The contract between the nsh app (src/host.ts, src/demo.ts) and the native hosts (ios/App/NshBridge.swift with ios/HonkKit HostContract.swift; android/app NshBridge.kt with android/core HostContract.kt). Every host call has sample arguments and results, every event a sample payload. `optional` lists keys that may be absent in arguments or results. `demo: false` marks calls the in-memory demo does not implement. Tests: src/host.contract.test.ts, HonkKit HostContractTests, android/core HostContractTest. Change this file, host.ts and both bridges together.",
   "samples": {
-    "bot": { "id": "aZ3kQ9xT", "name": "Berth 部署", "avatar": "preset:box:#1c1c1e", "defaultLevel": "active", "createdAt": 1700000000000 },
+    "bot": { "id": "aZ3kQ9xT", "name": "Berth 部署", "avatar": "preset:box:#1c1c1e", "defaultLevel": "active", "createdAt": 1700000000000, "encrypted": false },
     "message": {
       "id": 7, "botId": "aZ3kQ9xT", "title": "部署成功", "body": "sluice 已上线", "html": "<p>{{status}}</p>", "data": "{\"status\":\"ok\"}",
       "level": "active", "group": "prod", "url": "https://example.com", "copy": "dep_1", "icon": "", "open": "url", "image": "https://example.com/i.png", "parseMode": "Markdown", "silent": false, "collapseId": "dep", "allowQueries": false, "date": 1700000001000, "read": false
@@ -36,7 +36,7 @@
           "args": null,
           "result": [
             {
-              "bot": { "id": "aZ3kQ9xT", "name": "Berth 部署", "avatar": "preset:box:#1c1c1e", "defaultLevel": "active", "createdAt": 1700000000000 },
+              "bot": { "id": "aZ3kQ9xT", "name": "Berth 部署", "avatar": "preset:box:#1c1c1e", "defaultLevel": "active", "createdAt": 1700000000000, "encrypted": false },
               "muted": false, "pinned": true, "unread": 2,
               "last": {
                 "id": 7, "botId": "aZ3kQ9xT", "title": "部署成功", "body": "sluice 已上线", "html": "<p>{{status}}</p>", "data": "{\"status\":\"ok\"}",
@@ -44,7 +44,7 @@
               }
             },
             {
-              "bot": { "id": "bQ7mN2pR", "name": "空会话", "avatar": "", "defaultLevel": "passive", "createdAt": 1700000002000 },
+              "bot": { "id": "bQ7mN2pR", "name": "空会话", "avatar": "", "defaultLevel": "passive", "createdAt": 1700000002000, "encrypted": true },
               "muted": true, "pinned": false, "unread": 0, "last": null
             }
           ]
@@ -104,7 +104,7 @@
         {
           "args": { "name": "Berth 部署", "avatar": "preset:box:#1c1c1e", "defaultLevel": "active" },
           "result": {
-            "bot": { "id": "aZ3kQ9xT", "name": "Berth 部署", "avatar": "preset:box:#1c1c1e", "defaultLevel": "active", "createdAt": 1700000000000 },
+            "bot": { "id": "aZ3kQ9xT", "name": "Berth 部署", "avatar": "preset:box:#1c1c1e", "defaultLevel": "active", "createdAt": 1700000000000, "encrypted": false },
             "token": "aZ3kQ9xT:abcdefghijklmnopqrstuvwxyz012345"
           }
         }
@@ -115,11 +115,11 @@
       "samples": [
         {
           "args": { "botId": "aZ3kQ9xT", "name": "新名字", "avatar": "preset:bell:#c2410c", "defaultLevel": "timeSensitive" },
-          "result": { "id": "aZ3kQ9xT", "name": "新名字", "avatar": "preset:bell:#c2410c", "defaultLevel": "timeSensitive", "createdAt": 1700000000000 }
+          "result": { "id": "aZ3kQ9xT", "name": "新名字", "avatar": "preset:bell:#c2410c", "defaultLevel": "timeSensitive", "createdAt": 1700000000000, "encrypted": false }
         },
         {
           "args": { "botId": "aZ3kQ9xT", "name": "只改名" },
-          "result": { "id": "aZ3kQ9xT", "name": "只改名", "avatar": "preset:box:#1c1c1e", "defaultLevel": "active", "createdAt": 1700000000000 }
+          "result": { "id": "aZ3kQ9xT", "name": "只改名", "avatar": "preset:box:#1c1c1e", "defaultLevel": "active", "createdAt": 1700000000000, "encrypted": false }
         }
       ]
     },

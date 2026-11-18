@@ -101,10 +101,10 @@ const trendCard = `<div style="padding:4px 0">
 </div>`;
 
 const bots: Bot[] = [
-  { id: "Bx7kQ2mT", name: L("Berth 部署", "Berth Deploys"), avatar: "preset:box:#1c1c1e", defaultLevel: "active", createdAt: now - 864e5 * 5 },
-  { id: "aR4nW9pZ", name: L("服务器告警", "Server Alerts"), avatar: "preset:alert:#c2410c", defaultLevel: "timeSensitive", createdAt: now - 864e5 * 4 },
-  { id: "Kc3vH8sL", name: L("CI 构建", "CI Builds"), avatar: "preset:check:#2f6f3e", defaultLevel: "active", createdAt: now - 864e5 * 3 },
-  { id: "Ev5tR2nD", name: L("Evumi 报告", "Evumi Reports"), avatar: "preset:chart:#6366f1", defaultLevel: "active", createdAt: now - 864e5 * 2 },
+  { id: "Bx7kQ2mT", name: L("Berth 部署", "Berth Deploys"), avatar: "preset:box:#1c1c1e", defaultLevel: "active", createdAt: now - 864e5 * 5, encrypted: false },
+  { id: "aR4nW9pZ", name: L("服务器告警", "Server Alerts"), avatar: "preset:alert:#c2410c", defaultLevel: "timeSensitive", createdAt: now - 864e5 * 4, encrypted: false },
+  { id: "Kc3vH8sL", name: L("CI 构建", "CI Builds"), avatar: "preset:check:#2f6f3e", defaultLevel: "active", createdAt: now - 864e5 * 3, encrypted: false },
+  { id: "Ev5tR2nD", name: L("Evumi 报告", "Evumi Reports"), avatar: "preset:chart:#6366f1", defaultLevel: "active", createdAt: now - 864e5 * 2, encrypted: false },
 ];
 
 let nextId = 100;
@@ -337,7 +337,7 @@ export async function demo<T>(name: string, args: unknown): Promise<T> {
       case "honk.avatar.image":
         return localAvatars.get(a.avatar) ?? null;
       case "honk.bot.create": {
-        const bot: Bot = { id: demoBotId(), name: a.name, avatar: a.avatar, defaultLevel: a.defaultLevel, createdAt: Date.now() };
+        const bot: Bot = { id: demoBotId(), name: a.name, avatar: a.avatar, defaultLevel: a.defaultLevel, createdAt: Date.now(), encrypted: false };
         bots.push(bot);
         const token = demoToken(bot.id);
         tokens.set(bot.id, token);
@@ -358,7 +358,10 @@ export async function demo<T>(name: string, args: unknown): Promise<T> {
       case "honk.bot.encryption.key":
         return keys.get(a.botId) ?? null;
       case "honk.bot.encryption.enable": {
+        // The real hosts refuse when the bot is encrypted at the gateway but its key has not reached this device.
         if (!keys.has(a.botId)) keys.set(a.botId, demoKey());
+        const bot = bots.find((b) => b.id === a.botId);
+        if (bot) bot.encrypted = true;
         return keys.get(a.botId)!;
       }
       case "honk.bot.encryption.resetKey": {
@@ -366,9 +369,12 @@ export async function demo<T>(name: string, args: unknown): Promise<T> {
         keys.set(a.botId, k);
         return k;
       }
-      case "honk.bot.encryption.disable":
+      case "honk.bot.encryption.disable": {
         keys.delete(a.botId);
+        const bot = bots.find((b) => b.id === a.botId);
+        if (bot) bot.encrypted = false;
         return true;
+      }
       case "honk.bot.delete":
         bots.splice(bots.findIndex((b) => b.id === a.botId), 1);
         return true;

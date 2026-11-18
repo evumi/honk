@@ -53,7 +53,7 @@ class KeyRingTest {
         val a = ring()
         val key1 = Seal.generateKey()
         a.keys.save("b1", key1)
-        val wrapped1 = a.wrapped("b1")!!
+        val wrapped1 = a.wrapped("b1", createGroupKey = true)!!
 
         val b = KeyRing(MemoryBotKeys(), MemoryGroupKey(a.group.groupKey()))
         val patched = mutableListOf<String>()
@@ -75,7 +75,7 @@ class KeyRingTest {
         a.keys.save("b1", Seal.generateKey())
         val stranger = ring()
         var patched = 0
-        stranger.reconcile(listOf(bot("b1", a.wrapped("b1")!!))) { _, _ -> patched++ }
+        stranger.reconcile(listOf(bot("b1", a.wrapped("b1", createGroupKey = true)!!))) { _, _ -> patched++ }
         assertNull(stranger.keys.key("b1"))
         assertEquals(0, patched)
     }
@@ -122,12 +122,12 @@ class KeyRingTest {
         val k1 = Seal.generateKey()
         creator.keys.save("b1", k1)
         val bundle = LinkBundle(keys = creator.bundleKeys(listOf("b1")), groupKey = Seal.encode(creator.ensureGroupKey()))
-        val wrapped1 = creator.wrapped("b1")!!
+        val wrapped1 = creator.wrapped("b1", createGroupKey = true)!!
 
         val claimer = ring()
         val k2 = Seal.generateKey()
         claimer.keys.save("b2", k2)
-        val oldWrapped2 = claimer.wrapped("b2")!!
+        val oldWrapped2 = claimer.wrapped("b2", createGroupKey = true)!!
         val oldGroup = claimer.group.groupKey()!!
 
         claimer.adopt(bundle)

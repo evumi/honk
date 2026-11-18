@@ -95,6 +95,9 @@ interface BotKeyStore : BotKeyProvider {
     fun save(botId: String, key: ByteArray)
     fun remove(botId: String)
 
+    /** The ids of the bots that have a key here; used to drop the keys of bots the gateway no longer lists. */
+    fun ids(): List<String> = emptyList()
+
     /** Removes every bot's key (the device moved to another gateway). */
     fun removeAll()
 }
@@ -104,6 +107,7 @@ class MemoryBotKeys(private val map: MutableMap<String, ByteArray> = mutableMapO
     override fun key(botId: String): ByteArray? = synchronized(map) { map[botId] }
     override fun save(botId: String, key: ByteArray) { synchronized(map) { map[botId] = key } }
     override fun remove(botId: String) { synchronized(map) { map.remove(botId) } }
+    override fun ids(): List<String> = synchronized(map) { map.keys.toList() }
     override fun removeAll() { synchronized(map) { map.clear() } }
 }
 
@@ -142,6 +146,31 @@ object ContentLimits {
     /** [text] cut to at most [limit] characters (code points, as the gateway counts runes). */
     fun clip(text: String, limit: Int): String =
         if (text.codePointCount(0, text.length) <= limit) text else text.substring(0, text.offsetByCodePoints(0, limit))
+
+    /**
+     * The message with the limits applied that the gateway checks for plaintext: clipped title, body and copy,
+     * url / icon / image that are http(s) (https for the last two), and a card only when it and its data fit (an
+     * invalid card is dropped; the message stays with its body). The same rules for opened ciphertext and for
+     * imported archives.
+     */
+    fun sanitize(m: QueuedMessage): QueuedMessage {
+        val dataFits = m.data.toByteArray().size <= DATA
+        val (cardHtml, cardData) = when {
+            m.html.isEmpty() -> "" to (if (dataFits) m.data else "")
+            dataFits && cardFits(m.html) -> m.html to m.data
+            else -> "" to ""
+        }
+        return m.copy(
+            title = clip(m.title, TITLE),
+            body = clip(m.body, BODY),
+            copy = clip(m.copy, COPY),
+            url = link(m.url, httpsOnly = false),
+            icon = link(m.icon, httpsOnly = true),
+            image = link(m.image, httpsOnly = true),
+            html = cardHtml,
+            data = cardData,
+        )
+    }
 
     /** [v] when it is an http(s) URL with a host (https only when [httpsOnly]), else "". */
     fun link(v: String, httpsOnly: Boolean): String {
@@ -194,25 +223,18 @@ class MessageOpener(private val keys: BotKeyProvider, private val placeholder: S
                 if (data.toByteArray().size > ContentLimits.DATA) null else m.copy(ciphertext = "", data = data)
             }
             else -> {
-                val html = text(json, "html")
-                val data = text(json, "data")
-                val dataFits = data.toByteArray().size <= ContentLimits.DATA
-                // An invalid card is dropped; the message stays with its body.
-                val (cardHtml, cardData) = when {
-                    html.isEmpty() -> "" to (if (dataFits) data else "")
-                    dataFits && ContentLimits.cardFits(html) -> html to data
-                    else -> "" to ""
-                }
-                m.copy(
-                    ciphertext = "",
-                    title = ContentLimits.clip(text(json, "title"), ContentLimits.TITLE),
-                    body = ContentLimits.clip(text(json, "body"), ContentLimits.BODY),
-                    copy = ContentLimits.clip(text(json, "copy"), ContentLimits.COPY),
-                    url = ContentLimits.link(text(json, "url"), httpsOnly = false),
-                    icon = ContentLimits.link(text(json, "icon"), httpsOnly = true),
-                    image = ContentLimits.link(text(json, "image"), httpsOnly = true),
-                    html = cardHtml,
-                    data = cardData,
+                ContentLimits.sanitize(
+                    m.copy(
+                        ciphertext = "",
+                        title = text(json, "title"),
+                        body = text(json, "body"),
+                        copy = text(json, "copy"),
+                        url = text(json, "url"),
+                        icon = text(json, "icon"),
+                        image = text(json, "image"),
+                        html = text(json, "html"),
+                        data = text(json, "data"),
+                    ),
                 )
             }
         }
@@ -238,7 +260,7 @@ class MessageOpener(private val keys: BotKeyProvider, private val placeholder: S
 
     private fun failed(m: QueuedMessage) = QueuedMessage(
         id = m.id, botId = m.botId, kind = QueuedMessage.Kind.MESSAGE, body = placeholder, level = m.level, group = m.group,
-        silent = m.silent, collapseId = m.collapseId, date = m.date,
+        silent = m.silent, collapseId = m.collapseId, date = m.date, placeholder = true,
     )
 
     /** A string field: a JSON string as it is, any other value as its JSON text (`data` may be an object). */
@@ -289,6 +311,12 @@ class MemoryGroupKey(@Volatile private var key: ByteArray? = null) : GroupKeySto
 }
 
 /**
+ * The gateway already has encryption on for the bot, but its key has not reached this device (a phone paired a
+ * moment ago). Making a new key here would replace the group's, so the device waits for another one to share it.
+ */
+class WaitingForKeyException : Exception("等待其他设备同步密钥：这个 Bot 已开启加密，密钥还没到这台设备。")
+
+/**
  * The bot keys and the group key of this device, and how they agree with the
  * wrapped keys on the gateway.
  */
@@ -297,8 +325,48 @@ class KeyRing(val keys: BotKeyStore, val group: GroupKeyStore) {
     @Synchronized
     fun ensureGroupKey(): ByteArray = group.groupKey() ?: Seal.generateKey().also(group::save)
 
-    /** [botId]'s key wrapped with the group key, for `PATCH /v1/bots/:id`; null without a local key. */
-    fun wrapped(botId: String): String? = keys.key(botId)?.let { KeyWrap.wrap(it, ensureGroupKey(), botId) }
+    /**
+     * [botId]'s key wrapped with the group key, for `PATCH /v1/bots/:id`; null without a local key. It uses the
+     * existing group key and makes one only when [createGroupKey] is set (where a patch is about to be sent), so a
+     * no-op reconcile (the notification extension) never mints a key as a side effect.
+     */
+    @Synchronized
+    fun wrapped(botId: String, createGroupKey: Boolean = false): String? {
+        val k = keys.key(botId) ?: return null
+        val g = (if (createGroupKey) ensureGroupKey() else group.groupKey()) ?: return null
+        return KeyWrap.wrap(k, g, botId)
+    }
+
+    /**
+     * Turns encryption on for [bot] (as the gateway lists it now) and returns its key.
+     *
+     * Off at the gateway: this device's key, else a new one, is wrapped with the group key and sent through [patch]
+     * (which also sets `encrypted`); the key is stored only once that succeeded. On at the gateway: the key is the
+     * group's, so it is taken from the gateway's wrapped one ([reconcile]); with no key to be had this throws
+     * [WaitingForKeyException] instead of making a new one.
+     */
+    fun enable(bot: Bot, patch: (wrapped: String) -> Unit): ByteArray {
+        if (bot.encrypted) {
+            reconcile(listOf(bot)) { _, wrapped -> patch(wrapped) }
+            return keys.key(bot.id) ?: throw WaitingForKeyException()
+        }
+        val k = keys.key(bot.id) ?: Seal.generateKey()
+        publish(k, bot.id, patch)
+        return k
+    }
+
+    /** Replaces the bot's key with a new one and returns it. The old key stays if [patch] fails. */
+    fun reset(botId: String, patch: (wrapped: String) -> Unit): ByteArray {
+        val k = Seal.generateKey()
+        publish(k, botId, patch)
+        return k
+    }
+
+    /** Wraps [key] with the group key (made now if need be: a patch is about to be sent), sends it, then keeps it. */
+    private fun publish(key: ByteArray, botId: String, patch: (String) -> Unit) {
+        patch(KeyWrap.wrap(key, ensureGroupKey(), botId))
+        keys.save(botId, key)
+    }
 
     /** What a pairing bundle carries: every listed bot's key (base64url). */
     fun bundleKeys(botIds: List<String>): Map<String, String> =
@@ -324,18 +392,25 @@ class KeyRing(val keys: BotKeyStore, val group: GroupKeyStore) {
      * - otherwise nothing: without the group key (pair this phone) or a wrapped
      *   key, the bot's messages show the placeholder.
      *
-     * A failed [patch] is skipped; the next refresh tries again.
+     * A bot the gateway lists as not encrypted loses its local key (another device turned encryption off), so its
+     * plaintext messages are not taken for forgeries.
+     *
+     * A failed [patch] is skipped; the next refresh tries again. With [createGroupKey] off (a push handler that
+     * only wants to adopt keys) a missing group key is not made, so nothing is wrapped and sent.
      */
-    fun reconcile(bots: List<Bot>, patch: (botId: String, wrapped: String) -> Unit) {
+    fun reconcile(bots: List<Bot>, createGroupKey: Boolean = true, patch: (botId: String, wrapped: String) -> Unit) {
         for (bot in bots) {
-            if (!bot.encrypted) continue
+            if (!bot.encrypted) {
+                if (keys.key(bot.id) != null) keys.remove(bot.id)
+                continue
+            }
             val local = keys.key(bot.id)
             val g = group.groupKey()
             val k = if (g != null && bot.keyWrapped.isNotEmpty()) KeyWrap.unwrap(bot.keyWrapped, g, bot.id) else null
             if (k != null) {
                 if (local == null || !local.contentEquals(k)) keys.save(bot.id, k)
             } else {
-                val w = wrapped(bot.id) ?: continue
+                val w = wrapped(bot.id, createGroupKey) ?: continue
                 try {
                     patch(bot.id, w)
                 } catch (e: Exception) {

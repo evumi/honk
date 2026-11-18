@@ -75,9 +75,16 @@ class CardRequests(
                 reply = code(e)
             }
         }
-        val result = answer(key, seq, ok, reply)
-        val out = split(result)?.first ?: result
-        if (!isEmpty(out)) changed(key, out)
+        // The card's host may be gone by now (the activity was destroyed and its executor stopped, so `answer`
+        // throws RejectedExecutionException): this runs on a pool thread with nobody to catch, so drop the
+        // answer rather than crash the process.
+        try {
+            val result = answer(key, seq, ok, reply)
+            val out = split(result)?.first ?: result
+            if (!isEmpty(out)) changed(key, out)
+        } catch (e: Exception) {
+            // Nothing to tell the card any more.
+        }
     }
 
     companion object {

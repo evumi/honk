@@ -20,6 +20,11 @@ export interface Bot {
   avatar: string;
   defaultLevel: Level;
   createdAt: number;
+  /**
+   * The gateway lists the bot as end-to-end encrypted. The key may still be missing on this device (a phone
+   * paired a moment ago): `encryption.key` is null then, and `encryption.enable` refuses to make a new one.
+   */
+  encrypted: boolean;
 }
 
 export interface Message {

@@ -223,9 +223,19 @@ public struct APIClient: Sendable {
         public let messages: [QueuedMessage]
         public let cursor: Int64
         public let hasMore: Bool
+        /// The device must sync again from cursor 0 (after a merge); absent from older gateways.
+        public let reset: Bool
         enum CodingKeys: String, CodingKey {
-            case messages, cursor
+            case messages, cursor, reset
             case hasMore = "has_more"
+        }
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            messages = try c.decodeIfPresent([QueuedMessage].self, forKey: .messages) ?? []
+            cursor = try c.decode(Int64.self, forKey: .cursor)
+            hasMore = try c.decodeIfPresent(Bool.self, forKey: .hasMore) ?? false
+            reset = try c.decodeIfPresent(Bool.self, forKey: .reset) ?? false
         }
     }
 

@@ -47,6 +47,8 @@ const EN: Record<string, string> = {
   "重置密钥": "Reset key",
   "发送方需要 token 和这个密钥：honk send --key，或照 README 里的示例加密。网关、推送中继、苹果和谷歌都看不到通知内容。":
     "Senders need the token and this key: honk send --key, or encrypt as in the README's examples. The gateway, push relay, Apple and Google can't see the content.",
+  "等待其他设备同步密钥：这个 Bot 已开启加密，密钥还没到这台设备。在已有密钥的设备上打开 Honk 即可。":
+    "Waiting for the key from your other devices: encryption is on for this bot, but its key has not reached this phone yet. Open Honk on a device that has it.",
   "打开后，通知内容在发送方加密，只有你的设备能解开。网关、推送中继、苹果和谷歌都读不到。":
     "Once on, content is encrypted by the sender and only your device can open it. The gateway, push relay, Apple and Google can't read it.",
   "要端到端加密？在 Bot 设置里打开，然后用 honk send --key 密钥 发送。":

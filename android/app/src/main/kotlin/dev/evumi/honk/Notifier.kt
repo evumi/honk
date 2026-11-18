@@ -31,6 +31,8 @@ import dev.evumi.honk.core.Avatar
 import dev.evumi.honk.core.AvatarIcons
 import dev.evumi.honk.core.Banner
 import dev.evumi.honk.core.Bot
+import dev.evumi.honk.core.BoundedRead
+import dev.evumi.honk.core.Deadline
 import dev.evumi.honk.core.LocalAvatars
 import dev.evumi.honk.core.NotificationPlan
 import dev.evumi.honk.core.SvgPath
@@ -38,6 +40,8 @@ import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
+import java.util.concurrent.FutureTask
+import java.util.concurrent.TimeUnit
 
 /**
  * Builds the system notifications: one NotificationChannel per bot (in a
@@ -67,6 +71,8 @@ class Notifier(private val context: Context) {
         val copy: String = "",
         val open: String = "",
         val image: String = "",
+        /** At most this long (ms in all) for the picture and the avatar downloads, which run at the same time. */
+        val imageBudgetMs: Long = 10_000,
     )
 
     private val manager = NotificationManagerCompat.from(context)
@@ -139,7 +145,13 @@ class Notifier(private val context: Context) {
     fun show(c: Content) {
         if (!canPost()) return
         ensureChannel(c.botId, c.botName)
-        val avatar = avatarBitmap(Avatar.parse(c.avatar))
+        // The picture and the avatar download at the same time, each within the budget.
+        val pictureTask = NotificationPlan.imageUrl(c.image)?.let { url ->
+            FutureTask<Bitmap?> { picture(url, c.imageBudgetMs.coerceAtLeast(Deadline.MIN_SLICE_MS).toInt()) }.also {
+                Thread(it, "honk-picture").apply { isDaemon = true }.start()
+            }
+        }
+        val avatar = avatarBitmap(Avatar.parse(c.avatar), timeoutMs = minOf(5_000L, c.imageBudgetMs).coerceAtLeast(Deadline.MIN_SLICE_MS).toInt())
         val icon = avatar?.let(IconCompat::createWithBitmap)
         val bot = Person.Builder()
             .setName(c.botName)
@@ -157,7 +169,14 @@ class Notifier(private val context: Context) {
         }
         // With a picture the notification is a BigPictureStyle (the avatar becomes the large icon);
         // without, a MessagingStyle conversation.
-        val picture = NotificationPlan.imageUrl(c.image)?.let { picture(it) }
+        val picture = pictureTask?.let {
+            try {
+                it.get(c.imageBudgetMs + 1_000, TimeUnit.MILLISECONDS)
+            } catch (e: Exception) {
+                it.cancel(true)
+                null
+            }
+        }
         val style: NotificationCompat.Style = if (picture != null) {
             NotificationCompat.BigPictureStyle().bigPicture(picture).bigLargeIcon(null as Bitmap?).setSummaryText(text)
         } else {
@@ -274,13 +293,13 @@ class Notifier(private val context: Context) {
     // avatars
 
     /**
-     * The avatar as a bitmap: an https image (cached, 5 s timeout, 2 MB at
+     * The avatar as a bitmap: an https image (cached, [timeoutMs] in all, 2 MB at
      * most) or a picked image kept on the phone, else the preset: its icon in white on its colour, the same as the
      * nsh app draws it (the path data in [AvatarIcons] is generated from the app's `ICONS`).
      */
-    fun avatarBitmap(avatar: Avatar, size: Int = 192): Bitmap? {
+    fun avatarBitmap(avatar: Avatar, size: Int = 192, timeoutMs: Int = 5000): Bitmap? {
         if (avatar is Avatar.Image) {
-            image(avatar.url)?.let { return circle(it, size) }
+            image(avatar.url, timeoutMs = timeoutMs)?.let { return circle(it, size) }
         }
         if (avatar is Avatar.Local) {
             localAvatars(context).file(avatar.stringValue)?.let { BitmapFactory.decodeFile(it.path) }?.let { return circle(it, size) }
@@ -321,27 +340,29 @@ class Notifier(private val context: Context) {
     }
 
 
-    /** The message's picture for the notification: https, 5 MB at most, 10 s timeout, scaled down to 1024 px. */
-    private fun picture(url: String): Bitmap? =
-        image(url, NotificationPlan.MAX_IMAGE_BYTES, NotificationPlan.IMAGE_TIMEOUT_MS, 1024)
+    /** The message's picture for the notification: https, 5 MB at most, [timeoutMs] in all, scaled down to 1024 px. */
+    private fun picture(url: String, timeoutMs: Int = NotificationPlan.IMAGE_TIMEOUT_MS): Bitmap? =
+        image(url, NotificationPlan.MAX_IMAGE_BYTES, minOf(timeoutMs, NotificationPlan.IMAGE_TIMEOUT_MS), 1024)
 
     private fun image(url: String, maxBytes: Int = MAX_IMAGE, timeoutMs: Int = 5000, maxSide: Int = 0): Bitmap? {
         val dir = File(context.cacheDir, "avatars").apply { mkdirs() }
         val name = MessageDigest.getInstance("SHA-256").digest(url.toByteArray()).joinToString("") { "%02x".format(it) }
         val file = File(dir, name)
         if (!file.exists()) {
+            // timeoutMs bounds the whole download, not only the gaps between reads; the size is checked
+            // from Content-Length first and again while streaming.
+            val deadline = Deadline(timeoutMs.toLong())
             val bytes = runCatching {
                 val conn = URL(url).openConnection() as HttpURLConnection
                 conn.connectTimeout = timeoutMs
                 conn.readTimeout = timeoutMs
                 try {
                     if (conn.responseCode != 200 || conn.contentLengthLong > maxBytes) return null
-                    conn.inputStream.use { it.readNBytesCompat(maxBytes + 1) }
+                    conn.inputStream.use { BoundedRead.read(it, maxBytes, deadline) }
                 } finally {
                     conn.disconnect()
                 }
             }.getOrNull() ?: return null
-            if (bytes.size > maxBytes) return null
             file.writeBytes(bytes)
         }
         if (maxSide <= 0) return BitmapFactory.decodeFile(file.path)
@@ -381,16 +402,4 @@ class Notifier(private val context: Context) {
         /** The notification tag: `c<bot>:<collapse id>` when the message has one, else `m<message id>`. */
         fun tag(botId: String, messageId: Long, collapseId: String) = Banner.tag(botId, messageId, collapseId)
     }
-}
-
-/** InputStream.readNBytes is API 33; read at most [max] bytes. */
-private fun java.io.InputStream.readNBytesCompat(max: Int): ByteArray {
-    val out = java.io.ByteArrayOutputStream()
-    val buf = ByteArray(8192)
-    while (out.size() < max) {
-        val n = read(buf, 0, minOf(buf.size, max - out.size()))
-        if (n < 0) break
-        out.write(buf, 0, n)
-    }
-    return out.toByteArray()
 }

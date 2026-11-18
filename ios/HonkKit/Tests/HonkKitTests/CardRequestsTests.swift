@@ -134,7 +134,7 @@ private func requests(_ log: Log, reply: @escaping @Sendable (Int64, String) asy
         // Make it look like v3 again.
         var db: OpaquePointer?
         #expect(sqlite3_open(path, &db) == SQLITE_OK)
-        #expect(sqlite3_exec(db, "ALTER TABLE messages DROP COLUMN allow_queries; PRAGMA user_version = 3;", nil, nil, nil) == SQLITE_OK)
+        #expect(sqlite3_exec(db, "ALTER TABLE messages DROP COLUMN allow_queries; ALTER TABLE messages DROP COLUMN placeholder; ALTER TABLE bots DROP COLUMN encrypted; PRAGMA user_version = 3;", nil, nil, nil) == SQLITE_OK)
         sqlite3_close(db)
         let store = try LocalStore(path: path)
         #expect(try store.message(id: 1)?.allowQueries == false)

@@ -12,6 +12,10 @@ import com.google.firebase.messaging.FirebaseMessaging
 import dev.evumi.honk.core.ApiClient
 import dev.evumi.honk.core.ApiException
 import dev.evumi.honk.core.Banner
+import dev.evumi.honk.core.Deadline
+import dev.evumi.honk.core.SecretPruning
+import dev.evumi.honk.core.StoredMessage
+import dev.evumi.honk.core.TimeBox
 import dev.evumi.honk.core.BotKeyStore
 import dev.evumi.honk.core.GroupKeyStore
 import dev.evumi.honk.core.KeyRing
@@ -121,6 +125,12 @@ class HonkService private constructor(context: Context) {
         main.post { listeners.forEach { it() } }
     }
 
+    /** The gateway no longer knows this device: drop its credentials and the group key (see [register]). */
+    private fun forgetDevice() {
+        credentials.clear()
+        groupKey.remove()
+    }
+
     private fun setRegistration(r: Registration) {
         registration = r
         changed()
@@ -133,7 +143,11 @@ class HonkService private constructor(context: Context) {
         prefs.edit().putString(KEY_LAST_PUSH_TOKEN, pushToken).apply()
         if (registration != Registration.Registered) setRegistration(Registration.Registering)
         try {
-            val r = DeviceRegistrar(gatewayUrl, credentials, registerKey = registerKey, deviceName = Build.MODEL).register(pushToken)
+            val r = DeviceRegistrar(
+                gatewayUrl, credentials, registerKey = registerKey, deviceName = Build.MODEL,
+                // A new, unrelated group must not reuse the old group's key.
+                onForgotten = { groupKey.remove() },
+            ).register(pushToken)
             setRegistration(Registration.Registered)
             if (r == DeviceRegistrar.Result.REGISTERED) refresh()
         } catch (e: Exception) {
@@ -184,7 +198,7 @@ class HonkService private constructor(context: Context) {
                     setRegistration(Registration.Failed(Gateway.describe(e)))
                     return
                 }
-                credentials.clear()
+                forgetDevice()
             } catch (e: Exception) {
                 setRegistration(Registration.Failed(Gateway.describe(e)))
                 return
@@ -335,10 +349,15 @@ class HonkService private constructor(context: Context) {
      * gateway holds and try again. Blocking.
      */
     private fun fetchOpened(messageId: Long): QueuedMessage? {
-        val item = api.message(messageId)
-        if (!opener.opens(item)) refreshKeys()
+        val item = quickApi(FETCH_TIMEOUT_MS).message(messageId)
+        // At most every few minutes: a message that stays unopenable must not cost a bot list each time.
+        // (A placeholder is repaired when a sync applies the message again.)
+        if (!opener.opens(item) && runCatching { store.claimSlot("key-refresh", KEY_REFRESH_INTERVAL_MS) }.getOrDefault(false)) refreshKeys()
         return opener.open(item)
     }
+
+    /** A client whose every request gives up after [timeoutMs]: a push has a time budget, not the app's 15 s per call. */
+    private fun quickApi(timeoutMs: Int) = ApiClient(gatewayUrl, credentials.load()?.secret, HttpTransport(timeoutMs = timeoutMs))
 
     /** Fetches the bot list and reconciles the keys with the gateway's wrapped ones. A short timeout; failures are ignored. */
     private fun refreshKeys() {
@@ -362,6 +381,8 @@ class HonkService private constructor(context: Context) {
             val renamed = LegacyBotIds.rename(store, botTokens, bots) { client.getMe(it) }
             renamed.renamed.forEach { notifier.moveChannel(it.old, it.new) }
             store.replaceBots(bots, keeping = renamed.pending)
+            // Tokens and keys of bots the gateway no longer lists (deleted elsewhere, another group).
+            SecretPruning.prune(store, botTokens, botKeys)
             // Keys other devices turned on or reset arrive here; ours are published.
             keyRing.reconcile(bots) { id, wrapped -> client.updateBot(id, keyWrapped = wrapped) }
             notifier.syncChannels(store.chats().map { it.bot })
@@ -373,7 +394,7 @@ class HonkService private constructor(context: Context) {
             Log.w(TAG, "refresh failed", e)
             if (e.isUnauthorized) {
                 // The gateway forgot this device (it was deleted): register again.
-                credentials.clear()
+                forgetDevice()
                 setRegistration(Registration.WaitingForPushToken)
                 registerWithCurrentToken()
             }
@@ -390,7 +411,8 @@ class HonkService private constructor(context: Context) {
     /**
      * Handles an FCM data message (gateway/internal/push/fcm.go). A message is
      * fetched, stored and shown; an edit or delete is fetched and applied, and
-     * a notification it makes stale is removed. Blocking.
+     * a notification it makes stale is removed. Blocking, and within [PUSH_BUDGET_MS]: FCM gives a high-priority
+     * message about 20 s.
      */
     fun handlePush(info: PushInfo) {
         when {
@@ -406,16 +428,21 @@ class HonkService private constructor(context: Context) {
      */
     private fun renameBeforePush() {
         if (!isRegistered) return
-        val client = ApiClient(gatewayUrl, credentials.load()?.secret, HttpTransport(timeoutMs = 5_000))
+        val client = quickApi(5_000)
         LegacyBotIds.renameBeforePush(store, botTokens, client).renamed.forEach { notifier.moveChannel(it.old, it.new) }
     }
 
-    private fun handleMessage(info: PushInfo) {
+    /** What the network part of a push produced: the notification's tag and the stored message, if any. */
+    private class Fetched(val tag: String, val stored: StoredMessage?)
+
+    /**
+     * The network part of a message push: rename legacy ids, fetch the message (decrypting it), store it. The
+     * message comes first: its collapse id (a push without content has none) decides the notification's tag,
+     * which store.apply records. A sealed message is decrypted here; one that cannot be opened is stored as a
+     * placeholder and the notification says so.
+     */
+    private fun fetchAndStore(info: PushInfo): Fetched {
         renameBeforePush()
-        // The message comes first: its collapse id (a push without content has
-        // none) decides the notification's tag, which store.apply records.
-        // A sealed message is decrypted here; one that cannot be opened is stored
-        // as a placeholder and the notification says so.
         val fetched = try {
             fetchOpened(info.messageId)
         } catch (e: Exception) {
@@ -434,6 +461,21 @@ class HonkService private constructor(context: Context) {
                 null
             }
         }
+        return Fetched(tag, stored)
+    }
+
+    private fun handleMessage(info: PushInfo) {
+        val deadline = Deadline(PUSH_BUDGET_MS)
+        // The network part gets its own time box, so a slow gateway cannot eat the whole budget: at the end of
+        // it the notification is shown from the push's own text, and the images get what is left.
+        val work = try {
+            TimeBox.run(PUSH_BUDGET_MS - IMAGE_BUDGET_MS, "honk-push") { fetchAndStore(info) }
+        } catch (e: Exception) {
+            Log.w(TAG, "push ${info.messageId} failed", e)
+            null
+        }
+        val tag = work?.tag ?: Notifier.tag(info.botId, info.messageId, info.collapseId)
+        val stored = work?.stored
         changed()
         if (stored != null && !NotificationPlan.shouldNotify(stored.silent)) return
         if (foreground && focusedBotId == info.botId) {
@@ -465,22 +507,29 @@ class HonkService private constructor(context: Context) {
                 copy = stored?.copy.orEmpty(),
                 open = stored?.open.orEmpty(),
                 image = stored?.image.orEmpty(),
+                imageBudgetMs = deadline.remainingMs().coerceIn(1_000, IMAGE_BUDGET_MS),
             ),
         )
     }
 
     private fun handleSilent(info: PushInfo) {
         if (!isRegistered) return
-        renameBeforePush()
-        try {
-            fetchOpened(info.messageId)?.let {
-                notifier.cancel(store.apply(it).staleNotificationIds)
+        val deadline = Deadline(PUSH_BUDGET_MS)
+        val applied = try {
+            TimeBox.run(deadline.remainingMs(), "honk-push") {
+                renameBeforePush()
+                fetchOpened(info.messageId)?.let {
+                    notifier.cancel(store.apply(it).staleNotificationIds)
+                }
+                changed()
+                true
             }
-            changed()
         } catch (e: Exception) {
-            // Gone from the queue already (a sync applied it) or offline: sync instead.
-            refresh()
+            // Gone from the queue already (a sync applied it) or offline: sync instead, with the time left.
+            if (!deadline.expired) TimeBox.run(deadline.remainingMs(), "honk-push") { refresh(); true }
+            return
         }
+        if (applied == null) Log.w(TAG, "push ${info.messageId} ran out of time")
     }
 
     // local changes
@@ -501,6 +550,15 @@ class HonkService private constructor(context: Context) {
         private const val KEY_GATEWAY = "gatewayURL"
         private const val KEY_LAST_PUSH_TOKEN = "lastPushToken"
         private const val KEY_REGISTER_KEY = "register-key"
+
+        /** The whole handling of a push; FCM gives a high-priority message about 20 s. */
+        const val PUSH_BUDGET_MS = 15_000L
+        /** The most the picture and avatar downloads may take, at the end of [PUSH_BUDGET_MS]. */
+        private const val IMAGE_BUDGET_MS = 6_000L
+        /** Every request of a push gives up after this. */
+        private const val FETCH_TIMEOUT_MS = 8_000
+        /** The key refresh a push may trigger runs at most this often. */
+        private const val KEY_REFRESH_INTERVAL_MS = 5 * 60 * 1000L
         @Volatile private var instance: HonkService? = null
 
         fun get(context: Context): HonkService =

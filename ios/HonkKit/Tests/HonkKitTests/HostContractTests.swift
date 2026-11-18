@@ -28,8 +28,10 @@ private func canon(_ v: Any) throws -> String {
 }
 
 private func bot(_ j: JSON) -> Bot {
-    Bot(id: j["id"] as! String, name: j["name"] as! String, avatar: j["avatar"] as! String,
-        defaultLevel: j["defaultLevel"] as! String, createdAt: (j["createdAt"] as! NSNumber).int64Value)
+    var b = Bot(id: j["id"] as! String, name: j["name"] as! String, avatar: j["avatar"] as! String,
+                defaultLevel: j["defaultLevel"] as! String, createdAt: (j["createdAt"] as! NSNumber).int64Value)
+    b.encrypted = j["encrypted"] as! Bool
+    return b
 }
 
 private func message(_ j: JSON) -> StoredMessage {

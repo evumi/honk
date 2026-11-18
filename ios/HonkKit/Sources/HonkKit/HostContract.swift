@@ -195,7 +195,7 @@ public enum HostArgs {
 /// keys, bot ids strings, message ids numbers.
 public enum HostJSON {
     public static func bot(_ b: Bot) -> [String: Any] {
-        ["id": b.id, "name": b.name, "avatar": b.avatar, "defaultLevel": b.defaultLevel, "createdAt": b.createdAt]
+        ["id": b.id, "name": b.name, "avatar": b.avatar, "defaultLevel": b.defaultLevel, "createdAt": b.createdAt, "encrypted": b.encrypted]
     }
 
     public static func message(_ m: StoredMessage) -> [String: Any] {

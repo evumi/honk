@@ -84,6 +84,12 @@ public protocol BotKeyProviding: Sendable {
 public protocol BotKeyStoring: BotKeyProviding {
     func save(_ key: Data, botID: String)
     func remove(botID: String)
+    /// The ids of the bots that have a key here; used to drop the keys of bots the gateway no longer lists.
+    func ids() -> [String]
+}
+
+public extension BotKeyStoring {
+    func ids() -> [String] { [] }
 }
 
 /// Keeps each bot's key in the keychain access group the app and the
@@ -120,6 +126,8 @@ public struct BotKeyStore: BotKeyStoring, Sendable {
         for group in Keychain.groups(accessGroup) { SecItemDelete(query(botID, group: group) as CFDictionary) }
     }
 
+    public func ids() -> [String] { Keychain.accounts(query(nil, group: nil), accessGroup) }
+
     /// Removes every bot's key.
     public func removeAll() {
         for group in Keychain.groups(accessGroup) { SecItemDelete(query(nil, group: group) as CFDictionary) }
@@ -149,6 +157,12 @@ public final class MemoryBotKeys: BotKeyStoring, @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         keys.removeValue(forKey: botID)
+    }
+
+    public func ids() -> [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return Array(keys.keys)
     }
 }
 
@@ -180,6 +194,31 @@ public enum ContentLimits {
     /// `text` cut to at most `limit` characters (Unicode scalars, as the gateway counts runes).
     static func clip(_ text: String, _ limit: Int) -> String {
         text.unicodeScalars.count <= limit ? text : String(String.UnicodeScalarView(text.unicodeScalars.prefix(limit)))
+    }
+
+    /// The message with the limits applied that the gateway checks for plaintext: clipped title, body and copy,
+    /// url / icon / image that are http(s) (https for the last two), and a card only when it and its data fit (an
+    /// invalid card is dropped; the message stays with its body). The same rules for opened ciphertext and for
+    /// imported archives.
+    public static func sanitize(_ m: QueuedMessage) -> QueuedMessage {
+        var out = m
+        out.title = clip(m.title, title)
+        out.body = clip(m.body, body)
+        out.copy = clip(m.copy, copy)
+        out.url = link(m.url, httpsOnly: false)
+        out.icon = link(m.icon, httpsOnly: true)
+        out.image = link(m.image, httpsOnly: true)
+        let dataFits = m.data.utf8.count <= data
+        if m.html.isEmpty {
+            out.data = dataFits ? m.data : ""
+        } else if dataFits, cardFits(m.html) {
+            out.html = m.html
+            out.data = m.data
+        } else {
+            out.html = ""
+            out.data = ""
+        }
+        return out
     }
 
     /// `v` when it is an http(s) URL with a host (https only when `httpsOnly`), else "".
@@ -232,25 +271,15 @@ public struct MessageOpener: Sendable {
             guard data.utf8.count <= ContentLimits.data else { return nil }
             out.data = data
         case .message:
-            out.title = ContentLimits.clip(Self.text(json["title"]), ContentLimits.title)
-            out.body = ContentLimits.clip(Self.text(json["body"]), ContentLimits.body)
-            out.copy = ContentLimits.clip(Self.text(json["copy"]), ContentLimits.copy)
-            out.url = ContentLimits.link(Self.text(json["url"]), httpsOnly: false)
-            out.icon = ContentLimits.link(Self.text(json["icon"]), httpsOnly: true)
-            out.image = ContentLimits.link(Self.text(json["image"]), httpsOnly: true)
-            // An invalid card is dropped; the message stays with its body.
-            let html = Self.text(json["html"])
-            let data = Self.text(json["data"])
-            let dataFits = data.utf8.count <= ContentLimits.data
-            if html.isEmpty {
-                out.data = dataFits ? data : ""
-            } else if dataFits, ContentLimits.cardFits(html) {
-                out.html = html
-                out.data = data
-            } else {
-                out.html = ""
-                out.data = ""
-            }
+            out.title = Self.text(json["title"])
+            out.body = Self.text(json["body"])
+            out.copy = Self.text(json["copy"])
+            out.url = Self.text(json["url"])
+            out.icon = Self.text(json["icon"])
+            out.image = Self.text(json["image"])
+            out.html = Self.text(json["html"])
+            out.data = Self.text(json["data"])
+            out = ContentLimits.sanitize(out)
         case .delete:
             break
         }
@@ -270,7 +299,7 @@ public struct MessageOpener: Sendable {
 
     private func failed(_ m: QueuedMessage) -> QueuedMessage {
         QueuedMessage(id: m.id, botID: m.botID, kind: .message, body: placeholder, level: m.level, group: m.group,
-                      silent: m.silent, collapseID: m.collapseID, date: m.date)
+                      silent: m.silent, collapseID: m.collapseID, date: m.date, placeholder: true)
     }
 
     /// A string field: a JSON string as it is, any other value as its JSON text (`data` may be an object).
@@ -374,6 +403,19 @@ public final class MemoryGroupKey: GroupKeyStoring, @unchecked Sendable {
     }
 }
 
+/// Why turning encryption on or resetting its key was refused.
+public enum EncryptionError: Error, Equatable, LocalizedError {
+    /// The gateway already has encryption on for the bot, but its key has not reached this device (a phone paired
+    /// a moment ago). Making a new key here would replace the group's, so the device waits for another one to share it.
+    case waitingForKey
+
+    public var errorDescription: String? {
+        switch self {
+        case .waitingForKey: return "等待其他设备同步密钥：这个 Bot 已开启加密，密钥还没到这台设备。"
+        }
+    }
+}
+
 /// The bot keys and the group key of this device, and how they agree with the
 /// wrapped keys on the gateway.
 public struct KeyRing: Sendable {
@@ -395,9 +437,42 @@ public struct KeyRing: Sendable {
     }
 
     /// `botID`'s key wrapped with the group key, for `PATCH /v1/bots/:id`; `nil` without a local key.
-    public func wrapped(botID: String) -> String? {
-        guard let k = keys.key(botID: botID) else { return nil }
-        return try? KeyWrap.wrap(botKey: k, groupKey: ensureGroupKey(), botID: botID)
+    /// It uses the existing group key and makes one only with `createGroupKey` (where a patch is about to be
+    /// sent), so a no-op reconcile (the notification extension) never mints a key as a side effect.
+    public func wrapped(botID: String, createGroupKey: Bool = false) -> String? {
+        guard let k = keys.key(botID: botID), let g = createGroupKey ? ensureGroupKey() : group.groupKey() else { return nil }
+        return try? KeyWrap.wrap(botKey: k, groupKey: g, botID: botID)
+    }
+
+    /// Turns encryption on for `bot` (as the gateway lists it now) and returns its key.
+    ///
+    /// Off at the gateway: this device's key, else a new one, is wrapped with the group key and sent through
+    /// `patch` (which also sets `encrypted`); the key is stored only once that succeeded. On at the gateway: the
+    /// key is the group's, so it is taken from the gateway's wrapped one (`reconcile`); with no key to be had
+    /// this throws `waitingForKey` instead of making a new one.
+    public func enable(bot: Bot, patch: (_ wrapped: String) async throws -> Void) async throws -> Data {
+        if bot.encrypted {
+            await reconcile(bots: [bot]) { _, wrapped in try await patch(wrapped) }
+            guard let k = keys.key(botID: bot.id) else { throw EncryptionError.waitingForKey }
+            return k
+        }
+        let k = keys.key(botID: bot.id) ?? Seal.generateKey()
+        try await publish(k, botID: bot.id, patch)
+        return k
+    }
+
+    /// Replaces the bot's key with a new one and returns it. The old key stays if `patch` fails.
+    public func reset(botID: String, patch: (_ wrapped: String) async throws -> Void) async throws -> Data {
+        let k = Seal.generateKey()
+        try await publish(k, botID: botID, patch)
+        return k
+    }
+
+    /// Wraps `key` with the group key (made now if need be: a patch is about to be sent), sends it, then keeps it.
+    private func publish(_ key: Data, botID: String, _ patch: (String) async throws -> Void) async throws {
+        let wrapped = try KeyWrap.wrap(botKey: key, groupKey: ensureGroupKey(), botID: botID)
+        try await patch(wrapped)
+        keys.save(key, botID: botID)
     }
 
     /// What a pairing bundle carries: every listed bot's key (base64url).
@@ -426,14 +501,23 @@ public struct KeyRing: Sendable {
     /// - otherwise there is nothing to do: without the group key (pair this
     ///   phone) or a wrapped key, the bot's messages show the placeholder.
     ///
-    /// A failed `patch` is skipped; the next refresh tries again.
-    public func reconcile(bots: [Bot], patch: (_ botID: String, _ wrapped: String) async throws -> Void) async {
-        for bot in bots where bot.encrypted {
+    /// A bot the gateway lists as not encrypted loses its local key (another device turned encryption off), so
+    /// its plaintext messages are not taken for forgeries.
+    ///
+    /// A failed `patch` is skipped; the next refresh tries again. With `createGroupKey` off (the notification
+    /// extension, which only wants to adopt keys) a missing group key is not made, so nothing is wrapped and sent.
+    public func reconcile(bots: [Bot], createGroupKey: Bool = true,
+                          patch: (_ botID: String, _ wrapped: String) async throws -> Void) async {
+        for bot in bots {
+            guard bot.encrypted else {
+                if keys.key(botID: bot.id) != nil { keys.remove(botID: bot.id) }
+                continue
+            }
             let local = keys.key(botID: bot.id)
             if let g = group.groupKey(), !bot.keyWrapped.isEmpty,
                let k = KeyWrap.unwrap(bot.keyWrapped, groupKey: g, botID: bot.id) {
                 if local != k { keys.save(k, botID: bot.id) }
-            } else if let w = wrapped(botID: bot.id) {
+            } else if let w = wrapped(botID: bot.id, createGroupKey: createGroupKey) {
                 try? await patch(bot.id, w)
             }
         }

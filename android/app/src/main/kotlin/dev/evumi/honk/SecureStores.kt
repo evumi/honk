@@ -55,6 +55,8 @@ class PrefsBotTokenStore(private val prefs: SharedPreferences) : BotTokenStore {
         prefs.edit().remove(key(botId)).apply()
     }
 
+    override fun ids(): List<String> = prefs.all.keys.filter { it.startsWith(PREFIX) }.map { it.removePrefix(PREFIX) }
+
     override fun removeAll() {
         val edit = prefs.edit()
         prefs.all.keys.filter { it.startsWith(PREFIX) }.forEach(edit::remove)
@@ -75,15 +77,17 @@ class PrefsBotTokenStore(private val prefs: SharedPreferences) : BotTokenStore {
  * decrypted while the app is closed.
  */
 class PrefsBotKeyStore(private val prefs: SharedPreferences) : BotKeyStore {
-    override fun key(botId: String): ByteArray? = prefs.getString(key(botId), null)?.let(Seal::parseKey)
+    override fun key(botId: String): ByteArray? = prefs.getString(prefKey(botId), null)?.let(Seal::parseKey)
 
     override fun save(botId: String, key: ByteArray) {
-        prefs.edit().putString(key(botId), Seal.encode(key)).commit()
+        prefs.edit().putString(prefKey(botId), Seal.encode(key)).commit()
     }
 
     override fun remove(botId: String) {
-        prefs.edit().remove(key(botId)).commit()
+        prefs.edit().remove(prefKey(botId)).commit()
     }
+
+    override fun ids(): List<String> = prefs.all.keys.filter { it.startsWith(PREFIX) }.map { it.removePrefix(PREFIX) }
 
     override fun removeAll() {
         val edit = prefs.edit()
@@ -91,7 +95,7 @@ class PrefsBotKeyStore(private val prefs: SharedPreferences) : BotKeyStore {
         edit.commit()
     }
 
-    private fun key(botId: String) = "$PREFIX$botId"
+    private fun prefKey(botId: String) = "$PREFIX$botId"
 
     private companion object {
         const val PREFIX = "bot-key."

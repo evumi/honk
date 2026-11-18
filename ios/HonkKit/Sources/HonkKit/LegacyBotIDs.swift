@@ -13,6 +13,21 @@ import Foundation
 ///
 /// Delivered notifications are left alone on both platforms; their stored ids
 /// still remove them.
+/// Drops what this phone keeps for bots the gateway no longer lists.
+public enum SecretPruning {
+    /// Removes the tokens and end-to-end keys of bots that are not stored any more. Call it after
+    /// `LocalStore.replaceBots`, whose list already holds the legacy-id bots still pending a rename
+    /// (`LegacyBotIDs`), so those keep their token. The secrets are listed before the store is, so a bot added
+    /// meanwhile (its row is stored before its token) is never mistaken for an orphan.
+    public static func prune(store: LocalStore, tokens: BotTokenStoring, keys: BotKeyStoring) throws {
+        let tokenIDs = tokens.ids()
+        let keyIDs = keys.ids()
+        let keep = Set(try store.botIDs())
+        for id in tokenIDs where !keep.contains(id) { tokens.remove(botID: id) }
+        for id in keyIDs where !keep.contains(id) { keys.remove(botID: id) }
+    }
+}
+
 public enum LegacyBotIDs {
     public struct Outcome: Equatable, Sendable {
         /// (old id, new id) pairs.

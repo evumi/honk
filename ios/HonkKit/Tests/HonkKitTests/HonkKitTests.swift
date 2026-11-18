@@ -583,6 +583,7 @@ final class MemoryTokens: BotTokenStoring, @unchecked Sendable {
     func token(botID: String) -> String? { map[botID] }
     func save(_ token: String, botID: String) { map[botID] = token }
     func remove(botID: String) { map[botID] = nil }
+    func ids() -> [String] { Array(map.keys) }
 }
 
 struct Offline: Error {}

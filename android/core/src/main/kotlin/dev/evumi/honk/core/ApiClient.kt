@@ -182,7 +182,9 @@ class ApiClient(
     // messages
 
     @Serializable
-    data class SyncPage(val messages: List<QueuedMessage> = emptyList(), val cursor: Long, @SerialName("has_more") val hasMore: Boolean = false)
+    data class SyncPage(val messages: List<QueuedMessage> = emptyList(), val cursor: Long, @SerialName("has_more") val hasMore: Boolean = false,
+        /** The device must sync again from cursor 0 (after a merge); absent from older gateways. */
+        val reset: Boolean = false)
 
     fun message(id: Long): QueuedMessage = request("GET", "v1/messages/$id", QueuedMessage.serializer())
 
