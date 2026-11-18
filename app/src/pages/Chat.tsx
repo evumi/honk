@@ -284,7 +284,7 @@ function Bubble(props: { message: Message; p: Palette }) {
       <Each of={m().html ? [m()] : []} key={(x) => `${x.id}\u0000${x.html}\u0000${x.data}`}>
         {(x) => (
           <View style={{ paddingTop: 12, paddingBottom: 12, paddingLeft: 16, paddingRight: 16, borderBottomWidth: 0.5, borderBottomColor: props.p.separator }}>
-            <Widget html={x().html} data={x().data} palette={props.p} />
+            <Widget html={x().html} data={x().data} palette={props.p} messageId={x().id} allowQueries={x().allowQueries} />
           </View>
         )}
       </Each>

@@ -38,7 +38,7 @@ private func message(_ j: JSON) -> StoredMessage {
                   level: j["level"] as! String, group: j["group"] as! String, url: j["url"] as! String,
                   copy: j["copy"] as! String, icon: j["icon"] as! String, open: j["open"] as! String, image: j["image"] as! String,
                   parseMode: j["parseMode"] as! String, silent: j["silent"] as! Bool, collapseID: j["collapseId"] as! String,
-                  date: (j["date"] as! NSNumber).int64Value, read: j["read"] as! Bool)
+                  allowQueries: j["allowQueries"] as! Bool, date: (j["date"] as! NSNumber).int64Value, read: j["read"] as! Bool)
 }
 
 private func chat(_ j: JSON) -> ChatSummary {

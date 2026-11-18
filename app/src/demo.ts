@@ -110,7 +110,7 @@ const bots: Bot[] = [
 let nextId = 100;
 const msg = (botId: string, minutesAgo: number, m: Partial<Message>): Message => ({
   id: nextId++, botId, title: "", body: "", html: "", data: "", level: "active", group: "", url: "", copy: "",
-  icon: "", open: "", image: "", parseMode: "", silent: false, collapseId: "", date: now - minutesAgo * 6e4, read: false, ...m,
+  icon: "", open: "", image: "", parseMode: "", silent: false, collapseId: "", allowQueries: false, date: now - minutesAgo * 6e4, read: false, ...m,
 });
 
 const messages: Message[] = [
