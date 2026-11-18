@@ -394,6 +394,131 @@ public final class LocalStore: @unchecked Sendable {
         }
     }
 
+    /// A window of a bot's messages around `around`, newest first: the message,
+    /// up to `limit / 2` newer ones and the rest older. When the bot has no such
+    /// message it is the newest `limit`, as `messages(botID:)`.
+    public func messages(botID: String, around: Int64, limit: Int = 50) throws -> [StoredMessage] {
+        try locked {
+            guard try scalar("SELECT id FROM messages WHERE id = ? AND bot_id = ?", [around, botID]) != nil else {
+                return try query("SELECT \(Self.messageCols) FROM messages WHERE bot_id = ? ORDER BY id DESC LIMIT ?",
+                                 [botID, limit], Self.readMessage)
+            }
+            let newer = try query("SELECT \(Self.messageCols) FROM messages WHERE bot_id = ? AND id > ? ORDER BY id ASC LIMIT ?",
+                                  [botID, around, limit / 2], Self.readMessage)
+            let older = try query("SELECT \(Self.messageCols) FROM messages WHERE bot_id = ? AND id <= ? ORDER BY id DESC LIMIT ?",
+                                  [botID, around, limit - newer.count], Self.readMessage)
+            return newer.reversed() + older
+        }
+    }
+
+    /// `%`, `_` and the escape character matched literally in a LIKE pattern (used with `ESCAPE '\'`).
+    static func likePattern(_ q: String) -> String {
+        var out = "%"
+        for ch in q {
+            if ch == "\\" || ch == "%" || ch == "_" { out.append("\\") }
+            out.append(ch)
+        }
+        return out + "%"
+    }
+
+    /// Messages of every bot whose title or body contains `query` (case-insensitive for ASCII), newest first,
+    /// older than `before` when given: one page of `limit`. An empty query matches nothing.
+    public func search(_ query: String, before: Int64? = nil, limit: Int = 50) throws -> [StoredMessage] {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return [] }
+        let pattern = Self.likePattern(q)
+        return try locked {
+            try self.query("""
+                SELECT \(Self.messageCols) FROM messages
+                WHERE id < ? AND (title LIKE ? ESCAPE '\\' OR body LIKE ? ESCAPE '\\') ORDER BY id DESC LIMIT ?
+                """, [before ?? Int64.max, pattern, pattern, limit], Self.readMessage)
+        }
+    }
+
+    // MARK: retention
+
+    /// How long messages are kept, in days; 0 keeps them forever (the default).
+    public var retentionDays: Int {
+        (try? locked { try query("SELECT value FROM meta WHERE key = 'retention'") { $0.text(0) }.first ?? nil })
+            .flatMap { $0 }.flatMap { Int($0) }.map { max(0, $0) } ?? 0
+    }
+
+    public func setRetentionDays(_ days: Int) throws {
+        try locked {
+            try run("INSERT INTO meta (key, value) VALUES ('retention', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    [String(max(0, days))])
+        }
+    }
+
+    /// Deletes the messages older than the retention period (a day is 24 hours); returns their notification ids.
+    /// Does nothing when messages are kept forever.
+    @discardableResult
+    public func pruneExpired(now: Int64 = Int64(Date().timeIntervalSince1970 * 1000)) throws -> [String] {
+        let days = retentionDays
+        guard days > 0 else { return [] }
+        let cutoff = now - Int64(days) * 86_400_000
+        return try locked {
+            try transaction {
+                let ids = try query("SELECT notif_id FROM messages WHERE date < ? AND notif_id IS NOT NULL", [cutoff]) {
+                    $0.text(0)
+                }.compactMap { $0 }
+                try run("DELETE FROM messages WHERE date < ?", [cutoff])
+                return ids
+            }
+        }
+    }
+
+    // MARK: export and import
+
+    /// A bot's messages (every bot's when nil), oldest first, for `MessageArchive`.
+    public func exportMessages(botID: String? = nil) throws -> [StoredMessage] {
+        try locked {
+            if let botID {
+                return try query("SELECT \(Self.messageCols) FROM messages WHERE bot_id = ? ORDER BY id", [botID], Self.readMessage)
+            }
+            return try query("SELECT \(Self.messageCols) FROM messages ORDER BY id", [], Self.readMessage)
+        }
+    }
+
+    /// What `importMessages` did with the items it was given.
+    public struct ImportSummary: Equatable, Sendable {
+        public var imported = 0
+        /// Already stored (the same message id), or replaced by a newer message with its collapse id.
+        public var existing = 0
+        /// Of a bot this device does not have: bots belong to the gateway's account, so they are not created here.
+        public var unknownBot = 0
+    }
+
+    /// Adds archived messages the way `apply` does, so importing the same file twice changes nothing. Only
+    /// `message` items of bots stored here are imported; they arrive read and without a notification.
+    public func importMessages(_ items: [QueuedMessage]) throws -> ImportSummary {
+        try locked {
+            try transaction {
+                var summary = ImportSummary()
+                for m in items where m.kind == .message {
+                    guard try scalar("SELECT COUNT(*) FROM bots WHERE id = ?", [m.botID]) == 1 else {
+                        summary.unknownBot += 1
+                        continue
+                    }
+                    let stored = try scalar("SELECT id FROM messages WHERE id = ?", [m.id]) != nil
+                    var newer: Int64?
+                    if !m.collapseID.isEmpty {
+                        newer = try scalar("SELECT id FROM messages WHERE bot_id = ? AND collapse_id = ? AND id > ? LIMIT 1",
+                                           [m.botID, m.collapseID, m.id])
+                    }
+                    if stored || newer != nil {
+                        summary.existing += 1
+                        continue
+                    }
+                    _ = try insert(m, notificationID: nil)
+                    try run("UPDATE messages SET read = 1 WHERE id = ?", [m.id])
+                    summary.imported += 1
+                }
+                return summary
+            }
+        }
+    }
+
     /// The chat list: pinned first, then by latest message.
     public func chats() throws -> [ChatSummary] {
         try locked {
@@ -475,7 +600,8 @@ public final class LocalStore: @unchecked Sendable {
         try locked {
             try transaction {
                 let ids = try query("SELECT notif_id FROM messages WHERE notif_id IS NOT NULL") { $0.text(0) }.compactMap { $0 }
-                try exec("DELETE FROM messages; DELETE FROM bots; DELETE FROM meta;")
+                // The retention choice is about this phone, not the gateway: it stays.
+                try exec("DELETE FROM messages; DELETE FROM bots; DELETE FROM meta WHERE key <> 'retention';")
                 return ids
             }
         }
