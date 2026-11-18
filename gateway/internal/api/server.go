@@ -135,6 +135,10 @@ func (s *Server) Handler() http.Handler {
 		})
 	})
 
+	// Webhook adapters: /bot<token>/hook/<kind>[/path] (GET, POST, ...).
+	r.HandleFunc("/{bot}/hook/{kind}", s.hook)
+	r.HandleFunc("/{bot}/hook/{kind}/*", s.hook)
+
 	// /bot<token>/<method>, the same shape as Telegram's Bot API.
 	r.HandleFunc("/{bot}/{method}", s.botAPI)
 	return r

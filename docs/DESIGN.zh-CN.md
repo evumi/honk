@@ -111,6 +111,15 @@ bot token 形如 `<bot id>:<32 位随机串>`；token 和 device secret 都只�
 - `HONK_METRICS_ADDR`（默认空，不开）：在单独的监听地址提供 `/metrics`，Prometheus 文本格式，手写（`internal/metrics`），没有新依赖。计数：`honk_messages_total{kind}`、`honk_pushes_total{platform,route,result}`、`honk_push_retries_total`、`honk_push_dropped_total{reason}`（`queue_full`、`not_wanted`、`shutdown`）、`honk_http_requests_total{class}`；量表：`honk_devices`、`honk_bots`、`honk_push_queue_length`。`route` 现在只有 `direct`。
 - `HONK_LOG_FORMAT=json` 输出 JSON 日志；`HONK_LOG_LEVEL=debug` 时每个请求记一条访问日志（`/bot<token>/…` 里的 token 替换成 `<token>`）。
 
+### 命令行与 webhook 适配（发送方生态）
+
+- **`dry_run`**：`sendMessage` 加 `dry_run=true` 只校验。`widget.Inspect` 是 `Clean` 的带报告版本，返回清理后的 HTML、输入和清理后的原文大小、zlib 9 压缩大小，以及被白名单删掉的元素和属性（每种只列一次）；`Clean` 就是它的包装。`dry_run` 不入队、不推送，但计入限流。
+- **命令行**：同一个 `honk` 二进制。`cmd/honk/cli.go` 在 `main()` 开头分派：无参数或 `serve` 走原来的网关（环境变量配置不变），`send`、`edit`、`delete`、`me`、`preview`、`help` 交给 `internal/client`。`client.Client.Call` 向 `/bot<token>/<method>` POST JSON，失败的信封变成带 `description` 的错误，进程退出码 1（用法错误 2）；错误里不出现 token。地址和 token 优先级：命令行参数、`HONK_URL` / `HONK_TOKEN`、`~/.config/honk/config.json`。管道输入的标准输入作正文；`--html`、`--data` 的 `@文件` 读文件，data 会压成单行。`preview` 每次先 `dry_run` 打印大小和删除项，再用固定 `id`、`level=passive` 发送；`--watch` 轮询两个文件的修改时间和大小（500ms），不引依赖。
+- **`--key`**：客户端按第 7 节的密文格式加密（`client.Encrypt`：AES-256-GCM，12 字节 nonce ‖ 密文 ‖ 16 字节 tag，无填充 base64url，AAD 是 token 冒号前的 bot id），把 title、body、html、data、url、copy、icon 放进一段 JSON，作为 `ciphertext` 发送；`edit` 加密 `{"data": …}`。网关还没有 `ciphertext` 参数（加密一期），所以现在只有发送端和单元测试，帮助文字和 README 都注明了。
+- **webhook 适配**：`internal/hooks` 里每种格式一个纯函数 `Request → url.Values`（参数名就是 sendMessage 的），`hooks.Convert` 统一加上查询串覆盖（`level`、`group`、`icon`、`copy`、`url`、`title`）和空正文兜底。路由 `/{bot}/hook/{kind}[/*]` 在 `internal/api/hook.go`，鉴权用和 `botAPI` 同一个 `authBot`，转换后直接调用 `sendMessage`，所以限流、字段检查和卡片白名单完全一致；`ErrIgnored` 返回 `{"ignored":true}`。`alertmanager` / `grafana` 的 `id` 取 groupKey 的哈希（Grafana 单条告警取 fingerprint），自带的状态卡片所有文字都转义，并有测试保证它通过白名单且不被删减。`github` 不校验签名，token 就是密钥。`bark` 的 `<key>` 段被忽略。`json` 用 `$.a.b` 路径，由 `hooks.Lookup` 实现。
+- **GitHub Action**：根目录 `action.yml`，composite，用 `jq` 拼 JSON、`curl` 发送，输入经环境变量传入，避免注入。
+- **卡片手册**：`docs/CARDS.md`、`docs/CARDS.zh-CN.md`；`widget/docs_test.go` 抽出文档里每个 `html` 代码块，要求通过 `Inspect` 且没有任何删除，`json data` 代码块必须是 1 KB 以内的 JSON。
+
 ## 5. 原生宿主
 
 ### iOS（ios/）

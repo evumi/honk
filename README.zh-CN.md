@@ -90,6 +90,7 @@ docker run -p 8080:8080 -v honk-data:/data \
 | `url` | | 消息的链接，http(s)：在会话里点这条消息时打开 |
 | `copy` | | 长按菜单里「复制」用的文字 |
 | `icon` | | 这条消息的头像，必须是 https；不填用 bot 头像 |
+| `dry_run` | | `true` 时只校验：不入队、不推送，返回 `{"dry_run":true,"html":清理后的卡片,"input_size","raw_size","compressed_size","removed":[…]}`，即清理后卡片的大小（上限 32768 和 4096）和白名单删掉的内容（如 `"onclick on <div>"`、`"<iframe>"`）。计入限流 |
 
 ```bash
 curl https://honk.example.com/bot$TOKEN/sendMessage \
@@ -166,6 +167,56 @@ App 把内联 SVG（`svg`、`g`、各种图形、`text`/`tspan`、渐变、`symb
   });
 </script>
 ```
+
+## 命令行
+
+网关的二进制同时是发送端工具。不带参数的 `honk`（或 `honk serve`）和以前一样运行网关；其他子命令以某个 bot 的身份访问网关：
+
+```bash
+export HONK_URL=https://honk.example.com HONK_TOKEN=aZ3kQ9xT:Gw2K7mx…
+honk send "备份完成" --title 备份 --level passive
+make 2>&1 | tail -5 | honk send --title "构建日志"          # 管道输入时，标准输入就是正文
+honk send "api v1.8.2 已上线" --html @card.html --data @data.json --id deploy-api
+honk edit --id deploy-api --data '{"status":"已回滚"}'
+honk delete --id deploy-api
+honk me                                                     # token 对应的 bot
+honk preview card.html --data data.json --watch             # 每次保存都重发
+```
+
+- `HONK_URL` 和 `HONK_TOKEN` 也可以用 `--server` / `--token` 给，或写进 `~/.config/honk/config.json`（`{"url": "…", "token": "…"}`；认 `$XDG_CONFIG_HOME` 和 `$HONK_CONFIG`）。优先级：命令行参数、环境变量、配置文件。
+- `send` 的参数：`--title`、`--body`（或直接写在命令后、或走标准输入）、`--html`、`--data`（这两个可写成 `@文件`）、`--id`、`--level`、`--group`、`--link`（即 `url` 参数）、`--copy`、`--icon`、`--dry-run`。
+- `preview` 用固定的 `id`（默认 `honk-preview`）和 `level=passive` 发送，手机上那条消息原地更新而且不响。它先做一次 `dry_run`，打印大小和白名单删掉了什么。见[卡片手册](docs/CARDS.zh-CN.md)。
+- 退出码：成功 0；网关或网络出错 1（网关返回的 `description` 打到标准错误）；用法错误 2。
+- `--key <base64 密钥>`（或 `HONK_KEY`）在客户端加密消息内容：title、body、html、data、url、copy、icon 放进一段 AES-256-GCM 密文（12 字节 nonce、密文、16 字节 tag，无填充 base64url；token 里冒号前的 bot id 作附加认证数据），以 `ciphertext` 发送，`level`、`group`、`id` 仍是明文。**网关目前还不接受 `ciphertext`**：这是之后端到端加密版本的发送端部分，现在不要对现有网关使用 `--key`。
+
+## 接入现有工具
+
+`/bot<token>/hook/<kind>` 接收其他工具的 webhook 并转成消息，用的 token、限流和校验都和 `sendMessage` 一样。把带 token 的这个地址填到工具要求 webhook 地址的地方。没有内容可显示的请求（GitHub 的 `ping`、没有告警的 Alertmanager 分组）返回 `{"ok":true,"result":{"ignored":true}}`，什么也不发。查询串里的 `level`、`group`、`icon`、`copy`、`url`、`title` 会覆盖适配器的选择（`…/hook/github?level=passive`）。
+
+| `kind` | 来源 | 结果 |
+| --- | --- | --- |
+| `slack` | Slack incoming webhook（`text`、`attachments`、section `blocks`） | 正文取文字；第一个 attachment 的 title 和 `title_link` 作标题和链接；`<url\|label>` 变成 `label` |
+| `alertmanager` | Alertmanager `webhook_configs`（version 4） | 标题 `[FIRING:n] 名称`；每条告警一行；`groupKey` 作消息 `id`，所以「恢复」原地替换「触发」；critical 为 `timeSensitive`，恢复为 `passive`；附带状态卡片 |
+| `grafana` | Grafana webhook 联系点 | 版式相同；只有一条告警时用它的 `fingerprint` 作 `id`，否则用 `groupKey` |
+| `github` | 仓库 webhook（JSON 格式），事件名取自 `X-GitHub-Event` | `workflow_run`（每个 workflow 和分支一条：排队、运行、结束互相替换，失败为 `timeSensitive`）、`release`、`issues`、`pull_request`、`push`；其他事件给一行摘要 |
+| `bark` | Bark 客户端发出的请求 | 把 Bark 服务器设成 `https://honk.example.com/bot<token>/hook/bark`；支持 `/<key>/<body>`、`/<key>/<title>/<body>`、`/<key>/<title>/<subtitle>/<body>`（key 被忽略）和 `POST /push`（JSON 或表单：`title`、`subtitle`、`body`、`level`、`group`、`url`、`copy`、`icon`、`id`）；声音、角标之类忽略 |
+| `json` | 任意 JSON | 用查询串指定字段取值路径：`?title=$.alert.name&body=$.message&group=ci`。路径写法 `$.a.b`、`$.items[0].name` 或 `$.items.0.name`；不以 `$` 开头的值按字面使用；没有 `body` 时把整段 JSON 当正文 |
+
+GitHub 适配不校验 `X-Hub-Signature-256`：URL 里的 token 就是密钥，别让它出现在公开日志里。在 GitHub Actions 里请直接用本仓库的 action：
+
+```yaml
+- uses: evumi/honk@v1
+  if: failure()
+  with:
+    url: ${{ secrets.HONK_URL }}
+    token: ${{ secrets.HONK_TOKEN }}
+    title: "${{ github.repository }}: 构建失败"
+    body: "${{ github.workflow }} on ${{ github.ref_name }}"
+    id: ci-${{ github.workflow }}
+    level: timeSensitive
+```
+
+输入：`token`、`url`（必填），`title`、`body`（不填用标题）、`id`、`level`、`html`、`data`。这是个 composite action，内部用 `curl`，网关拒绝消息时这一步失败。
 
 ## App API
 

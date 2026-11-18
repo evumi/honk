@@ -29,17 +29,8 @@ const (
 
 // botAPI serves /bot<token>/<method> with GET query, form or JSON parameters.
 func (s *Server) botAPI(w http.ResponseWriter, r *http.Request) {
-	seg := chi.URLParam(r, "bot")
-	if !strings.HasPrefix(seg, "bot") {
-		s.fail(w, r, errNotFound)
-		return
-	}
-	bot, dev, err := s.store.BotByToken(r.Context(), strings.TrimPrefix(seg, "bot"))
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			err = errUnauthorized
-		}
-		s.fail(w, r, err)
+	bot, dev, good := s.authBot(w, r)
+	if !good {
 		return
 	}
 	p, err := params(r)
@@ -82,12 +73,22 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request, bot store.B
 		s.fail(w, r, err)
 		return
 	}
-	if m.HTML, err = widget.Clean(p.Get("html")); err != nil {
+	rep, err := widget.Inspect(p.Get("html"))
+	if err != nil {
 		s.fail(w, r, badRequest(err.Error()))
 		return
 	}
+	m.HTML = rep.HTML
 	if !s.allow(bot.ID) {
 		s.fail(w, r, apiError{http.StatusTooManyRequests, "Too Many Requests"})
+		return
+	}
+	if v := strings.ToLower(p.Get("dry_run")); v == "true" || v == "1" {
+		// Validate only: nothing is queued or pushed.
+		ok(w, map[string]any{
+			"dry_run": true, "level": m.Level, "html": rep.HTML, "input_size": rep.InputSize,
+			"raw_size": rep.Raw, "compressed_size": rep.Compressed, "removed": rep.Removed,
+		})
 		return
 	}
 	m, err = s.store.AddMessage(r.Context(), bot, m, s.opts.MessageTTL)

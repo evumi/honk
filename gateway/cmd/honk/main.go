@@ -20,6 +20,9 @@ import (
 var version = "dev"
 
 func main() {
+	if handled, code := cli(os.Args[1:]); handled { // honk send, honk preview, ...
+		os.Exit(code)
+	}
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	if err := run(log); err != nil {
 		log.Error("exit", "err", err)
