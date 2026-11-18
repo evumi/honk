@@ -5,7 +5,8 @@ import { reuse } from "./stable";
 
 export type Route =
   | { name: "home" }
-  | { name: "chat"; botId: BotId }
+  /** `messageId`: open scrolled to that message (a search result). */
+  | { name: "chat"; botId: BotId; messageId?: number }
   | { name: "newBot"; botId?: BotId }
   | { name: "botCreated"; botId: BotId; token: string; botName: string; avatar: string }
   | { name: "botSettings"; botId: BotId }

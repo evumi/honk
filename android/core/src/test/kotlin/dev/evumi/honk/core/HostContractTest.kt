@@ -98,6 +98,11 @@ class HostContractTest {
         assertEquals(HostArgs.Messages("aZ3kQ9xT", 8, 20), m)
         assertEquals(HostArgs.Messages("aZ3kQ9xT", 8, 20), HostArgs.Messages(Args(mapOf("botId" to "aZ3kQ9xT", "before" to "8", "limit" to 20))))
         assertEquals(HostArgs.Messages("b", null, 50), HostArgs.Messages(Args(mapOf("botId" to "b"))))
+        assertEquals(HostArgs.Messages("b", null, 50, 7), HostArgs.Messages(Args(mapOf("botId" to "b", "around" to 7))))
+        assertEquals(HostArgs.Search("q", 3), HostArgs.Search(Args(mapOf("query" to "q", "before" to 3))))
+        assertEquals(HostArgs.RetentionSet(0), HostArgs.RetentionSet(Args(mapOf("days" to 0))))
+        assertEquals(HostArgs.Export(null), HostArgs.Export(Args(null)))
+        assertEquals(HostArgs.Export("b"), HostArgs.Export(Args(mapOf("botId" to "b"))))
         assertEquals(HostArgs.BotCreate("n", "", "active"), HostArgs.BotCreate(Args(mapOf("name" to "n"))))
         assertEquals(HostArgs.GatewaySet("https://gw.test/", "s3cret"), HostArgs.GatewaySet(Args(mapOf("url" to "https://gw.test/", "registerKey" to "s3cret"))))
         assertEquals("null url: the default gateway; empty key: none", HostArgs.GatewaySet(null, null), HostArgs.GatewaySet(Args(mapOf("url" to null, "registerKey" to ""))))
@@ -122,6 +127,19 @@ class HostContractTest {
         for (s in samples("honk.messages")) {
             val list = s.getValue("result").jsonArray
             assertEquals(list, json(list.map { HostJson.message(message(it.jsonObject)) }))
+        }
+        for (s in samples("honk.search")) {
+            val list = s.getValue("result").jsonArray
+            assertEquals(list, json(list.map { HostJson.message(message(it.jsonObject)) }))
+        }
+        for (s in samples("honk.export")) {
+            val r = s.getValue("result").jsonObject
+            assertEquals(r, json(HostJson.exportResult(r.getValue("count").jsonPrimitive.long.toInt(), r.getValue("shared").jsonPrimitive.boolean)))
+        }
+        for (s in samples("honk.import")) {
+            val r = s.getValue("result") as? JsonObject ?: continue
+            fun n(k: String) = r.getValue(k).jsonPrimitive.long.toInt()
+            assertEquals(r, json(HostJson.importResult(LocalStore.ImportSummary(n("imported"), n("existing"), n("unknownBot")), n("invalid"))))
         }
         for (s in samples("honk.bot.create")) {
             val r = s.getValue("result").jsonObject

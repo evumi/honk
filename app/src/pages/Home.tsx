@@ -1,10 +1,11 @@
 import type { JSX } from "nsh";
-import { Canvas, createAnimatedValue, effect, List, Path2D, safeArea, Scroll, signal, Text, View } from "nsh";
+import { Canvas, computed, createAnimatedValue, effect, List, Path2D, safeArea, Scroll, signal, Text, View } from "nsh";
 import { AlertDialog, Input, NavPage } from "nsh/base";
 import { Avatar, Badge, EdgeBlur, Glyph, glass, Row, Section, UI_ICONS } from "../components";
 import { lastSeen, listTime } from "../format";
 import { createDissolve, Dissolve } from "../fx/Dissolve";
-import { api, type Chat } from "../host";
+import { api, type Chat, type Message, type Retention } from "../host";
+import { chooseRetention, exportMessages, importMessages, retentionLabel } from "../archive";
 import { chats, devices, loadDevices, loadStatus, nav, reload, status } from "../store";
 import { palette, type Palette } from "../theme";
 import { lang, langChoice, setLangChoice, tr, type LangChoice } from "../i18n";
@@ -98,6 +99,67 @@ function ChatsTab(props: { p: Palette }) {
   };
   const editing = signal(false);
   const shown = () => chats().filter((c) => matches(c, query().trim()));
+
+  // Messages matching the search, 50 a page, under the matching chats.
+  const found = signal<Message[]>([]);
+  let searchSeq = 0;
+  let moreToFind = false;
+  let findingMore = false;
+  effect(() => {
+    const q = query().trim();
+    const seq = ++searchSeq;
+    moreToFind = false;
+    if (!q) {
+      found.set([]);
+      return;
+    }
+    void api.search(q).then(
+      (ms) => {
+        if (seq !== searchSeq) return;
+        moreToFind = ms.length >= 50;
+        found.set(ms);
+      },
+      () => seq === searchSeq && found.set([]),
+    );
+  });
+  const findMore = async () => {
+    const last = found().at(-1);
+    if (!moreToFind || findingMore || !last) return;
+    findingMore = true;
+    const seq = searchSeq;
+    try {
+      const ms = await api.search(query().trim(), last.id);
+      if (seq !== searchSeq) return;
+      moreToFind = ms.length >= 50;
+      found.set([...found(), ...ms]);
+    } catch {
+      moreToFind = false;
+    } finally {
+      findingMore = false;
+    }
+  };
+
+  // The list's rows: matching chats, then a 「消息」 group of matching messages. Unchanged rows keep their object.
+  let itemCache = new Map<string, Item>();
+  const items = computed<Item[]>(() => {
+    const next = new Map<string, Item>();
+    const keep = (key: string, chat?: Chat, msg?: Message, bot?: Chat["bot"]): Item => {
+      const old = itemCache.get(key);
+      const item = old && old.chat === chat && old.msg === msg && old.bot === bot ? old : { key, chat, msg, bot };
+      next.set(key, item);
+      return item;
+    };
+    const out: Item[] = shown().map((c) => keep(`c${c.bot.id}`, c));
+    if (query().trim()) {
+      const hits = found().flatMap((m) => {
+        const bot = chats().find((c) => c.bot.id === m.botId)?.bot;
+        return bot ? [keep(`m${m.id}`, undefined, m, bot)] : [];
+      });
+      if (hits.length > 0) out.push(keep("header"), ...hits);
+    }
+    itemCache = next;
+    return out;
+  });
   return (
     <View style={{ flex: 1 }}>
       <Header
@@ -147,8 +209,9 @@ function ChatsTab(props: { p: Palette }) {
         </View>
       </If>
       <List
-        each={shown()}
-        keyExtractor={(c) => String(c.bot.id)}
+        each={items()}
+        keyExtractor={(i) => i.key}
+        onLoadMore={() => void findMore()}
         estimatedItemSize={80}
         style={{ flex: 1 }}
         contentStyle={{ paddingBottom: safeArea().bottom + 100 } as never}
@@ -156,12 +219,64 @@ function ChatsTab(props: { p: Palette }) {
         onRefresh={() => void refresh()}
         empty={
           <If when={query().trim()} else={<Empty p={p()} />}>
-            <Text style={{ textAlign: "center", paddingTop: 60, fontSize: 15, color: p().hint }}>{tr("没有匹配的会话")}</Text>
+            <Text style={{ textAlign: "center", paddingTop: 60, fontSize: 15, color: p().hint }}>{tr("没有匹配的结果")}</Text>
           </If>
         }
       >
-        {(chat) => <ChatRow chat={chat()} p={p()} editing={editing()} />}
+        {(item) => (
+          <If
+            when={item().chat}
+            else={
+              <If when={item().msg} else={<GroupLabel text={tr("消息")} p={p()} />}>
+                {(m) => <MessageHit message={m()} bot={item().bot!} p={p()} />}
+              </If>
+            }
+          >
+            {(chat) => <ChatRow chat={chat()} p={p()} editing={editing()} />}
+          </If>
+        )}
       </List>
+    </View>
+  );
+}
+
+/** A row of the chat list: a chat, a matching message, or the 「消息」 label between them. */
+interface Item {
+  key: string;
+  chat?: Chat;
+  msg?: Message;
+  bot?: Chat["bot"];
+}
+
+function GroupLabel(props: { text: string; p: Palette }) {
+  return (
+    <View style={{ paddingLeft: 16, paddingRight: 16, paddingTop: 14, paddingBottom: 6, backgroundColor: props.p.bg }}>
+      <Text testID="messages-group" style={{ fontSize: 13, fontWeight: "600", color: props.p.hint }}>{props.text}</Text>
+    </View>
+  );
+}
+
+/** A message that matches the search; opens its chat on that message. */
+function MessageHit(props: { message: Message; bot: Chat["bot"]; p: Palette }) {
+  const m = () => props.message;
+  return (
+    <View
+      testID={`hit-${m().id}`}
+      role="button"
+      onPress={() => nav.push({ name: "chat", botId: m().botId, messageId: m().id })}
+      activeStyle={{ backgroundColor: props.p.pill }}
+      style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingLeft: 16, minHeight: 64, backgroundColor: props.p.bg }}
+    >
+      <Avatar avatar={props.bot.avatar} size={40} iconScale={0.55} />
+      <View style={{ flex: 1, paddingTop: 8, paddingBottom: 8, paddingRight: 16, gap: 2, borderBottomWidth: 0.5, borderBottomColor: props.p.separator }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <Text style={{ flex: 1, fontSize: 15, fontWeight: "600", color: props.p.text, numberOfLines: 1 }}>{props.bot.name}</Text>
+          <Text style={{ fontSize: 13, color: props.p.hint }}>{listTime(m().date)}</Text>
+        </View>
+        <Text style={{ fontSize: 15, lineHeight: 20, color: props.p.hint, numberOfLines: 2 }}>
+          {m().title && m().body ? `${m().title}${lang() === "zh" ? "：" : ": "}${m().body}` : m().title || m().body}
+        </Text>
+      </View>
     </View>
   );
 }
@@ -418,6 +533,8 @@ function SettingsTab(props: { p: Palette }) {
       () => api.removeDevice(id),
     );
   const deviceName = (d: { name: string; platform: string }) => d.name || (d.platform === "ios" ? "iPhone" : "Android");
+  const retention = signal<Retention>(0);
+  void api.retention().then((d) => retention.set(d), () => {});
   const host = () => {
     const u = status()?.gatewayURL ?? "";
     return u.replace(/^https?:\/\//, "").replace(/\/$/, "") || "…";
@@ -445,6 +562,19 @@ function SettingsTab(props: { p: Palette }) {
       <Section title={tr("网关")} p={p()}>
         <Row p={p()} first label={host()} value={tr("更改")} onPress={() => nav.push({ name: "gateway" })} testID="gateway-row" chevron />
         <Row p={p()} label={tr("立即同步")} color={p().accent} onPress={() => void api.refresh().then(reload)} />
+      </Section>
+      <Section title={tr("消息")} p={p()} footer={tr("超过保留期限的消息会从这台设备上删除，不影响网关。导出的 JSON Lines 文件可以在这里导入回来；属于这台设备上没有的 Bot 的消息会被跳过。")}>
+        <Row
+          p={p()}
+          first
+          label={tr("保留期限")}
+          value={retentionLabel(retention())}
+          onPress={() => void chooseRetention(retention()).then((d) => retention.set(d))}
+          testID="retention-row"
+          chevron
+        />
+        <Row p={p()} label={tr("导出全部消息")} color={p().accent} onPress={() => void exportMessages()} testID="export-all" />
+        <Row p={p()} label={tr("导入消息")} color={p().accent} onPress={() => void importMessages()} testID="import" />
       </Section>
       <Section title={tr("通用")} p={p()}>
         <Row p={p()} first label={tr("语言")} value={languageLabel(langChoice())} onPress={() => void pickLanguage()} testID="language-row" chevron />

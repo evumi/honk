@@ -14,7 +14,7 @@ import { createDissolve, Dissolve } from "../fx/Dissolve";
 
 interface Row { m: Message; day: boolean }
 
-export function ChatPage(props: { botId: string }) {
+export function ChatPage(props: { botId: string; messageId?: number }) {
   const p = palette;
   // Newest first, as the host answers: the list is inverted (item 0 at the
   // bottom), so it opens on the newest message and stays there as messages
@@ -27,8 +27,32 @@ export function ChatPage(props: { botId: string }) {
   // Scrolled up away from the newest messages, and how many arrived since.
   const away = signal(false);
   const fresh = signal(0);
+  // A search result opens the chat on a window of messages around it instead of the newest; "back to the newest"
+  // (or nothing found) clears it.
+  const anchor = signal<number | undefined>(props.messageId);
+  let scrolledToAnchor = false;
+
+  const loadAround = async (id: number) => {
+    const window = await api.messagesAround(props.botId, id);
+    // Older messages already loaded past the window stay.
+    const floor = window.at(-1)?.id;
+    const older = floor === undefined ? [] : messages().filter((m) => m.id < floor);
+    messages.set(reuse(messages(), [...window, ...older], (m) => String(m.id)));
+    // The window's older half may stop short without the start being near: the first scroll up asks for more.
+    reachedStart = false;
+    const at = messages().findIndex((m) => m.id === id);
+    if (at < 0) {
+      anchor.set(undefined);
+    } else if (!scrolledToAnchor) {
+      scrolledToAnchor = true;
+      // Once the rows are laid out.
+      setTimeout(() => list?.scrollToIndex({ index: at, animated: false, viewPosition: 0.5 }), 60);
+    }
+  };
 
   const load = async () => {
+    const around = anchor();
+    if (around !== undefined) return loadAround(around);
     const latest = await api.messages(props.botId);
     const newestBefore = messages()[0]?.id;
     if (away() && newestBefore !== undefined) {
@@ -75,7 +99,14 @@ export function ChatPage(props: { botId: string }) {
     if (!away()) fresh.set(0);
   };
   const jumpToLatest = () => {
-    list?.scrollToIndex({ index: 0, animated: true });
+    if (anchor() !== undefined) {
+      // Leaves the window: the effect above loads the newest page.
+      anchor.set(undefined);
+      messages.set([]);
+      reachedStart = false;
+    } else {
+      list?.scrollToIndex({ index: 0, animated: true });
+    }
     away.set(false);
     fresh.set(0);
   };
@@ -149,7 +180,7 @@ export function ChatPage(props: { botId: string }) {
 
         <EdgeBlur edge="bottom" height={safeArea().bottom + 80} tint={p().chatWall} />
         {/* Back to the newest message, with how many arrived while scrolled up. */}
-        <If when={away() || fresh() > 0}>
+        <If when={away() || fresh() > 0 || anchor() !== undefined}>
           <View
             testID="jump-latest"
             role="button"

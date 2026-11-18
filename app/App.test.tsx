@@ -147,7 +147,7 @@ test("search filters the chat list", async () => {
   const app = await open("./App.tsx", { locale: "zh-Hans-CN",  host: host() });
   await app.waitFor("text:Berth 部署");
   await app.type("id:search", "告警");
-  await app.waitFor("text:没有匹配的会话");
+  await app.waitFor("text:没有匹配的结果");
   await app.clear("id:search");
   await app.type("id:search", "berth");
   await app.waitFor("text:Berth 部署");
@@ -624,4 +624,108 @@ test("the device section is in English too", async () => {
   expect(app.texts()).toContain("Add device");
   expect(app.texts()).toContain("Remove this device from the group");
   expect(app.texts()).toContain("Delete all data");
+});
+
+test("search lists matching messages under the chats and opens the chat on one", async () => {
+  const hit = { id: 7, botId: "aZ3kQ9xT", title: "部署成功", body: "sub2api 已上线", html: "", data: "", level: "active", group: "", url: "", copy: "", icon: "", collapseId: "", date: Date.now(), read: true };
+  const app = await open("./App.tsx", { locale: "zh-Hans-CN", host: host({ "honk.search": [hit] }) });
+  await app.waitFor("text:Berth 部署");
+  await app.type("id:search", "部署");
+  await app.waitFor("id:messages-group");
+  expect(app.texts()).toContain("消息");
+  expect(app.host.calls().filter((c) => c.name === "honk.search").at(-1)?.data).toEqual({ query: "部署" });
+  await app.press("id:hit-7");
+  await app.waitFor("id:chat");
+  await app.waitUntil(() => app.host.calls().some((c) => c.name === "honk.messages"));
+  expect(app.host.calls().find((c) => c.name === "honk.messages")?.data).toEqual({ botId: "aZ3kQ9xT", around: 7, limit: 50 });
+  // Not marked read: the newest messages have not been seen.
+  expect(app.host.calls().some((c) => c.name === "honk.markRead")).toBe(false);
+  // The way back to the newest messages is there.
+  await app.waitFor("id:jump-latest");
+});
+
+test("a search with no message hits shows no messages group", async () => {
+  const app = await open("./App.tsx", { locale: "zh-Hans-CN", host: host({ "honk.search": [] }) });
+  await app.waitFor("text:Berth 部署");
+  await app.type("id:search", "berth");
+  await app.waitFor("text:Berth 部署");
+  await app.wait(200);
+  expect(app.count("id:messages-group")).toBe(0);
+});
+
+test("settings keeps messages for a chosen period after confirming", async () => {
+  let days = 0;
+  const app = await open("./App.tsx", {
+    locale: "zh-Hans-CN",
+    host: host({ "honk.retention.get": () => days, "honk.retention.set": (d: unknown) => (days = (d as { days: number }).days) }),
+  });
+  await app.press("id:tab-settings");
+  await app.waitFor("text:永久");
+  // The period sheet, then the confirmation that older messages go.
+  app.onDialog((d) => (d.sheet ? "30 天" : "删除"));
+  await app.press("id:retention-row");
+  await app.waitUntil(() => app.host.calls().some((c) => c.name === "honk.retention.set"));
+  expect(app.host.calls().find((c) => c.name === "honk.retention.set")?.data).toEqual({ days: 30 });
+  await app.waitFor("text:30 天");
+});
+
+test("cancelling the retention confirmation changes nothing", async () => {
+  const app = await open("./App.tsx", { locale: "zh-Hans-CN", host: host({ "honk.retention.get": 0, "honk.retention.set": 90 }) });
+  await app.press("id:tab-settings");
+  app.onDialog((d) => (d.sheet ? "90 天" : "取消"));
+  await app.press("id:retention-row");
+  await app.wait(400);
+  expect(app.host.calls().some((c) => c.name === "honk.retention.set")).toBe(false);
+});
+
+test("exports all messages from settings and one chat from its settings", async () => {
+  const app = await open("./App.tsx", { locale: "zh-Hans-CN", host: host({ "honk.export": { count: 3, shared: true } }) });
+  await app.press("id:tab-settings");
+  await app.press("id:export-all");
+  await app.waitUntil(() => app.host.calls().some((c) => c.name === "honk.export"));
+  expect(app.host.calls().find((c) => c.name === "honk.export")?.data ?? null).toBeNull();
+  await app.press("id:tab-chats");
+  await app.press("id:chat-aZ3kQ9xT");
+  await app.press("id:open-settings");
+  await app.press("id:export-chat");
+  await app.waitUntil(() => app.host.calls().filter((c) => c.name === "honk.export").length === 2);
+  expect(app.host.calls().filter((c) => c.name === "honk.export")[1].data).toEqual({ botId: "aZ3kQ9xT" });
+});
+
+test("exporting nothing says so", async () => {
+  const app = await open("./App.tsx", { locale: "zh-Hans-CN", host: host({ "honk.export": { count: 0, shared: false } }) });
+  await app.press("id:tab-settings");
+  const seen: string[] = [];
+  app.onDialog((d) => (seen.push(d.title ?? ""), "好"));
+  await app.press("id:export-all");
+  await app.waitUntil(() => seen.length > 0);
+  expect(seen).toEqual(["没有可导出的消息"]);
+});
+
+test("importing reports what was added and what was skipped", async () => {
+  const app = await open("./App.tsx", {
+    locale: "zh-Hans-CN",
+    host: host({ "honk.import": { imported: 5, existing: 2, unknownBot: 1, invalid: 0 } }),
+  });
+  await app.press("id:tab-settings");
+  const seen: (string | null | undefined)[] = [];
+  app.onDialog((d) => (seen.push(d.title, d.message), "好"));
+  await app.press("id:import");
+  await app.waitUntil(() => seen.length > 0);
+  expect(seen[0]).toBe("导入完成");
+  expect(seen[1]).toContain("新增 5 条消息。");
+  expect(seen[1]).toContain("2 条已经在这台设备上。");
+  expect(seen[1]).toContain("1 条属于这台设备上没有的 Bot，已跳过。");
+  expect(seen[1]).not.toContain("无法读取");
+});
+
+test("cancelling the import picker says nothing", async () => {
+  const app = await open("./App.tsx", { locale: "zh-Hans-CN", host: host({ "honk.import": null }) });
+  await app.press("id:tab-settings");
+  const seen: string[] = [];
+  app.onDialog((d) => (seen.push(d.title ?? ""), "好"));
+  await app.press("id:import");
+  await app.waitUntil(() => app.host.calls().some((c) => c.name === "honk.import"));
+  await app.wait(200);
+  expect(seen).toEqual([]);
 });

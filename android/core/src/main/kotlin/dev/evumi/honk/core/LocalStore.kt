@@ -221,6 +221,130 @@ class LocalStore(private val sql: Sql) {
         )
     }
 
+    /**
+     * A window of a bot's messages around [around], newest first: the message, up to `limit / 2` newer ones and
+     * the rest older. When the bot has no such message it is the newest [limit], as [messages].
+     */
+    fun messagesAround(botId: String, around: Long, limit: Int = 50): List<StoredMessage> = locked {
+        if (scalar("SELECT id FROM messages WHERE id = ? AND bot_id = ?", listOf(around, botId)) == null) {
+            return@locked sql.query(
+                "SELECT $MESSAGE_COLS FROM messages WHERE bot_id = ? ORDER BY id DESC LIMIT ?", listOf(botId, limit), ::readMessage,
+            )
+        }
+        val newer = sql.query(
+            "SELECT $MESSAGE_COLS FROM messages WHERE bot_id = ? AND id > ? ORDER BY id ASC LIMIT ?",
+            listOf(botId, around, limit / 2), ::readMessage,
+        )
+        val older = sql.query(
+            "SELECT $MESSAGE_COLS FROM messages WHERE bot_id = ? AND id <= ? ORDER BY id DESC LIMIT ?",
+            listOf(botId, around, limit - newer.size), ::readMessage,
+        )
+        newer.reversed() + older
+    }
+
+    /**
+     * Messages of every bot whose title or body contains [query] (case-insensitive for ASCII), newest first, older
+     * than [before] when given: one page of [limit]. `%`, `_` and `\` match literally. An empty query matches nothing.
+     */
+    fun search(query: String, before: Long? = null, limit: Int = 50): List<StoredMessage> {
+        val q = query.trim()
+        if (q.isEmpty()) return emptyList()
+        val pattern = likePattern(q)
+        return locked {
+            sql.query(
+                """
+                SELECT $MESSAGE_COLS FROM messages
+                WHERE id < ? AND (title LIKE ? ESCAPE '\' OR body LIKE ? ESCAPE '\') ORDER BY id DESC LIMIT ?
+                """.trimIndent(),
+                listOf(before ?: Long.MAX_VALUE, pattern, pattern, limit),
+                ::readMessage,
+            )
+        }
+    }
+
+    // retention
+
+    /** How long messages are kept, in days; 0 keeps them forever (the default). */
+    var retentionDays: Int
+        get() = locked {
+            sql.query("SELECT value FROM meta WHERE key = 'retention'") { it.text(0) }.firstOrNull()?.toIntOrNull()?.coerceAtLeast(0) ?: 0
+        }
+        set(value) = locked {
+            sql.run(
+                "INSERT INTO meta (key, value) VALUES ('retention', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                listOf(value.coerceAtLeast(0).toString()),
+            )
+        }
+
+    /**
+     * Deletes the messages older than the retention period (a day is 24 hours); returns their notification ids.
+     * Does nothing when messages are kept forever.
+     */
+    fun pruneExpired(now: Long = System.currentTimeMillis()): List<String> {
+        val days = retentionDays
+        if (days <= 0) return emptyList()
+        val cutoff = now - days * 86_400_000L
+        return locked {
+            transaction {
+                val ids = sql.query("SELECT notif_id FROM messages WHERE date < ? AND notif_id IS NOT NULL", listOf(cutoff)) {
+                    it.text(0)
+                }.filterNotNull()
+                sql.run("DELETE FROM messages WHERE date < ?", listOf(cutoff))
+                ids
+            }
+        }
+    }
+
+    // export and import
+
+    /** A bot's messages (every bot's when null), oldest first, for [MessageArchive]. */
+    fun exportMessages(botId: String? = null): List<StoredMessage> = locked {
+        if (botId != null) {
+            sql.query("SELECT $MESSAGE_COLS FROM messages WHERE bot_id = ? ORDER BY id", listOf(botId), ::readMessage)
+        } else {
+            sql.query("SELECT $MESSAGE_COLS FROM messages ORDER BY id", emptyList(), ::readMessage)
+        }
+    }
+
+    /** What [importMessages] did with the items it was given. */
+    data class ImportSummary(
+        val imported: Int = 0,
+        /** Already stored (the same message id), or replaced by a newer message with its collapse id. */
+        val existing: Int = 0,
+        /** Of a bot this device does not have: bots belong to the gateway's account, so they are not created here. */
+        val unknownBot: Int = 0,
+    )
+
+    /**
+     * Adds archived messages the way [apply] does, so importing the same file twice changes nothing. Only `message`
+     * items of bots stored here are imported; they arrive read and without a notification. Same as LocalStore.swift.
+     */
+    fun importMessages(items: List<QueuedMessage>): ImportSummary = locked {
+        transaction {
+            var imported = 0
+            var existing = 0
+            var unknownBot = 0
+            for (m in items) {
+                if (m.kind != QueuedMessage.Kind.MESSAGE) continue
+                if (scalar("SELECT COUNT(*) FROM bots WHERE id = ?", listOf(m.botId)) != 1L) {
+                    unknownBot++
+                    continue
+                }
+                val stored = scalar("SELECT id FROM messages WHERE id = ?", listOf(m.id)) != null
+                val newer = m.collapseId.isNotEmpty() &&
+                    scalar("SELECT id FROM messages WHERE bot_id = ? AND collapse_id = ? AND id > ? LIMIT 1", listOf(m.botId, m.collapseId, m.id)) != null
+                if (stored || newer) {
+                    existing++
+                    continue
+                }
+                insert(m, null)
+                sql.run("UPDATE messages SET read = 1 WHERE id = ?", listOf(m.id))
+                imported++
+            }
+            ImportSummary(imported, existing, unknownBot)
+        }
+    }
+
     /** The chat list: pinned first, then by latest message. */
     fun chats(): List<ChatSummary> = locked {
         val rows = sql.query(
@@ -294,7 +418,8 @@ class LocalStore(private val sql: Sql) {
             val ids = sql.query("SELECT notif_id FROM messages WHERE notif_id IS NOT NULL") { it.text(0) }.filterNotNull()
             sql.exec("DELETE FROM messages")
             sql.exec("DELETE FROM bots")
-            sql.exec("DELETE FROM meta")
+            // The retention choice is about this phone, not the gateway: it stays.
+            sql.exec("DELETE FROM meta WHERE key <> 'retention'")
             ids
         }
     }
@@ -334,6 +459,16 @@ class LocalStore(private val sql: Sql) {
         sql.query(q, args) { if (it.isNull(0)) null else it.long(0) }.firstOrNull()
 
     companion object {
+        /** `%`, `_` and the escape character matched literally in a LIKE pattern (used with `ESCAPE '\'`). */
+        internal fun likePattern(q: String): String = buildString {
+            append('%')
+            for (ch in q) {
+                if (ch == '\\' || ch == '%' || ch == '_') append('\\')
+                append(ch)
+            }
+            append('%')
+        }
+
         private const val BOT_COLS = "id, name, avatar, default_level, created_at, updated_at"
 
         /** Reads [BOT_COLS] from the first six columns of a row. */

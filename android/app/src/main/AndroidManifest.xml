@@ -37,6 +37,16 @@
         <receiver
             android:name=".NotificationActionReceiver"
             android:exported="false" />
+        <!-- Hands an exported message file to the share sheet (honk.export). -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.exports"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
 
         <!-- Notifications the app builds itself; this is only the fallback for any FCM notification message. -->
         <meta-data

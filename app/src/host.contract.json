@@ -52,7 +52,7 @@
       ]
     },
     "honk.messages": {
-      "optional": ["before"],
+      "optional": ["before", "around"],
       "samples": [
         {
           "args": { "botId": "aZ3kQ9xT", "before": 8, "limit": 50 },
@@ -63,7 +63,37 @@
             }
           ]
         },
-        { "args": { "botId": "aZ3kQ9xT", "limit": 50 }, "result": [] }
+        { "args": { "botId": "aZ3kQ9xT", "limit": 50 }, "result": [] },
+        { "args": { "botId": "aZ3kQ9xT", "around": 7, "limit": 50 }, "result": [] }
+      ]
+    },
+    "honk.search": {
+      "optional": ["before"],
+      "samples": [
+        {
+          "args": { "query": "部署", "before": 8 },
+          "result": [
+            {
+              "id": 7, "botId": "aZ3kQ9xT", "title": "部署成功", "body": "sluice 已上线", "html": "<p>{{status}}</p>", "data": "{\"status\":\"ok\"}",
+              "level": "active", "group": "prod", "url": "https://example.com", "copy": "dep_1", "icon": "", "open": "url", "image": "https://example.com/i.png", "parseMode": "Markdown", "silent": false, "collapseId": "dep", "date": 1700000001000, "read": false
+            }
+          ]
+        },
+        { "args": { "query": "nothing" }, "result": [] }
+      ]
+    },
+    "honk.retention.get": { "samples": [{ "args": null, "result": 0 }, { "args": null, "result": 90 }] },
+    "honk.retention.set": { "samples": [{ "args": { "days": 30 }, "result": 30 }, { "args": { "days": 0 }, "result": 0 }] },
+    "honk.export": {
+      "samples": [
+        { "args": null, "result": { "count": 12, "shared": true } },
+        { "args": { "botId": "aZ3kQ9xT" }, "result": { "count": 0, "shared": false } }
+      ]
+    },
+    "honk.import": {
+      "samples": [
+        { "args": null, "result": { "imported": 5, "existing": 2, "unknownBot": 1, "invalid": 0 } },
+        { "args": null, "result": null }
       ]
     },
     "honk.markRead": { "samples": [{ "args": { "botId": "aZ3kQ9xT" }, "result": true }] },

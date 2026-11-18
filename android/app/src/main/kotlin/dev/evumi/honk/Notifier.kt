@@ -13,6 +13,7 @@ import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.Typeface
 import android.net.Uri
 import android.os.Build
@@ -27,10 +28,12 @@ import androidx.core.content.pm.ShortcutInfoCompat
 import androidx.core.content.pm.ShortcutManagerCompat
 import androidx.core.graphics.drawable.IconCompat
 import dev.evumi.honk.core.Avatar
+import dev.evumi.honk.core.AvatarIcons
 import dev.evumi.honk.core.Banner
 import dev.evumi.honk.core.Bot
 import dev.evumi.honk.core.LocalAvatars
 import dev.evumi.honk.core.NotificationPlan
+import dev.evumi.honk.core.SvgPath
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
@@ -136,7 +139,7 @@ class Notifier(private val context: Context) {
     fun show(c: Content) {
         if (!canPost()) return
         ensureChannel(c.botId, c.botName)
-        val avatar = avatarBitmap(Avatar.parse(c.avatar), c.botName)
+        val avatar = avatarBitmap(Avatar.parse(c.avatar))
         val icon = avatar?.let(IconCompat::createWithBitmap)
         val bot = Person.Builder()
             .setName(c.botName)
@@ -272,11 +275,10 @@ class Notifier(private val context: Context) {
 
     /**
      * The avatar as a bitmap: an https image (cached, 5 s timeout, 2 MB at
-     * most) or a picked image kept on the phone, else the preset's colour with the bot name's first letter. The
-     * preset icon itself is drawn by the nsh app; the notification uses the
-     * letter so the app ships no icon set of its own.
+     * most) or a picked image kept on the phone, else the preset: its icon in white on its colour, the same as the
+     * nsh app draws it (the path data in [AvatarIcons] is generated from the app's `ICONS`).
      */
-    fun avatarBitmap(avatar: Avatar, name: String, size: Int = 192): Bitmap? {
+    fun avatarBitmap(avatar: Avatar, size: Int = 192): Bitmap? {
         if (avatar is Avatar.Image) {
             image(avatar.url)?.let { return circle(it, size) }
         }
@@ -287,15 +289,37 @@ class Notifier(private val context: Context) {
         val canvas = Canvas(bmp)
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = avatar.argb }
         canvas.drawCircle(size / 2f, size / 2f, size / 2f, paint)
-        val letter = name.trim().let { if (it.isEmpty()) "H" else it.substring(0, it.offsetByCodePoints(0, 1)).uppercase() }
-        paint.color = Color.WHITE
-        paint.textSize = size * 0.46f
-        paint.typeface = Typeface.DEFAULT_BOLD
-        paint.textAlign = Paint.Align.CENTER
-        val y = size / 2f - (paint.descent() + paint.ascent()) / 2
-        canvas.drawText(letter, size / 2f, y, paint)
+        drawIcon(canvas, (avatar as? Avatar.Preset)?.icon ?: "bell", size)
         return bmp
     }
+
+    /** The preset icon as the app's `Glyph` draws it: 24-unit grid at half the size, stroke 1.8, round caps and joins, white. */
+    private fun drawIcon(canvas: Canvas, icon: String, size: Int) {
+        val d = AvatarIcons.PATHS[icon] ?: AvatarIcons.PATHS.getValue("bell")
+        val path = Path()
+        for (op in SvgPath.parse(d)) {
+            when (op) {
+                is SvgPath.Op.MoveTo -> path.moveTo(op.x, op.y)
+                is SvgPath.Op.LineTo -> path.lineTo(op.x, op.y)
+                is SvgPath.Op.CubicTo -> path.cubicTo(op.x1, op.y1, op.x2, op.y2, op.x, op.y)
+                SvgPath.Op.Close -> path.close()
+            }
+        }
+        val scale = size * ICON_SCALE / 24f
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            color = Color.WHITE
+            strokeWidth = 1.8f
+            strokeCap = Paint.Cap.ROUND
+            strokeJoin = Paint.Join.ROUND
+        }
+        canvas.save()
+        canvas.translate(size / 2f - 12 * scale, size / 2f - 12 * scale)
+        canvas.scale(scale, scale)
+        canvas.drawPath(path, paint)
+        canvas.restore()
+    }
+
 
     /** The message's picture for the notification: https, 5 MB at most, 10 s timeout, scaled down to 1024 px. */
     private fun picture(url: String): Bitmap? =
@@ -345,6 +369,9 @@ class Notifier(private val context: Context) {
         const val CHANNEL_PREFIX = "bot-"
         const val NOTIFICATION_ID = 1
         private const val MAX_IMAGE = 2 shl 20
+
+        /** The icon's size as a share of the avatar's, as the app's `Glyph` (`iconScale`). */
+        private const val ICON_SCALE = 0.5f
 
         /** Where picked avatar images are kept (not backed up, like the database). */
         fun localAvatars(context: Context) = LocalAvatars(File(context.noBackupFilesDir, "avatars"))

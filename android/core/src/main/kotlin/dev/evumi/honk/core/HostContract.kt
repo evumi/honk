@@ -31,8 +31,23 @@ class Args(data: Any?) {
 
 /** The arguments of the host calls that take more than one. */
 object HostArgs {
-    data class Messages(val botId: String, val before: Long?, val limit: Int) {
-        constructor(a: Args) : this(a.requireString("botId"), a.long("before"), a.long("limit")?.toInt() ?: 50)
+    /** [around]: a window around that message instead of the newest page (a search result opened in its chat). */
+    data class Messages(val botId: String, val before: Long?, val limit: Int, val around: Long? = null) {
+        constructor(a: Args) : this(a.requireString("botId"), a.long("before"), a.long("limit")?.toInt() ?: 50, a.long("around"))
+    }
+
+    data class Search(val query: String, val before: Long?) {
+        constructor(a: Args) : this(a.requireString("query"), a.long("before"))
+    }
+
+    /** [days]: 0 keeps messages forever. */
+    data class RetentionSet(val days: Int) {
+        constructor(a: Args) : this(a.require("days").toInt())
+    }
+
+    /** [botId]: one chat; null: every chat. */
+    data class Export(val botId: String?) {
+        constructor(a: Args) : this(a.string("botId"))
     }
 
     data class BotCreate(val name: String, val avatar: String, val defaultLevel: String) {
@@ -69,6 +84,10 @@ object HostArgs {
             "honk.devices.remove" -> a.requireString("deviceId")
             "honk.link.claim" -> a.requireString("code")
             "honk.messages" -> Messages(a)
+            "honk.search" -> Search(a)
+            "honk.retention.get", "honk.import" -> Unit
+            "honk.retention.set" -> RetentionSet(a)
+            "honk.export" -> Export(a) // no botId: every chat
             "honk.markRead", "honk.bot.token", "honk.bot.resetToken", "honk.bot.delete", "honk.chat.clear",
             "honk.bot.setMuted", "honk.bot.setPinned" -> a.requireString("botId")
             "honk.focus" -> Unit // a missing botId means no chat is open
@@ -144,6 +163,13 @@ object HostJson {
 
     /** `honk.link.create`: the code in groups of four, and when it stops working (Unix milliseconds). */
     fun linkCreated(code: String, expiresAt: Long): Map<String, Any?> = mapOf("code" to code, "expiresAt" to expiresAt)
+
+    /** `honk.export`: how many messages went into the file, and whether the share sheet was used. */
+    fun exportResult(count: Int, shared: Boolean): Map<String, Any?> = mapOf("count" to count, "shared" to shared)
+
+    /** `honk.import`. */
+    fun importResult(r: LocalStore.ImportSummary, invalid: Int): Map<String, Any?> =
+        mapOf("imported" to r.imported, "existing" to r.existing, "unknownBot" to r.unknownBot, "invalid" to invalid)
 
     fun botCreated(b: Bot, token: String): Map<String, Any?> = mapOf("bot" to bot(b), "token" to token)
 
