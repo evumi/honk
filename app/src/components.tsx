@@ -1,6 +1,7 @@
 import type { JSX } from "nsh";
 import { Canvas, Image, signal, keyboardFrame, Path2D, safeArea, Scroll, Text, View } from "nsh";
 import { api } from "./host";
+import { badgeText } from "./format";
 import { tr } from "./i18n";
 import { palette, type Palette } from "./theme";
 
@@ -306,7 +307,7 @@ export function Badge(props: { count: number; muted?: boolean; p: Palette }) {
         backgroundColor: props.muted ? "#8e8e93" : props.p.accent, alignItems: "center", justifyContent: "center",
       }}
     >
-      <Text style={{ color: "#ffffff", fontSize: 13, fontWeight: "600" }}>{String(props.count)}</Text>
+      <Text style={{ color: "#ffffff", fontSize: 13, fontWeight: "600" }}>{badgeText(props.count)}</Text>
     </View>
   );
 }

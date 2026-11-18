@@ -15,7 +15,10 @@ interface Row { m: Message; day: boolean }
 
 export function ChatPage(props: { botId: string }) {
   const p = palette;
-  const messages = signal<Message[]>([]); // oldest first
+  // Newest first, as the host answers: the list is inverted (item 0 at the
+  // bottom), so it opens on the newest message and stays there as messages
+  // arrive, natively, however late they load.
+  const messages = signal<Message[]>([]);
   const chat = () => chatOf(props.botId);
   let loadingOlder = false;
   let reachedStart = false;
@@ -23,33 +26,34 @@ export function ChatPage(props: { botId: string }) {
   // Scrolled up away from the newest messages, and how many arrived since.
   const away = signal(false);
   const fresh = signal(0);
-  // Where the viewport starts when scrolled to the newest message.
-  let endPos: { index: number; offset: number } | null = null;
-  const measureEnd = () =>
-    requestAnimationFrame(() => void list?.measureScrollPosition().then((pos) => (endPos = pos)));
 
   const load = async () => {
     const latest = await api.messages(props.botId);
-    const lastBefore = messages().at(-1)?.id;
-    const next = [...latest].reverse();
-    if (away() && lastBefore !== undefined) {
-      const at = next.findIndex((m) => m.id === lastBefore);
-      if (at >= 0) fresh.set(fresh() + next.length - 1 - at);
+    const newestBefore = messages()[0]?.id;
+    if (away() && newestBefore !== undefined) {
+      const at = latest.findIndex((m) => m.id === newestBefore);
+      if (at > 0) fresh.set(fresh() + at);
     }
-    messages.set(reuse(messages(), next, (m) => String(m.id)));
-    if (!away()) measureEnd();
-    reachedStart = latest.length < 50;
+    // Older messages already loaded past this page stay.
+    const floor = latest.at(-1)?.id;
+    const older = floor === undefined ? [] : messages().filter((m) => m.id < floor);
+    messages.set(reuse(messages(), [...latest, ...older], (m) => String(m.id)));
+    if (older.length === 0) reachedStart = latest.length < 50;
     // Only when something is unread: marking read announces a change, which
     // reloads this page, which would mark read again.
     if (latest.some((m) => !m.read)) await api.markRead(props.botId);
   };
   const loadOlder = async () => {
-    if (loadingOlder || reachedStart || messages().length === 0) return;
+    const oldest = messages().at(-1);
+    if (loadingOlder || reachedStart || !oldest) return;
     loadingOlder = true;
-    const older = await api.messages(props.botId, messages()[0].id);
-    reachedStart = older.length < 50;
-    messages.set([...older.reverse(), ...messages()]);
-    loadingOlder = false;
+    try {
+      const older = await api.messages(props.botId, oldest.id);
+      reachedStart = older.length < 50;
+      messages.set([...messages(), ...older]);
+    } finally {
+      loadingOlder = false;
+    }
   };
 
   // Reload when the host reports a change (a push arrived, an edit landed).
@@ -63,16 +67,16 @@ export function ChatPage(props: { botId: string }) {
     void reload();
   });
 
+  // Positions count from the bottom (item 0's side) in an inverted list.
   const checkPosition = async () => {
     const pos = await list?.measureScrollPosition();
-    away.set(!!pos && !!endPos && (pos.index < endPos.index || (pos.index === endPos.index && pos.offset < endPos.offset - 60)));
+    away.set(!!pos && (pos.index > 0 || pos.offset > 60));
     if (!away()) fresh.set(0);
   };
   const jumpToLatest = () => {
-    list?.scrollToEnd({ animated: true });
+    list?.scrollToIndex({ index: 0, animated: true });
     away.set(false);
     fresh.set(0);
-    measureEnd();
   };
 
   // Rows carry whether they start a day, so a row depends on its own item only
@@ -83,7 +87,8 @@ export function ChatPage(props: { botId: string }) {
     const ms = messages();
     const next = new Map<string, Row>();
     const out = ms.map((m, i) => {
-      const day = i === 0 || !sameDay(ms[i - 1].date, m.date);
+      // The older neighbour is the next item.
+      const day = i === ms.length - 1 || !sameDay(ms[i + 1].date, m.date);
       const key = String(m.id);
       const old = rowCache.get(key);
       const row = old && old.m === m && old.day === day ? old : { m, day };
@@ -106,10 +111,10 @@ export function ChatPage(props: { botId: string }) {
           each={rows()}
           keyExtractor={(r) => String(r.m.id)}
           estimatedItemSize={150}
-          initialScrollAtEnd
+          inverted
           ref={(r: ListRef) => (list = r)}
           onScrollEnd={() => void checkPosition()}
-          onLoadMoreAtStart={() => void loadOlder()}
+          onLoadMore={() => void loadOlder()}
           style={{ flex: 1 }}
           contentStyle={{ paddingTop: safeArea().top + 60, paddingBottom: safeArea().bottom + 70, paddingLeft: 12, paddingRight: 12, gap: 10 } as never}
           empty={
