@@ -126,8 +126,10 @@ object HostJson {
     fun gatewayGet(url: String, defaultUrl: String, custom: Boolean, registerKey: String): Map<String, Any?> =
         mapOf("url" to url, "defaultURL" to defaultUrl, "custom" to custom, "registerKey" to registerKey)
 
-    fun gatewayTest(url: String, version: String, registerKeyRequired: Boolean): Map<String, Any?> =
-        mapOf("ok" to true, "url" to url, "version" to version, "registerKeyRequired" to registerKeyRequired)
+    /** [push]: how the gateway sends pushes per platform; left out for a gateway that does not say. */
+    fun gatewayTest(url: String, version: String, registerKeyRequired: Boolean, push: ApiClient.PushRoutes? = null): Map<String, Any?> =
+        mapOf("ok" to true, "url" to url, "version" to version, "registerKeyRequired" to registerKeyRequired) +
+            (if (push != null) mapOf("push" to mapOf("ios" to push.ios, "android" to push.android)) else emptyMap())
 
     fun gatewayTestFailed(error: String): Map<String, Any?> = mapOf("ok" to false, "error" to error)
 

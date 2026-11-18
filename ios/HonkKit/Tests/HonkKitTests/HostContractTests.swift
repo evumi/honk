@@ -136,7 +136,8 @@ private func chat(_ j: JSON) -> ChatSummary {
         for s in try results("honk.gateway.test") {
             let r = s["result"] as! JSON
             let out = r["ok"] as! Bool
-                ? HostJSON.gatewayTest(url: r["url"] as! String, version: r["version"] as! String, registerKeyRequired: r["registerKeyRequired"] as! Bool)
+                ? HostJSON.gatewayTest(url: r["url"] as! String, version: r["version"] as! String, registerKeyRequired: r["registerKeyRequired"] as! Bool,
+                                      push: (r["push"] as? JSON).map { APIClient.PushRoutes(ios: $0["ios"] as! String, android: $0["android"] as! String) })
                 : HostJSON.gatewayTest(error: r["error"] as! String)
             #expect(try canon(out) == canon(r))
         }

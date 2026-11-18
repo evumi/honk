@@ -147,7 +147,7 @@ class HostContractTest {
         for (s in samples("honk.gateway.test")) {
             val r = s.getValue("result").jsonObject
             fun str(k: String) = r.getValue(k).jsonPrimitive.content
-            val out = if (r.getValue("ok").jsonPrimitive.boolean) HostJson.gatewayTest(str("url"), str("version"), r.getValue("registerKeyRequired").jsonPrimitive.boolean) else HostJson.gatewayTestFailed(str("error"))
+            val out = if (r.getValue("ok").jsonPrimitive.boolean) HostJson.gatewayTest(str("url"), str("version"), r.getValue("registerKeyRequired").jsonPrimitive.boolean, r["push"]?.jsonObject?.let { ApiClient.PushRoutes(it.getValue("ios").jsonPrimitive.content, it.getValue("android").jsonPrimitive.content) }) else HostJson.gatewayTestFailed(str("error"))
             assertEquals(r, json(out))
         }
         for (s in samples("honk.gateway.set")) {

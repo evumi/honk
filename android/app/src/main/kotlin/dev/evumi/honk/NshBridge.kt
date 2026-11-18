@@ -101,7 +101,7 @@ class NshBridge(
         handle("honk.gateway.test") { a ->
             try {
                 val checked = service.testGateway(a.requireString("url"))
-                HostJson.gatewayTest(checked.url, checked.version, checked.registerKeyRequired)
+                HostJson.gatewayTest(checked.url, checked.version, checked.registerKeyRequired, checked.push)
             } catch (e: Exception) {
                 HostJson.gatewayTestFailed(Gateway.describe(e))
             }

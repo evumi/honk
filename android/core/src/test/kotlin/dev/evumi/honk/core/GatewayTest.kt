@@ -241,6 +241,13 @@ class GatewayTest {
         assertTrue(ApiClient(FakeGateway.BASE, null, gw).info().registerKeyRequired)
         val plain = FakeGateway { _, _, _ -> FakeGateway.ok("""{"name":"honk","version":"1","api":2}""") }
         assertTrue(!ApiClient(FakeGateway.BASE, null, plain).info().registerKeyRequired)
+        assertNull("an older gateway does not say how it pushes", ApiClient(FakeGateway.BASE, null, plain).info().push)
+        val relay = FakeGateway { _, _, _ ->
+            FakeGateway.ok("""{"name":"honk","version":"1","api":2,"features":["relay"],"push":{"ios":"direct","android":"relay"}}""")
+        }
+        val info = ApiClient(FakeGateway.BASE, null, relay).info()
+        assertEquals(listOf("relay"), info.features)
+        assertEquals(ApiClient.PushRoutes("direct", "relay"), info.push)
     }
 
     private var counter = 0

@@ -204,7 +204,10 @@ export async function demo<T>(name: string, args: unknown): Promise<T> {
         const url = normalize(String(a.url ?? ""));
         if (!url) return { ok: false, error: L("地址无效：需要 http:// 或 https:// 开头的网址", "Not a valid address: it needs http:// or https://") };
         if (url.includes("bad")) return { ok: false, error: L("无法连接到这个地址", "Can't reach this address") };
-        return { ok: true, url, version: "0.1.0", registerKeyRequired: url.includes("locked") };
+        return {
+          ok: true, url, version: "0.1.0", registerKeyRequired: url.includes("locked"),
+          push: url.includes("off") ? { ios: "off", android: "off" } : url.includes("relay") ? { ios: "relay", android: "relay" } : { ios: "direct", android: "direct" },
+        };
       }
       case "honk.gateway.set": {
         const target = a.url ? normalize(String(a.url)) ?? gateway : DEFAULT_GATEWAY;

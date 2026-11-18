@@ -188,6 +188,12 @@ const EN: Record<string, string> = {
   "注册口令": "Register key",
   "可选": "Optional",
   "需要注册口令": "needs a register key",
+  "直连": "direct",
+  "经中继": "via relay",
+  "关闭": "off",
+  "iOS 推送：{mode}": "iOS push: {mode}",
+  "Android 推送：{mode}": "Android push: {mode}",
+  "推送关闭的平台，只能在打开 App 时收到通知。": "On a platform with push off, notifications arrive only when the app is opened.",
   "网关设置了注册口令（HONK_REGISTER_KEY）时，填在这里，注册这台设备时会带上；没有就留空。":
     "If the gateway is set up with a register key (HONK_REGISTER_KEY), enter it here; it is sent when this device registers. Leave it empty otherwise.",
   "切换中…": "Switching…",

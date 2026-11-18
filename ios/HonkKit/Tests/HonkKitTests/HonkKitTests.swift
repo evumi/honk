@@ -324,6 +324,10 @@ final class MockGateway: URLProtocol {
         #expect(try await api.info().registerKeyRequired)
         MockGateway.handler = { _ in (200, #"{"ok":true,"result":{"name":"honk","version":"1","api":2}}"#) }
         #expect(try await api.info().registerKeyRequired == false)
+        #expect(try await api.info().push == nil, "an older gateway does not say how it pushes")
+        MockGateway.handler = { _ in (200, #"{"ok":true,"result":{"name":"honk","version":"1","api":2,"features":["relay"],"push":{"ios":"direct","android":"relay"}}}"#) }
+        let info = try await api.info()
+        #expect(info.features == ["relay"] && info.push == APIClient.PushRoutes(ios: "direct", android: "relay"))
     }
 
     @Test func gatewayError() async throws {

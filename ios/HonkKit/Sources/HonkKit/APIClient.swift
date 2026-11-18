@@ -38,23 +38,42 @@ public struct APIClient: Sendable {
 
     // MARK: gateway
 
+    /// How the gateway sends pushes to each platform: `direct` (its own APNs/FCM
+    /// credentials), `relay` (through a push relay) or `off`.
+    public struct PushRoutes: Decodable, Equatable, Sendable {
+        public let ios: String
+        public let android: String
+
+        public init(ios: String, android: String) {
+            self.ios = ios
+            self.android = android
+        }
+    }
+
     public struct GatewayInfo: Decodable, Equatable, Sendable {
         public let name: String
         public let version: String
         public let api: Int
         /// The gateway only registers devices that send its `register_key` (HONK_REGISTER_KEY).
         public let registerKeyRequired: Bool
+        /// What the gateway can do beyond the base API, e.g. `relay`; empty for an older gateway.
+        public let features: [String]
+        /// Nil for a gateway that does not say.
+        public let push: PushRoutes?
 
         enum CodingKeys: String, CodingKey {
-            case name, version, api
+            case name, version, api, features, push
             case registerKeyRequired = "register_key_required"
         }
 
-        public init(name: String, version: String, api: Int, registerKeyRequired: Bool = false) {
+        public init(name: String, version: String, api: Int, registerKeyRequired: Bool = false,
+                    features: [String] = [], push: PushRoutes? = nil) {
             self.name = name
             self.version = version
             self.api = api
             self.registerKeyRequired = registerKeyRequired
+            self.features = features
+            self.push = push
         }
 
         public init(from decoder: Decoder) throws {
@@ -63,6 +82,8 @@ public struct APIClient: Sendable {
             version = try c.decode(String.self, forKey: .version)
             api = try c.decode(Int.self, forKey: .api)
             registerKeyRequired = try c.decodeIfPresent(Bool.self, forKey: .registerKeyRequired) ?? false
+            features = try c.decodeIfPresent([String].self, forKey: .features) ?? []
+            push = try c.decodeIfPresent(PushRoutes.self, forKey: .push)
         }
     }
 

@@ -77,6 +77,16 @@ export interface GatewayTest {
   error?: string;
   /** The gateway only registers devices that send its register key. */
   registerKeyRequired?: boolean;
+  /** How the gateway sends pushes to each platform; absent for a gateway that does not say. */
+  push?: PushRoutes;
+}
+
+/** `direct`: with the gateway's own APNs/FCM credentials; `relay`: through a push relay; `off`: not at all. */
+export type PushRoute = "direct" | "relay" | "off";
+
+export interface PushRoutes {
+  ios: PushRoute;
+  android: PushRoute;
 }
 
 /** Test hook (host.contract.test.ts): sees every host call before it is made, host or not. */

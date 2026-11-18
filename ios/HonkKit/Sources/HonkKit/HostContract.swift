@@ -184,8 +184,12 @@ public enum HostJSON {
         ["url": url, "defaultURL": defaultURL, "custom": custom, "registerKey": registerKey]
     }
 
-    public static func gatewayTest(url: String, version: String, registerKeyRequired: Bool) -> [String: Any] {
-        ["ok": true, "url": url, "version": version, "registerKeyRequired": registerKeyRequired]
+    /// `push`: how the gateway sends pushes per platform; left out for a gateway that does not say.
+    public static func gatewayTest(url: String, version: String, registerKeyRequired: Bool,
+                                   push: APIClient.PushRoutes? = nil) -> [String: Any] {
+        var out: [String: Any] = ["ok": true, "url": url, "version": version, "registerKeyRequired": registerKeyRequired]
+        if let push { out["push"] = ["ios": push.ios, "android": push.android] }
+        return out
     }
 
     public static func gatewayTest(error: String) -> [String: Any] {

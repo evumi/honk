@@ -1,7 +1,7 @@
 import { signal, Text, View } from "nsh";
 import { AlertDialog, Input, NavPage } from "nsh/base";
 import { FormBody, Row, Section } from "../components";
-import { api, type Gateway, type GatewayTest } from "../host";
+import { api, type Gateway, type GatewayTest, type PushRoute } from "../host";
 import { loadStatus, nav, reload } from "../store";
 import { palette } from "../theme";
 import { tr } from "../i18n";
@@ -77,6 +77,15 @@ export function GatewayPage() {
     if (await confirmSwitch(g.defaultURL)) await apply(null);
   };
 
+  const routeLabel = (r: PushRoute) => (r === "direct" ? tr("直连") : r === "relay" ? tr("经中继") : tr("关闭"));
+
+  /** The push mode per platform of the gateway that was just tested (none for one that does not say). */
+  const pushRoutes = () => {
+    const c = check();
+    return c.state === "done" && c.result.ok ? c.result.push : undefined;
+  };
+  const anyOff = () => pushRoutes()?.ios === "off" || pushRoutes()?.android === "off";
+
   const status = () => {
     const c = check();
     if (c.state === "checking") return { text: tr("正在连接…"), color: p().hint };
@@ -141,6 +150,23 @@ export function GatewayPage() {
                 <View style={{ minHeight: 44, paddingLeft: 16, paddingRight: 16, flexDirection: "row", alignItems: "center", gap: 8, borderTopWidth: 0.5, borderTopColor: p().separator }}>
                   <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: s().color }} />
                   <Text testID="gateway-status" style={{ flex: 1, fontSize: 15, color: s().color }}>{s().text}</Text>
+                </View>
+              )}
+            </If>
+            <If when={pushRoutes()}>
+              {(r) => (
+                <View style={{ paddingTop: 10, paddingBottom: 10, paddingLeft: 16, paddingRight: 16, gap: 6, borderTopWidth: 0.5, borderTopColor: p().separator }}>
+                  <Text testID="gateway-push-ios" style={{ fontSize: 15, color: r().ios === "off" ? p().destructive : p().hint }}>
+                    {tr("iOS 推送：{mode}", { mode: routeLabel(r().ios) })}
+                  </Text>
+                  <Text testID="gateway-push-android" style={{ fontSize: 15, color: r().android === "off" ? p().destructive : p().hint }}>
+                    {tr("Android 推送：{mode}", { mode: routeLabel(r().android) })}
+                  </Text>
+                  <If when={anyOff()}>
+                    <Text testID="gateway-push-off" style={{ fontSize: 15, color: p().destructive }}>
+                      {tr("推送关闭的平台，只能在打开 App 时收到通知。")}
+                    </Text>
+                  </If>
                 </View>
               )}
             </If>

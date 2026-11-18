@@ -63,6 +63,10 @@ class ApiClient(
 
     // gateway
 
+    /** How the gateway sends pushes to each platform: `direct`, `relay` (through a push relay) or `off`. */
+    @Serializable
+    data class PushRoutes(val ios: String, val android: String)
+
     /** What the gateway says it is; a Honk gateway answers `name` "honk". */
     @Serializable
     data class GatewayInfo(
@@ -71,6 +75,10 @@ class ApiClient(
         val api: Int = 0,
         /** The gateway only registers devices that send its `register_key` (HONK_REGISTER_KEY). */
         @SerialName("register_key_required") val registerKeyRequired: Boolean = false,
+        /** What the gateway can do beyond the base API, e.g. `relay`; empty for an older gateway. */
+        val features: List<String> = emptyList(),
+        /** Null for a gateway that does not say. */
+        val push: PushRoutes? = null,
     )
 
     fun info(): GatewayInfo = request("GET", "v1/info", GatewayInfo.serializer(), auth = false)

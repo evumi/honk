@@ -115,9 +115,10 @@
       ]
     },
     "honk.gateway.test": {
-      "optional": ["url", "version", "error", "registerKeyRequired"],
+      "optional": ["url", "version", "error", "registerKeyRequired", "push"],
       "samples": [
-        { "args": { "url": "gw.test" }, "result": { "ok": true, "url": "https://gw.test/", "version": "0.2.0", "registerKeyRequired": false } },
+        { "args": { "url": "gw.test" }, "result": { "ok": true, "url": "https://gw.test/", "version": "0.2.0", "registerKeyRequired": false, "push": { "ios": "direct", "android": "relay" } } },
+        { "args": { "url": "old.test" }, "result": { "ok": true, "url": "https://old.test/", "version": "0.1.0", "registerKeyRequired": false } },
         { "args": { "url": "locked.test" }, "result": { "ok": true, "url": "https://locked.test/", "version": "0.2.0", "registerKeyRequired": true } },
         { "args": { "url": "nope" }, "result": { "ok": false, "error": "无法连接到这个地址" } }
       ]

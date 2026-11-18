@@ -96,7 +96,7 @@ final class NshBridge {
         handle("honk.gateway.test") { [service] args in
             do {
                 let (url, info) = try await service.testGateway(try CallArgs(args).require("url"))
-                return HostJSON.gatewayTest(url: url.absoluteString, version: info.version, registerKeyRequired: info.registerKeyRequired)
+                return HostJSON.gatewayTest(url: url.absoluteString, version: info.version, registerKeyRequired: info.registerKeyRequired, push: info.push)
             } catch {
                 return HostJSON.gatewayTest(error: error.localizedDescription)
             }
