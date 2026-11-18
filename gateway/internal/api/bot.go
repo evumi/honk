@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -26,7 +27,53 @@ const (
 	maxGroup      = 64
 	maxURL        = 2048
 	maxCollapseID = 128
+	// maxCiphertext is the longest "ciphertext" parameter (base64url text).
+	maxCiphertext = 64 * 1024
 )
+
+// sealedFields are the content parameters that live inside a ciphertext.
+var sealedFields = []string{"title", "body", "html", "data", "url", "copy", "icon", "image"}
+
+// checkCiphertext validates the ciphertext parameter without reading it: it
+// must be base64url and long enough for nonce and tag. It returns the unpadded
+// text, and "" when the parameter is absent. Any plaintext content parameter
+// next to it is refused, so nothing readable is stored by accident.
+func checkCiphertext(p url.Values) (string, error) {
+	ct := strings.TrimRight(strings.TrimSpace(p.Get("ciphertext")), "=")
+	if ct == "" {
+		return "", nil
+	}
+	for _, f := range sealedFields {
+		if p.Get(f) != "" {
+			return "", badRequest(f + " must be inside the ciphertext, not sent next to it")
+		}
+	}
+	if len(ct) > maxCiphertext {
+		return "", badRequest(fmt.Sprintf("ciphertext is longer than %d bytes", maxCiphertext))
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(ct)
+	if err != nil {
+		return "", badRequest("ciphertext must be base64url")
+	}
+	if len(raw) < minSealed {
+		return "", badRequest("ciphertext is too short: it is nonce (12 bytes), content and tag (16 bytes)")
+	}
+	return ct, nil
+}
+
+// minSealed is nonce (12) plus tag (16): AES-256-GCM of an empty plaintext.
+const minSealed = 12 + 16
+
+// errEncryptedBot is the answer to a plaintext send to an encrypted bot.
+var errEncryptedBot = badRequest("this bot is end-to-end encrypted: send the content as ciphertext (honk send --key); plaintext is refused")
+
+// bare is the push for a bot's encrypted traffic: no bot name, title or body
+// (the device decrypts the message, or shows a placeholder, after fetching it).
+// notifyOwner sends it to every device of the group.
+func bare(n push.Notification) push.Notification {
+	n.BotName, n.Title, n.Body, n.Group, n.CollapseID, n.Bare = "", "", "", "", "", true
+	return n
+}
 
 // botAPI serves /bot<token>/<method> with GET query, form or JSON parameters.
 func (s *Server) botAPI(w http.ResponseWriter, r *http.Request) {
@@ -85,12 +132,20 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request, bot store.B
 		s.fail(w, r, err)
 		return
 	}
+	if m.Ciphertext, err = checkCiphertext(p); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	if bot.Encrypted && m.Ciphertext == "" {
+		s.fail(w, r, errEncryptedBot)
+		return
+	}
 	var ttl time.Duration
 	if m.OpenMode, m.Image, m.ParseMode, m.Silent, ttl, err = sendOptions(p, s.opts.MessageTTL); err != nil {
 		s.fail(w, r, err)
 		return
 	}
-	if m.OpenMode == "url" && m.URL == "" {
+	if m.OpenMode == "url" && m.URL == "" && m.Ciphertext == "" {
 		s.fail(w, r, badRequest("open=url needs a url"))
 		return
 	}
@@ -98,18 +153,24 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request, bot store.B
 		s.fail(w, r, err)
 		return
 	}
-	rep, err := widget.Inspect(p.Get("html"))
-	if err != nil {
-		s.fail(w, r, badRequest(err.Error()))
-		return
+	var rep widget.Report
+	if m.Ciphertext == "" {
+		if rep, err = widget.Inspect(p.Get("html")); err != nil {
+			s.fail(w, r, badRequest(err.Error()))
+			return
+		}
+		m.HTML = rep.HTML
 	}
-	m.HTML = rep.HTML
 	if !s.allow(bot.ID) {
 		s.fail(w, r, apiError{http.StatusTooManyRequests, "Too Many Requests"})
 		return
 	}
 	if v := strings.ToLower(p.Get("dry_run")); v == "true" || v == "1" {
 		// Validate only: nothing is queued or pushed.
+		if m.Ciphertext != "" {
+			ok(w, map[string]any{"dry_run": true, "level": m.Level, "ciphertext_size": len(m.Ciphertext)})
+			return
+		}
 		ok(w, map[string]any{
 			"dry_run": true, "level": m.Level, "html": rep.HTML, "input_size": rep.InputSize,
 			"raw_size": rep.Raw, "compressed_size": rep.Compressed, "removed": rep.Removed,
@@ -133,11 +194,15 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request, bot store.B
 		banner = StripMarkdown(m.Body)
 	}
 	s.m.messages.Inc(store.KindMessage)
-	s.notifyOwner(r.Context(), bot.OwnerID, push.Notification{
+	n := push.Notification{
 		Kind: store.KindMessage, MessageID: m.ID, BotID: bot.ID, BotName: bot.Name,
 		Title: m.Title, Body: banner, Group: m.Group, Level: m.Level, CollapseID: m.CollapseID,
 		Quiet: m.Silent, Expires: pushExpires,
-	})
+	}
+	if m.Ciphertext != "" {
+		n = bare(n)
+	}
+	s.notifyOwner(r.Context(), bot.OwnerID, n)
 	ok(w, m)
 }
 
@@ -165,15 +230,30 @@ func (s *Server) changeMessage(w http.ResponseWriter, r *http.Request, bot store
 		return
 	}
 	var m store.Message
-	var err error
+	ct, err := checkCiphertext(p)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
 	if kind == store.KindEdit {
 		data := p.Get("data")
-		if len(data) > widget.MaxData {
+		switch {
+		case ct != "":
+			m, err = s.store.EditCiphertext(r.Context(), bot, t, ct, s.opts.MessageTTL)
+		case bot.Encrypted:
+			s.fail(w, r, errEncryptedBot)
+			return
+		case len(data) > widget.MaxData:
 			s.fail(w, r, badRequest(fmt.Sprintf("data is longer than %d bytes", widget.MaxData)))
 			return
+		default:
+			m, err = s.store.EditData(r.Context(), bot, t, data, s.opts.MessageTTL)
 		}
-		m, err = s.store.EditData(r.Context(), bot, t, data, s.opts.MessageTTL)
 	} else {
+		if ct != "" {
+			s.fail(w, r, badRequest("a delete has no ciphertext"))
+			return
+		}
 		m, err = s.store.DeleteMessage(r.Context(), bot, t, s.opts.MessageTTL)
 	}
 	if err != nil {
@@ -181,9 +261,13 @@ func (s *Server) changeMessage(w http.ResponseWriter, r *http.Request, bot store
 		return
 	}
 	s.m.messages.Inc(kind)
-	s.notifyOwner(r.Context(), bot.OwnerID, push.Notification{
+	n := push.Notification{
 		Kind: kind, MessageID: m.ID, TargetID: m.TargetID, BotID: bot.ID, BotName: bot.Name, CollapseID: m.CollapseID,
-	})
+	}
+	if bot.Encrypted || ct != "" {
+		n = bare(n)
+	}
+	s.notifyOwner(r.Context(), bot.OwnerID, n)
 	ok(w, true)
 }
 
@@ -242,6 +326,15 @@ func level(v, def string) (string, error) {
 
 func checkMessage(m store.Message) error {
 	switch {
+	case m.Ciphertext != "":
+		// The content is sealed: its limits are checked on the device.
+		if len(m.Group) > maxGroup {
+			return badRequest(fmt.Sprintf("group is longer than %d bytes", maxGroup))
+		}
+		if len(m.CollapseID) > maxCollapseID {
+			return badRequest(fmt.Sprintf("id is longer than %d bytes", maxCollapseID))
+		}
+		return nil
 	case m.Body == "":
 		return badRequest("body is required")
 	case utf8.RuneCountInString(m.Title) > maxTitle:

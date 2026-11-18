@@ -72,6 +72,7 @@ func (s *Store) migrate(ctx context.Context) error {
 		migrateV4,
 		migrateSendOptions,
 		migrateWidgetQueries,
+		migrateEncryption,
 	}
 	for ; v < len(steps); v++ {
 		if err := s.step(ctx, v+1, steps[v]); err != nil {
@@ -254,6 +255,21 @@ func migrateWidgetQueries(ctx context.Context, tx *sql.Tx) error {
 		`ALTER TABLE messages ADD COLUMN allow_queries INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE bots ADD COLUMN webhook_url TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE bots ADD COLUMN webhook_secret TEXT NOT NULL DEFAULT ''`,
+	} {
+		if _, err := tx.ExecContext(ctx, q); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// migrateEncryption adds end-to-end encryption: bots.encrypted (the device
+// turned it on; plaintext sends are then refused), messages.ciphertext (the
+// sealed content, which the gateway stores and never reads).
+func migrateEncryption(ctx context.Context, tx *sql.Tx) error {
+	for _, q := range []string{
+		`ALTER TABLE bots ADD COLUMN encrypted INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE messages ADD COLUMN ciphertext TEXT NOT NULL DEFAULT ''`,
 	} {
 		if _, err := tx.ExecContext(ctx, q); err != nil {
 			return err
@@ -559,17 +575,19 @@ type Bot struct {
 	DefaultLevel string `json:"default_level"`
 	CreatedAt    int64  `json:"created_at"`
 	UpdatedAt    int64  `json:"updated_at"`
+	// Encrypted: messages must be sent as end-to-end encrypted ciphertext.
+	Encrypted bool `json:"encrypted"`
 
 	// WebhookURL and WebhookSecret are where widget queries go (setWebhook).
 	WebhookURL    string `json:"-"`
 	WebhookSecret string `json:"-"`
 }
 
-const botCols = `public_id, id, owner_id, name, avatar, default_level, created_at, updated_at, webhook_url, webhook_secret`
+const botCols = `public_id, id, owner_id, name, avatar, default_level, encrypted, created_at, updated_at, webhook_url, webhook_secret`
 
 func scanBot(row interface{ Scan(...any) error }) (Bot, error) {
 	var b Bot
-	err := row.Scan(&b.ID, &b.Key, &b.OwnerID, &b.Name, &b.Avatar, &b.DefaultLevel, &b.CreatedAt, &b.UpdatedAt, &b.WebhookURL, &b.WebhookSecret)
+	err := row.Scan(&b.ID, &b.Key, &b.OwnerID, &b.Name, &b.Avatar, &b.DefaultLevel, &b.Encrypted, &b.CreatedAt, &b.UpdatedAt, &b.WebhookURL, &b.WebhookSecret)
 	if errors.Is(err, sql.ErrNoRows) {
 		return b, ErrNotFound
 	}
@@ -661,6 +679,7 @@ type BotPatch struct {
 	Name         *string
 	Avatar       *string
 	DefaultLevel *string
+	Encrypted    *bool
 }
 
 // UpdateBot changes a bot's name, avatar or default level.
@@ -678,10 +697,13 @@ func (s *Store) UpdateBot(ctx context.Context, ownerID string, botID string, p B
 	if p.DefaultLevel != nil {
 		b.DefaultLevel = *p.DefaultLevel
 	}
+	if p.Encrypted != nil {
+		b.Encrypted = *p.Encrypted
+	}
 	b.UpdatedAt = s.ms()
 	_, err = s.db.ExecContext(ctx,
-		`UPDATE bots SET name = ?, avatar = ?, default_level = ?, updated_at = ? WHERE public_id = ? AND owner_id = ?`,
-		b.Name, b.Avatar, b.DefaultLevel, b.UpdatedAt, botID, ownerID)
+		`UPDATE bots SET name = ?, avatar = ?, default_level = ?, encrypted = ?, updated_at = ? WHERE public_id = ? AND owner_id = ?`,
+		b.Name, b.Avatar, b.DefaultLevel, b.Encrypted, b.UpdatedAt, botID, ownerID)
 	return b, err
 }
 

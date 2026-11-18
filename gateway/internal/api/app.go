@@ -322,6 +322,7 @@ func (s *Server) updateBot(w http.ResponseWriter, r *http.Request) {
 		Name         *string `json:"name"`
 		Avatar       *string `json:"avatar"`
 		DefaultLevel *string `json:"default_level"`
+		Encrypted    *bool   `json:"encrypted"`
 	}
 	if err := decode(r, &in); err != nil {
 		s.fail(w, r, err)
@@ -331,7 +332,7 @@ func (s *Server) updateBot(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	b, err := s.store.UpdateBot(r.Context(), device(r).OwnerID, id, store.BotPatch{Name: in.Name, Avatar: in.Avatar, DefaultLevel: in.DefaultLevel})
+	b, err := s.store.UpdateBot(r.Context(), device(r).OwnerID, id, store.BotPatch{Name: in.Name, Avatar: in.Avatar, DefaultLevel: in.DefaultLevel, Encrypted: in.Encrypted})
 	if err != nil {
 		s.fail(w, r, err)
 		return

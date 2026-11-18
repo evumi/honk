@@ -17,21 +17,24 @@ const (
 // Message is one queued item. For an edit or delete, TargetID and/or
 // CollapseID say which message it applies to, and Data is the new state.
 type Message struct {
-	ID         int64  `json:"message_id"`
-	BotID      string `json:"bot_id"` // the bot's public id
-	BotKey     int64  `json:"-"`      // the bot's row id
-	OwnerID    string `json:"-"`
-	Kind       string `json:"kind"`
-	TargetID   int64  `json:"target_id,omitempty"`
-	Title      string `json:"title,omitempty"`
-	Body       string `json:"body,omitempty"`
-	HTML       string `json:"html,omitempty"`
-	Data       string `json:"data,omitempty"`
-	Level      string `json:"level,omitempty"`
-	Group      string `json:"group,omitempty"`
-	URL        string `json:"url,omitempty"`
-	Copy       string `json:"copy,omitempty"`
-	Icon       string `json:"icon,omitempty"`
+	ID       int64  `json:"message_id"`
+	BotID    string `json:"bot_id"` // the bot's public id
+	BotKey   int64  `json:"-"`      // the bot's row id
+	OwnerID  string `json:"-"`
+	Kind     string `json:"kind"`
+	TargetID int64  `json:"target_id,omitempty"`
+	Title    string `json:"title,omitempty"`
+	Body     string `json:"body,omitempty"`
+	HTML     string `json:"html,omitempty"`
+	Data     string `json:"data,omitempty"`
+	Level    string `json:"level,omitempty"`
+	Group    string `json:"group,omitempty"`
+	URL      string `json:"url,omitempty"`
+	Copy     string `json:"copy,omitempty"`
+	Icon     string `json:"icon,omitempty"`
+	// Ciphertext is the end-to-end sealed content; the gateway never reads it.
+	// When set, Title/Body/HTML/Copy/Icon/URL/Image are empty (an edit: Data too).
+	Ciphertext string `json:"ciphertext,omitempty"`
 	OpenMode   string `json:"open,omitempty"`       // "url": tapping the notification opens URL
 	Image      string `json:"image,omitempty"`      // https image for the notification and the bubble
 	ParseMode  string `json:"parse_mode,omitempty"` // "Markdown": Body is Markdown
@@ -45,13 +48,13 @@ type Message struct {
 
 // msgSelect reads messages with their bot's public id.
 const msgSelect = `SELECT m.id, b.public_id, m.bot_id, m.owner_id, m.kind, m.target_id, m.title, m.body, m.html, m.data, m.level,
-	m.group_key, m.url, m.copy_text, m.icon, m.open_mode, m.image, m.parse_mode, m.silent, m.collapse_id, m.allow_queries, m.created_at, m.expires_at
+	m.group_key, m.url, m.copy_text, m.icon, m.ciphertext, m.open_mode, m.image, m.parse_mode, m.silent, m.collapse_id, m.allow_queries, m.created_at, m.expires_at
 	FROM messages m JOIN bots b ON b.id = m.bot_id`
 
 func scanMessage(row interface{ Scan(...any) error }) (Message, error) {
 	var m Message
 	err := row.Scan(&m.ID, &m.BotID, &m.BotKey, &m.OwnerID, &m.Kind, &m.TargetID, &m.Title, &m.Body, &m.HTML, &m.Data,
-		&m.Level, &m.Group, &m.URL, &m.Copy, &m.Icon, &m.OpenMode, &m.Image, &m.ParseMode, &m.Silent, &m.CollapseID, &m.AllowQueries, &m.CreatedAt, &m.ExpiresAt)
+		&m.Level, &m.Group, &m.URL, &m.Copy, &m.Icon, &m.Ciphertext, &m.OpenMode, &m.Image, &m.ParseMode, &m.Silent, &m.CollapseID, &m.AllowQueries, &m.CreatedAt, &m.ExpiresAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return m, ErrNotFound
 	}
@@ -60,10 +63,10 @@ func scanMessage(row interface{ Scan(...any) error }) (Message, error) {
 
 func insert(ctx context.Context, tx *sql.Tx, m *Message) error {
 	res, err := tx.ExecContext(ctx, `
-		INSERT INTO messages (bot_id, owner_id, device_id, kind, target_id, title, body, html, data, level, group_key, url, copy_text, icon, open_mode, image, parse_mode, silent, collapse_id, allow_queries, created_at, expires_at)
-		VALUES (?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		INSERT INTO messages (bot_id, owner_id, device_id, kind, target_id, title, body, html, data, level, group_key, url, copy_text, icon, ciphertext, open_mode, image, parse_mode, silent, collapse_id, allow_queries, created_at, expires_at)
+		VALUES (?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		m.BotKey, m.OwnerID, m.Kind, m.TargetID, m.Title, m.Body, m.HTML, m.Data, m.Level, m.Group, m.URL, m.Copy, m.Icon,
-		m.OpenMode, m.Image, m.ParseMode, m.Silent, m.CollapseID, m.AllowQueries, m.CreatedAt, m.ExpiresAt)
+		m.Ciphertext, m.OpenMode, m.Image, m.ParseMode, m.Silent, m.CollapseID, m.AllowQueries, m.CreatedAt, m.ExpiresAt)
 	if err != nil {
 		return err
 	}
@@ -128,15 +131,22 @@ func resolve(ctx context.Context, tx *sql.Tx, botID int64, t Target) (Target, er
 // EditData queues a change to a message's data and updates the queued copy if
 // it is still there.
 func (s *Store) EditData(ctx context.Context, bot Bot, t Target, data string, ttl time.Duration) (Message, error) {
-	return s.change(ctx, KindEdit, bot, t, data, ttl)
+	return s.change(ctx, KindEdit, bot, t, data, "", ttl)
+}
+
+// EditCiphertext queues an end-to-end encrypted edit. The gateway cannot read
+// the new data, so the queued copy of the message is left alone; the device
+// applies the edit after the message, in queue order.
+func (s *Store) EditCiphertext(ctx context.Context, bot Bot, t Target, ciphertext string, ttl time.Duration) (Message, error) {
+	return s.change(ctx, KindEdit, bot, t, "", ciphertext, ttl)
 }
 
 // DeleteMessage queues a delete and drops the queued copy if it is still there.
 func (s *Store) DeleteMessage(ctx context.Context, bot Bot, t Target, ttl time.Duration) (Message, error) {
-	return s.change(ctx, KindDelete, bot, t, "", ttl)
+	return s.change(ctx, KindDelete, bot, t, "", "", ttl)
 }
 
-func (s *Store) change(ctx context.Context, kind string, bot Bot, t Target, data string, ttl time.Duration) (Message, error) {
+func (s *Store) change(ctx context.Context, kind string, bot Bot, t Target, data, ciphertext string, ttl time.Duration) (Message, error) {
 	now := s.now()
 	botID := bot.Key
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -151,18 +161,22 @@ func (s *Store) change(ctx context.Context, kind string, bot Bot, t Target, data
 	if t.MessageID > 0 {
 		var q string
 		var args []any
-		if kind == KindEdit {
+		if kind == KindEdit && ciphertext != "" {
+			q = ""
+		} else if kind == KindEdit {
 			q, args = `UPDATE messages SET data = ? WHERE id = ? AND bot_id = ? AND kind = 'message'`, []any{data, t.MessageID, botID}
 		} else {
 			// Earlier edits of a deleted message are moot too.
 			q, args = `DELETE FROM messages WHERE bot_id = ? AND (id = ? OR (kind = 'edit' AND target_id = ?))`, []any{botID, t.MessageID, t.MessageID}
 		}
-		if _, err := tx.ExecContext(ctx, q, args...); err != nil {
-			return Message{}, err
+		if q != "" {
+			if _, err := tx.ExecContext(ctx, q, args...); err != nil {
+				return Message{}, err
+			}
 		}
 	}
 	m := Message{
-		BotID: bot.ID, BotKey: botID, OwnerID: bot.OwnerID, Kind: kind, TargetID: t.MessageID, CollapseID: t.CollapseID, Data: data,
+		BotID: bot.ID, BotKey: botID, OwnerID: bot.OwnerID, Kind: kind, TargetID: t.MessageID, CollapseID: t.CollapseID, Data: data, Ciphertext: ciphertext,
 		CreatedAt: now.UnixMilli(), ExpiresAt: now.Add(ttl).UnixMilli(),
 	}
 	if err := insert(ctx, tx, &m); err != nil {

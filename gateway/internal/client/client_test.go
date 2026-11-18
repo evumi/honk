@@ -404,3 +404,26 @@ func waitFor(t *testing.T, ok func() bool) {
 	}
 	t.Fatal("timed out")
 }
+
+// The same vector is checked by HonkKit (Swift) and :core (Kotlin): a message
+// sealed by any of the three opens in the others.
+const (
+	vectorKey        = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+	vectorAAD        = "Ab3dEf9h"
+	vectorPlaintext  = `{"title":"部署成功","body":"sub2api 已上线","data":"{\"n\":1}","url":"https://example.com/a"}`
+	vectorCiphertext = "oKGio6SlpqeoqaqrnToIRDGnZ51YR25Qr519bJYkyfUYKGBAvmxJ4gaJTyOhAyXNzlI6Hbortiyx8GRD-Dlqagaxbh9jZCkl-FLr7JaGtBISicaVho7dIq2muM69eJGL6qThG4MFUv-f-SL5oOUJ1gyfu2fYX9FnuIta5-PpRAI"
+)
+
+func TestSharedVector(t *testing.T) {
+	key, err := ParseKey(vectorKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pt, err := Decrypt(key, vectorAAD, vectorCiphertext)
+	if err != nil || string(pt) != vectorPlaintext {
+		t.Fatalf("vector = %q, %v", pt, err)
+	}
+	if _, err := Decrypt(key, "other", vectorCiphertext); err == nil {
+		t.Error("a different AAD must fail")
+	}
+}

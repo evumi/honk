@@ -43,8 +43,7 @@ Connection (all commands except serve):
                                       or ~/.config/honk/config.json: {"url": "...", "token": "..."}
   HONK_KEY, --key                     base64 32-byte key: send the content as end-to-end
                                       encrypted "ciphertext" (AES-256-GCM, AAD = bot id). The
-                                      gateway does not accept ciphertext yet; this is for the
-                                      end-to-end encryption release.
+                                      key is the one the app shows in the bot's settings.
 
 Flag values written @file are read from that file.
 Exit status: 0 success, 1 failure (the gateway's description is printed), 2 usage.
