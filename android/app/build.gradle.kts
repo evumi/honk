@@ -123,5 +123,6 @@ dependencies {
     implementation(libs.androidx.activity)
     implementation(libs.lifecycle.runtime)
     implementation(libs.security.crypto)
+    implementation(libs.androidx.work)
     implementation(libs.coroutines.android)
 }

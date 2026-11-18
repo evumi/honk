@@ -57,7 +57,9 @@ targets:
             UIWindowSceneSessionRoleApplication:
               - UISceneConfigurationName: Default
                 UISceneDelegateClassName: $(PRODUCT_MODULE_NAME).SceneDelegate
-        UIBackgroundModes: [remote-notification]
+        # fetch: BGAppRefreshTask (App/BackgroundRefresh.swift); its identifier is <bundle id>.refresh.
+        UIBackgroundModes: [remote-notification, fetch]
+        BGTaskSchedulerPermittedIdentifiers: [$(HONK_BUNDLE_ID).refresh]
         NSUserActivityTypes: [INSendMessageIntent]
         CADisableMinimumFrameDurationOnPhone: true
         NSAppTransportSecurity:

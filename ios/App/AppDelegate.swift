@@ -11,6 +11,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationC
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         UNUserNotificationCenter.current().delegate = self
+        BackgroundRefresh.register()
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { _, _ in
             DispatchQueue.main.async { application.registerForRemoteNotifications() }
         }
