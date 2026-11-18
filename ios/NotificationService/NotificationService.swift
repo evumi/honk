@@ -90,7 +90,7 @@ final class NotificationService: UNNotificationServiceExtension {
                 // the key or turned it off. Unwrap what the gateway holds, then try again. Once per
                 // few minutes at most; a placeholder is repaired when the app syncs the message again.
                 let ring = KeyRing(keys: keys, group: GroupKeyStore(accessGroup: config.keychainGroup))
-                if let bots = try? await api.listBots() { await ring.reconcile(bots: bots) { _, _ in } }
+                if let bots = try? await api.listBots() { await ring.reconcile(bots: bots, createGroupKey: false) { _, _ in } }
             }
             if let item, let m = opener.open(item),
                let r = try? store.apply(m, notificationID: request.identifier) {

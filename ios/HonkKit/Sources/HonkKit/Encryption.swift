@@ -504,8 +504,10 @@ public struct KeyRing: Sendable {
     /// A bot the gateway lists as not encrypted loses its local key (another device turned encryption off), so
     /// its plaintext messages are not taken for forgeries.
     ///
-    /// A failed `patch` is skipped; the next refresh tries again.
-    public func reconcile(bots: [Bot], patch: (_ botID: String, _ wrapped: String) async throws -> Void) async {
+    /// A failed `patch` is skipped; the next refresh tries again. With `createGroupKey` off (the notification
+    /// extension, which only wants to adopt keys) a missing group key is not made, so nothing is wrapped and sent.
+    public func reconcile(bots: [Bot], createGroupKey: Bool = true,
+                          patch: (_ botID: String, _ wrapped: String) async throws -> Void) async {
         for bot in bots {
             guard bot.encrypted else {
                 if keys.key(botID: bot.id) != nil { keys.remove(botID: bot.id) }
@@ -515,7 +517,7 @@ public struct KeyRing: Sendable {
             if let g = group.groupKey(), !bot.keyWrapped.isEmpty,
                let k = KeyWrap.unwrap(bot.keyWrapped, groupKey: g, botID: bot.id) {
                 if local != k { keys.save(k, botID: bot.id) }
-            } else if let w = wrapped(botID: bot.id, createGroupKey: true) {
+            } else if let w = wrapped(botID: bot.id, createGroupKey: createGroupKey) {
                 try? await patch(bot.id, w)
             }
         }

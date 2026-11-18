@@ -395,9 +395,10 @@ class KeyRing(val keys: BotKeyStore, val group: GroupKeyStore) {
      * A bot the gateway lists as not encrypted loses its local key (another device turned encryption off), so its
      * plaintext messages are not taken for forgeries.
      *
-     * A failed [patch] is skipped; the next refresh tries again.
+     * A failed [patch] is skipped; the next refresh tries again. With [createGroupKey] off (a push handler that
+     * only wants to adopt keys) a missing group key is not made, so nothing is wrapped and sent.
      */
-    fun reconcile(bots: List<Bot>, patch: (botId: String, wrapped: String) -> Unit) {
+    fun reconcile(bots: List<Bot>, createGroupKey: Boolean = true, patch: (botId: String, wrapped: String) -> Unit) {
         for (bot in bots) {
             if (!bot.encrypted) {
                 if (keys.key(bot.id) != null) keys.remove(bot.id)
@@ -409,7 +410,7 @@ class KeyRing(val keys: BotKeyStore, val group: GroupKeyStore) {
             if (k != null) {
                 if (local == null || !local.contentEquals(k)) keys.save(bot.id, k)
             } else {
-                val w = wrapped(bot.id, createGroupKey = true) ?: continue
+                val w = wrapped(bot.id, createGroupKey) ?: continue
                 try {
                     patch(bot.id, w)
                 } catch (e: Exception) {

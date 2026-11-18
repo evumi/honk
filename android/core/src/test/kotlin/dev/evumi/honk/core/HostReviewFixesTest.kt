@@ -30,6 +30,11 @@ class HostReviewFixesTest {
         // With a local key the patch is sent, and only then the group key exists.
         ring.keys.save("b1", Seal.generateKey())
         assertNull("no group key, no wrap", ring.wrapped("b1"))
+        // A push handler's reconcile adopts keys only: it neither makes a group key nor sends anything.
+        var quiet = 0
+        ring.reconcile(listOf(bot("b1", encrypted = true)), createGroupKey = false) { _, _ -> quiet++ }
+        assertEquals(0, quiet)
+        assertNull(ring.group.groupKey())
         var patched = 0
         ring.reconcile(listOf(bot("b1", encrypted = true))) { _, _ -> patched++ }
         assertEquals(1, patched)

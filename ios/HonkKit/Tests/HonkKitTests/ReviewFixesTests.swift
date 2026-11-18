@@ -28,6 +28,10 @@ private func bot(_ id: String, encrypted: Bool, wrapped: String = "") -> Bot {
         #expect(ring.group.groupKey() == nil)
         ring.keys.save(Seal.generateKey(), botID: "b1")
         #expect(ring.wrapped(botID: "b1") == nil, "no group key, no wrap")
+        // The extension's reconcile adopts keys only: it neither makes a group key nor sends anything.
+        var quiet = 0
+        await ring.reconcile(bots: [bot("b1", encrypted: true)], createGroupKey: false) { _, _ in quiet += 1 }
+        #expect(quiet == 0 && ring.group.groupKey() == nil)
         var patched = 0
         await ring.reconcile(bots: [bot("b1", encrypted: true)]) { _, _ in patched += 1 }
         #expect(patched == 1)
