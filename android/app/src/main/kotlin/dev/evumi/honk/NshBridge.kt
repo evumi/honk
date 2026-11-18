@@ -10,12 +10,12 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.longbridge.nsh.NshHostReply
 import com.longbridge.nsh.NshView
-import dev.evumi.honk.core.Bot
+import dev.evumi.honk.core.Args
 import dev.evumi.honk.core.CardHost
-import dev.evumi.honk.core.ChatSummary
 import dev.evumi.honk.core.Gateway
+import dev.evumi.honk.core.HostArgs
+import dev.evumi.honk.core.HostJson
 import dev.evumi.honk.core.LocalAvatars
-import dev.evumi.honk.core.StoredMessage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -52,22 +52,22 @@ class NshBridge(
     // Card scripts run on their own thread, each in a QuickJS runtime (native/card);
     // the strings in and out are JSON the app reads. Timer changes go to the UI thread.
     private val cards = CardHost { key, result ->
-        activity.runOnUiThread { nsh.send("honk.card.changed", mapOf("key" to key, "result" to result)) }
+        activity.runOnUiThread { nsh.send("honk.card.changed", HostJson.cardChangedEvent(key, result)) }
     }
 
     fun install() {
         removeListener = service.addChangeListener { nsh.send("honk.changed", null) }
         // Only once the app listens: until then pushes get a system notification.
         handle("honk.incoming.listen") {
-            service.onIncoming = { botId, messageId -> nsh.send("honk.incoming", mapOf("botId" to botId, "messageId" to messageId)) }
+            service.onIncoming = { botId, messageId -> nsh.send("honk.incoming", HostJson.incomingEvent(botId, messageId)) }
             true
         }
 
-        handle("honk.card.open") { a -> cards.open(a.requireString("key"), a.requireString("load")) }
-        handle("honk.card.click") { a -> cards.click(a.requireString("key"), a.requireString("path")) }
-        handle("honk.card.set") { a -> cards.set(a.requireString("key"), a.requireString("state")) }
+        handle("honk.card.open") { a -> HostArgs.CardCall(a, "load").let { cards.open(it.key, it.payload) } }
+        handle("honk.card.click") { a -> HostArgs.CardCall(a, "path").let { cards.click(it.key, it.payload) } }
+        handle("honk.card.set") { a -> HostArgs.CardCall(a, "state").let { cards.set(it.key, it.payload) } }
         handle("honk.card.close") { a ->
-            cards.close(a.requireString("key"))
+            cards.close(HostArgs.CardCall(a, null).key)
             true
         }
 
@@ -76,9 +76,9 @@ class NshBridge(
             service.retryRegistration()
             status()
         }
-        handle("honk.chats") { service.store.chats().map(::chat) }
+        handle("honk.chats") { service.store.chats().map(HostJson::chat) }
         handle("honk.messages") { a ->
-            service.store.messages(a.requireString("botId"), a.long("before"), a.long("limit")?.toInt() ?: 50).map(::message)
+            HostArgs.Messages(a).let { service.store.messages(it.botId, it.before, it.limit) }.map(HostJson::message)
         }
         handle("honk.markRead") { a ->
             service.markRead(a.requireString("botId"))
@@ -96,14 +96,14 @@ class NshBridge(
         // gateway
 
         handle("honk.gateway.get") {
-            mapOf("url" to service.gatewayUrl, "defaultURL" to service.defaultGatewayUrl, "custom" to service.isCustomGateway)
+            HostJson.gatewayGet(service.gatewayUrl, service.defaultGatewayUrl, service.isCustomGateway)
         }
         handle("honk.gateway.test") { a ->
             try {
                 val checked = service.testGateway(a.requireString("url"))
-                mapOf("ok" to true, "url" to checked.url, "version" to checked.version)
+                HostJson.gatewayTest(checked.url, checked.version)
             } catch (e: Exception) {
-                mapOf("ok" to false, "error" to Gateway.describe(e))
+                HostJson.gatewayTestFailed(Gateway.describe(e))
             }
         }
         handle("honk.gateway.set") { a ->
@@ -113,25 +113,27 @@ class NshBridge(
             } catch (e: Exception) {
                 throw IllegalStateException(Gateway.describe(e), e)
             }
-            mapOf("url" to service.gatewayUrl, "registered" to service.isRegistered)
+            HostJson.gatewaySet(service.gatewayUrl, service.isRegistered)
         }
 
         // bots
 
         handle("honk.bot.create") { a ->
-            val created = service.api.createBot(a.requireString("name"), a.string("avatar").orEmpty(), a.string("defaultLevel") ?: "active")
+            val c = HostArgs.BotCreate(a)
+            val created = service.api.createBot(c.name, c.avatar, c.defaultLevel)
             service.store.saveBot(created.bot)
             service.botTokens.save(created.bot.id, created.token)
             service.notifier.ensureChannel(created.bot.id, created.bot.name)
             service.changed()
-            mapOf("bot" to bot(created.bot), "token" to created.token)
+            HostJson.botCreated(created.bot, created.token)
         }
         handle("honk.bot.update") { a ->
-            val b = service.api.updateBot(a.requireString("botId"), a.string("name"), a.string("avatar"), a.string("defaultLevel"))
+            val u = HostArgs.BotUpdate(a)
+            val b = service.api.updateBot(u.botId, u.name, u.avatar, u.defaultLevel)
             service.store.saveBot(b)
             service.notifier.ensureChannel(b.id, b.name)
             service.changed()
-            bot(b)
+            HostJson.bot(b)
         }
         handle("honk.bot.token") { a -> service.botTokens.token(a.requireString("botId")) }
         handle("honk.bot.resetToken") { a ->
@@ -198,7 +200,7 @@ class NshBridge(
     }
 
     fun openChat(botId: String) {
-        nsh.send("honk.open", mapOf("botId" to botId))
+        nsh.send("honk.open", HostJson.openEvent(botId))
     }
 
     /** The notification permission may have changed (back from settings, the dialog answered). */
@@ -207,16 +209,16 @@ class NshBridge(
     }
 
     /** honk.status: Android always has a real push channel (FCM), so pushMode is "apns" as on a device. */
-    private fun status(): Map<String, Any?> = buildMap {
-        put("registered", service.isRegistered)
-        put("registration", service.registration.name)
-        (service.registration as? HonkService.Registration.Failed)?.let { put("registrationError", it.reason) }
-        put("pushMode", "apns")
-        put("gatewayURL", service.gatewayUrl)
-        put("notifications", notificationStatus())
-        put("appVersion", BuildConfig.VERSION_NAME)
-        put("appBuild", BuildConfig.VERSION_CODE.toString())
-    }
+    private fun status(): Map<String, Any?> = HostJson.status(
+        registered = service.isRegistered,
+        registration = service.registration.name,
+        registrationError = (service.registration as? HonkService.Registration.Failed)?.reason,
+        pushMode = "apns",
+        gatewayUrl = service.gatewayUrl,
+        notifications = notificationStatus(),
+        appVersion = BuildConfig.VERSION_NAME,
+        appBuild = BuildConfig.VERSION_CODE.toString(),
+    )
 
     private fun notificationStatus(): String {
         val granted = Build.VERSION.SDK_INT < 33 ||
@@ -234,7 +236,7 @@ class NshBridge(
                 try {
                     val args = Args(data)
                     val result = if (io) withContext(Dispatchers.IO) { body(args) } else body(args)
-                    reply.resolve(result)
+                    reply.resolve(orgJson(result))
                 } catch (e: Exception) {
                     reply.reject(e.message ?: e.javaClass.simpleName)
                 }
@@ -242,40 +244,14 @@ class NshBridge(
         }
     }
 
-    // JSON shapes (camelCase; bot ids are strings, message ids numbers), the same as NshBridge.swift.
-
-    private fun bot(b: Bot): Map<String, Any?> =
-        mapOf("id" to b.id, "name" to b.name, "avatar" to b.avatar, "defaultLevel" to b.defaultLevel, "createdAt" to b.createdAt)
-
-    private fun message(m: StoredMessage): Map<String, Any?> = mapOf(
-        "id" to m.id, "botId" to m.botId, "title" to m.title, "body" to m.body, "html" to m.html, "data" to m.data,
-        "level" to m.level, "group" to m.group, "url" to m.url, "copy" to m.copy, "icon" to m.icon,
-        "collapseId" to m.collapseId, "date" to m.date, "read" to m.read,
-    )
-
-    private fun chat(c: ChatSummary): Map<String, Any?> = mapOf(
-        "bot" to bot(c.bot), "muted" to c.muted, "pinned" to c.pinned, "unread" to c.unread,
-        // nsh serialises through org.json, whose JSONObject(Map) drops null values: JSONObject.NULL keeps `last: null`.
-        "last" to (c.last?.let(::message) ?: JSONObject.NULL),
-    )
-}
-
-/** Reads the JSON object a host call passes. */
-class Args(data: Any?) {
-    private val map: Map<*, *> = data as? Map<*, *> ?: emptyMap<String, Any>()
-
-    fun string(k: String): String? = when (val v = map[k]) {
-        is String -> v
-        is Number -> v.toLong().toString()
-        else -> null
+    /**
+     * nsh serialises through org.json, whose JSONObject(Map) drops null values
+     * (`last: null` would vanish): JSONObject.NULL keeps them. The shapes come
+     * from HostJson in :core, the same as HostJSON in ios/HonkKit.
+     */
+    private fun orgJson(v: Any?): Any? = when (v) {
+        is Map<*, *> -> v.entries.associate { (k, x) -> k to (orgJson(x) ?: JSONObject.NULL) }
+        is List<*> -> v.map { orgJson(it) ?: JSONObject.NULL }
+        else -> v
     }
-    fun bool(k: String): Boolean? = map[k] as? Boolean
-    fun long(k: String): Long? = when (val v = map[k]) {
-        is Number -> v.toLong()
-        is String -> v.toLongOrNull()
-        else -> null
-    }
-
-    fun require(k: String): Long = long(k) ?: throw IllegalArgumentException("missing argument $k")
-    fun requireString(k: String): String = string(k)?.takeIf { it.isNotEmpty() } ?: throw IllegalArgumentException("missing argument $k")
 }

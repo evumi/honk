@@ -25,4 +25,6 @@ val buildCardLib by tasks.registering(Exec::class) {
 tasks.test {
     dependsOn(buildCardLib)
     systemProperty("java.library.path", nativeDir.resolve("build").absolutePath)
+    // HostContractTest reads the host contract shared with the nsh app and HonkKit.
+    systemProperty("honk.contract", rootDir.resolve("../app/src/host.contract.json").absolutePath)
 }

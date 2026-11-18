@@ -1,5 +1,8 @@
 // The contract with the native hosts (ios/App/NshBridge.swift and
-// android/app/src/main/kotlin/dev/evumi/honk/NshBridge.kt).
+// android/app/src/main/kotlin/dev/evumi/honk/NshBridge.kt). host.contract.json
+// holds sample arguments and results for every call and event; host.contract.test.ts
+// checks this file and demo.ts against it, HonkKit's and :core's tests check
+// the native side. Change them together.
 // Every call goes through `call`, which uses the demo backend when no host
 // embeds the app (`nsh run` on a desktop), so the UI can be tried alone.
 import { host } from "nsh";
@@ -72,7 +75,11 @@ export interface GatewayTest {
   error?: string;
 }
 
+/** Test hook (host.contract.test.ts): sees every host call before it is made, host or not. */
+export const spy: { call?: (name: string, args: unknown) => void } = {};
+
 export function call<T>(name: string, args?: unknown): Promise<T> {
+  spy.call?.(name, args ?? null);
   if (!host.available()) return demo<T>(name, args);
   return host.call<T>(name, args ?? null);
 }
@@ -86,10 +93,22 @@ export function call<T>(name: string, args?: unknown): Promise<T> {
  * rejects, and the card stays static.
  */
 export const cards = {
-  open: (key: string, load: string) => (host.available() ? host.call<string>("honk.card.open", { key, load }) : Promise.reject(new Error("no host"))),
-  click: (key: string, path: string) => host.call<string>("honk.card.click", { key, path }),
-  set: (key: string, state: string) => host.call<string>("honk.card.set", { key, state }),
-  close: (key: string) => (host.available() ? host.call<boolean>("honk.card.close", { key }) : Promise.resolve(true)),
+  open: (key: string, load: string) => {
+    spy.call?.("honk.card.open", { key, load });
+    return host.available() ? host.call<string>("honk.card.open", { key, load }) : Promise.reject(new Error("no host"));
+  },
+  click: (key: string, path: string) => {
+    spy.call?.("honk.card.click", { key, path });
+    return host.available() ? host.call<string>("honk.card.click", { key, path }) : Promise.reject(new Error("no host"));
+  },
+  set: (key: string, state: string) => {
+    spy.call?.("honk.card.set", { key, state });
+    return host.available() ? host.call<string>("honk.card.set", { key, state }) : Promise.reject(new Error("no host"));
+  },
+  close: (key: string) => {
+    spy.call?.("honk.card.close", { key });
+    return host.available() ? host.call<boolean>("honk.card.close", { key }) : Promise.resolve(true);
+  },
 };
 
 /**
@@ -105,6 +124,7 @@ export function on(event: string, listener: (payload: unknown) => void): () => v
 
 /** Tells the host the app shows its own banner for `honk.incoming` (until then it shows the system's). */
 export function listenIncoming(): Promise<boolean> {
+  spy.call?.("honk.incoming.listen", null);
   if (!host.available()) return Promise.resolve(false);
   return host.call<boolean>("honk.incoming.listen", null).catch(() => false);
 }

@@ -32,7 +32,7 @@ final class NshBridge {
         // Only once the app listens: until then pushes get the system banner.
         handle("honk.incoming.listen") { [weak self, service] _ in
             service.onIncoming = { botID, messageID in
-                self?.app.send("honk.incoming", ["botId": botID, "messageId": messageID])
+                self?.app.send("honk.incoming", HostJSON.incomingEvent(botID: botID, messageID: messageID))
             }
             return true
         }
@@ -40,23 +40,23 @@ final class NshBridge {
         // Card scripts run off the main thread in their own QuickJS runtimes
         // (native/card); the strings in and out are JSON the app reads.
         let cards = CardHost { [weak self] key, result in
-            Task { @MainActor in self?.app.send("honk.card.changed", ["key": key, "result": result]) }
+            Task { @MainActor in self?.app.send("honk.card.changed", HostJSON.cardChangedEvent(key: key, result: result)) }
         }
         self.cards = cards
         handle("honk.card.open") { args in
-            let a = Args(args)
-            return await cards.open(key: try a.require("key"), load: try a.require("load"))
+            let c = try HostArgs.CardCall(Args(args), payload: "load")
+            return await cards.open(key: c.key, load: c.payload)
         }
         handle("honk.card.click") { args in
-            let a = Args(args)
-            return await cards.click(key: try a.require("key"), path: try a.require("path"))
+            let c = try HostArgs.CardCall(Args(args), payload: "path")
+            return await cards.click(key: c.key, path: c.payload)
         }
         handle("honk.card.set") { args in
-            let a = Args(args)
-            return await cards.set(key: try a.require("key"), state: try a.require("state"))
+            let c = try HostArgs.CardCall(Args(args), payload: "state")
+            return await cards.set(key: c.key, state: c.payload)
         }
         handle("honk.card.close") { args in
-            await cards.close(key: try Args(args).require("key"))
+            await cards.close(key: try HostArgs.CardCall(Args(args), payload: nil).key)
             return true
         }
 
@@ -66,13 +66,11 @@ final class NshBridge {
             return await Self.status(service)
         }
         handle("honk.chats") { [service] _ in
-            try service.store.chats().map(Self.chat)
+            try service.store.chats().map(HostJSON.chat)
         }
         handle("honk.messages") { [service] args in
-            let a = Args(args)
-            let limit = a.int("limit").map { Int($0) } ?? 50
-            return try service.store.messages(botID: try a.require("botId"), before: a.int("before"), limit: limit)
-                .map(Self.message)
+            let m = try HostArgs.Messages(Args(args))
+            return try service.store.messages(botID: m.botID, before: m.before, limit: m.limit).map(HostJSON.message)
         }
         handle("honk.markRead") { [service] args in
             service.markRead(botID: try Args(args).require("botId"))
@@ -90,42 +88,40 @@ final class NshBridge {
         // MARK: gateway
 
         handle("honk.gateway.get") { [service] _ in
-            ["url": service.config.gatewayURL.absoluteString,
-             "defaultURL": service.config.defaultGatewayURL.absoluteString,
-             "custom": service.config.isCustomGateway]
+            HostJSON.gatewayGet(url: service.config.gatewayURL.absoluteString,
+                                defaultURL: service.config.defaultGatewayURL.absoluteString,
+                                custom: service.config.isCustomGateway)
         }
         handle("honk.gateway.test") { [service] args in
             do {
                 let (url, info) = try await service.testGateway(try Args(args).require("url"))
-                return ["ok": true, "url": url.absoluteString, "version": info.version]
+                return HostJSON.gatewayTest(url: url.absoluteString, version: info.version)
             } catch {
-                return ["ok": false, "error": error.localizedDescription]
+                return HostJSON.gatewayTest(error: error.localizedDescription)
             }
         }
         handle("honk.gateway.set") { [service] args in
             // `url` null or missing: back to the default gateway.
             try await service.switchGateway(to: Args(args).string("url"))
-            return ["url": service.config.gatewayURL.absoluteString, "registered": service.isRegistered]
+            return HostJSON.gatewaySet(url: service.config.gatewayURL.absoluteString, registered: service.isRegistered)
         }
 
         // MARK: bots
 
         handle("honk.bot.create") { [service] args in
-            let a = Args(args)
-            let created = try await service.api.createBot(name: try a.require("name"), avatar: a.string("avatar") ?? "",
-                                                          defaultLevel: a.string("defaultLevel") ?? "active")
+            let a = try HostArgs.BotCreate(Args(args))
+            let created = try await service.api.createBot(name: a.name, avatar: a.avatar, defaultLevel: a.defaultLevel)
             try service.store.saveBot(created.bot)
             service.botTokens.save(created.token, botID: created.bot.id)
             service.changed()
-            return ["bot": Self.bot(created.bot), "token": created.token]
+            return HostJSON.botCreated(created.bot, token: created.token)
         }
         handle("honk.bot.update") { [service] args in
-            let a = Args(args)
-            let bot = try await service.api.updateBot(id: try a.require("botId"), name: a.string("name"),
-                                                      avatar: a.string("avatar"), defaultLevel: a.string("defaultLevel"))
+            let a = try HostArgs.BotUpdate(Args(args))
+            let bot = try await service.api.updateBot(id: a.botID, name: a.name, avatar: a.avatar, defaultLevel: a.defaultLevel)
             try service.store.saveBot(bot)
             service.changed()
-            return Self.bot(bot)
+            return HostJSON.bot(bot)
         }
         handle("honk.bot.token") { [service] args in
             if let token = service.botTokens.token(botID: try Args(args).require("botId")) { return token }
@@ -195,43 +191,25 @@ final class NshBridge {
     }
 
     func openChat(botID: String) {
-        app.send("honk.open", ["botId": botID])
+        app.send("honk.open", HostJSON.openEvent(botID: botID))
     }
 
     private func handle(_ name: String, _ body: @escaping @MainActor (Any?) async throws -> Any) {
         app.handle(name) { data in try await body(data) }
     }
 
-    // MARK: JSON shapes (camelCase; bot ids are strings, message ids numbers)
-
-    static func bot(_ b: Bot) -> [String: Any] {
-        ["id": b.id, "name": b.name, "avatar": b.avatar, "defaultLevel": b.defaultLevel, "createdAt": b.createdAt]
-    }
-
-    static func message(_ m: StoredMessage) -> [String: Any] {
-        ["id": m.id, "botId": m.botID, "title": m.title, "body": m.body, "html": m.html, "data": m.data,
-         "level": m.level, "group": m.group, "url": m.url, "copy": m.copy, "icon": m.icon, "collapseId": m.collapseID,
-         "date": m.date, "read": m.read]
-    }
-
-    static func chat(_ c: ChatSummary) -> [String: Any] {
-        ["bot": bot(c.bot), "muted": c.muted, "pinned": c.pinned, "unread": c.unread,
-         "last": c.last.map(message) ?? NSNull()]
-    }
+    // MARK: status
 
     static func status(_ service: HonkService) async -> [String: Any] {
         let settings = await UNUserNotificationCenter.current().notificationSettings()
-        var out: [String: Any] = [
-            "registered": service.isRegistered,
-            "registration": service.registration.name,
-            "pushMode": service.pushMode.rawValue,
-            "gatewayURL": service.config.gatewayURL.absoluteString,
-            "notifications": Self.authorization(settings.authorizationStatus),
-            "appVersion": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "",
-            "appBuild": Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "",
-        ]
-        if case let .failed(reason) = service.registration { out["registrationError"] = reason }
-        return out
+        var failure: String?
+        if case let .failed(reason) = service.registration { failure = reason }
+        return HostJSON.status(
+            registered: service.isRegistered, registration: service.registration.name, registrationError: failure,
+            pushMode: service.pushMode.rawValue, gatewayURL: service.config.gatewayURL.absoluteString,
+            notifications: Self.authorization(settings.authorizationStatus),
+            appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "",
+            appBuild: Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "")
     }
 
     static func authorization(_ s: UNAuthorizationStatus) -> String {
@@ -239,48 +217,6 @@ final class NshBridge {
         case .authorized, .provisional, .ephemeral: return "authorized"
         case .denied: return "denied"
         default: return "notDetermined"
-        }
-    }
-}
-
-/// Reads the JSON object a host call passes.
-struct Args {
-    let dict: [String: Any]
-
-    init(_ data: Any?) { dict = data as? [String: Any] ?? [:] }
-
-    func string(_ k: String) -> String? {
-        switch dict[k] {
-        case let s as String: return s
-        case let n as NSNumber where CFGetTypeID(n) != CFBooleanGetTypeID(): return n.stringValue
-        default: return nil
-        }
-    }
-    func bool(_ k: String) -> Bool? { (dict[k] as? NSNumber)?.boolValue }
-    func int(_ k: String) -> Int64? {
-        switch dict[k] {
-        case let n as NSNumber: return n.int64Value
-        case let s as String: return Int64(s)
-        default: return nil
-        }
-    }
-
-    func require(_ k: String) throws -> Int64 {
-        guard let v = int(k) else { throw BridgeError.missing(k) }
-        return v
-    }
-
-    func require(_ k: String) throws -> String {
-        guard let v = string(k), !v.isEmpty else { throw BridgeError.missing(k) }
-        return v
-    }
-}
-
-enum BridgeError: Error, LocalizedError {
-    case missing(String)
-    var errorDescription: String? {
-        switch self {
-        case let .missing(k): return "missing argument \(k)"
         }
     }
 }
