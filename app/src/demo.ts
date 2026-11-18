@@ -148,6 +148,7 @@ const messages: Message[] = [
 ];
 const DEFAULT_GATEWAY = "https://honk.example.com/";
 let gateway = DEFAULT_GATEWAY;
+let registerKey = "";
 
 function normalize(u: string): string | null {
   let t = u.trim();
@@ -198,15 +199,18 @@ export async function demo<T>(name: string, args: unknown): Promise<T> {
       case "honk.register.retry":
         return { registered: true, registration: "registered", pushMode: "apns", gatewayURL: gateway, notifications: "authorized" };
       case "honk.gateway.get":
-        return { url: gateway, defaultURL: DEFAULT_GATEWAY, custom: gateway !== DEFAULT_GATEWAY };
+        return { url: gateway, defaultURL: DEFAULT_GATEWAY, custom: gateway !== DEFAULT_GATEWAY, registerKey };
       case "honk.gateway.test": {
         const url = normalize(String(a.url ?? ""));
         if (!url) return { ok: false, error: L("地址无效：需要 http:// 或 https:// 开头的网址", "Not a valid address: it needs http:// or https://") };
         if (url.includes("bad")) return { ok: false, error: L("无法连接到这个地址", "Can't reach this address") };
-        return { ok: true, url, version: "0.1.0" };
+        return { ok: true, url, version: "0.1.0", registerKeyRequired: url.includes("locked") };
       }
       case "honk.gateway.set": {
-        gateway = a.url ? normalize(String(a.url)) ?? gateway : DEFAULT_GATEWAY;
+        const target = a.url ? normalize(String(a.url)) ?? gateway : DEFAULT_GATEWAY;
+        registerKey = String(a.registerKey ?? "");
+        if (target === gateway) return { url: gateway, registered: true };
+        gateway = target;
         bots.splice(0, bots.length);
         messages.splice(0, messages.length);
         return { url: gateway, registered: true };

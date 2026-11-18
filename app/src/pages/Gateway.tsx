@@ -13,16 +13,21 @@ export function GatewayPage() {
   const p = palette;
   const current = signal<Gateway | null>(null);
   const draft = signal("");
+  const keyDraft = signal("");
   const check = signal<Check>({ state: "idle" });
   const busy = signal(false);
 
   void api.gateway().then((g) => {
     current.set(g);
     draft.set(g.url);
+    keyDraft.set(g.registerKey ?? "");
   });
 
   const normalized = () => draft().trim();
-  const changed = () => current() != null && normalized() !== "" && normalized() !== current()!.url;
+  const key = () => keyDraft().trim();
+  const urlChanged = () => current() != null && normalized() !== "" && normalized() !== current()!.url;
+  const keyChanged = () => current() != null && normalized() !== "" && key() !== (current()!.registerKey ?? "");
+  const changed = () => urlChanged() || keyChanged();
 
   const test = async () => {
     if (!normalized()) return;
@@ -43,10 +48,10 @@ export function GatewayPage() {
     return action === "ok";
   };
 
-  const apply = async (url: string | null) => {
+  const apply = async (url: string | null, registerKey?: string) => {
     busy.set(true);
     try {
-      await api.setGateway(url);
+      await api.setGateway(url, registerKey);
       await Promise.all([reload(), loadStatus()]);
       nav.setRoutes([{ name: "home" }]);
     } catch (e) {
@@ -62,7 +67,8 @@ export function GatewayPage() {
     await test();
     const c = check();
     if (c.state !== "done" || !c.result.ok) return;
-    if (await confirmSwitch(c.result.url ?? normalized())) await apply(normalized());
+    // The same gateway with another register key clears nothing: no question.
+    if (!urlChanged() || (await confirmSwitch(c.result.url ?? normalized()))) await apply(normalized(), key());
   };
 
   const restore = async () => {
@@ -74,7 +80,11 @@ export function GatewayPage() {
   const status = () => {
     const c = check();
     if (c.state === "checking") return { text: tr("正在连接…"), color: p().hint };
-    if (c.state === "done" && c.result.ok) return { text: tr("连接正常 · 网关版本 {version}", { version: c.result.version || tr("未知") }), color: p().good };
+    if (c.state === "done" && c.result.ok) {
+      const text = tr("连接正常 · 网关版本 {version}", { version: c.result.version || tr("未知") });
+      if (c.result.registerKeyRequired && !key()) return { text: `${text} · ${tr("需要注册口令")}`, color: p().destructive };
+      return { text, color: p().good };
+    }
     if (c.state === "done") return { text: c.result.error ?? tr("无法连接"), color: p().destructive };
     return null;
   };
@@ -134,6 +144,25 @@ export function GatewayPage() {
                 </View>
               )}
             </If>
+          </Section>
+
+          <Section
+            title={tr("注册口令")}
+            p={p()}
+            footer={tr("网关设置了注册口令（HONK_REGISTER_KEY）时，填在这里，注册这台设备时会带上；没有就留空。")}
+          >
+            <View style={{ height: 48, paddingLeft: 16, paddingRight: 16, justifyContent: "center" }}>
+              <Input
+                testID="register-key"
+                value={keyDraft()}
+                onChange={({ value }) => keyDraft.set(value)}
+                placeholder={tr("可选")}
+                autoCapitalize="none"
+                autoCorrect={false}
+                returnKeyType="done"
+                style={{ fontSize: 16, color: p().text }}
+              />
+            </View>
           </Section>
 
           <Section title={tr("当前")} p={p()} footer={tr("切换后这台设备会在新网关上重新注册，本机的 Bot 和消息会被清除。")}>

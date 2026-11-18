@@ -79,6 +79,10 @@ private func chat(_ j: JSON) -> ChatSummary {
         #expect(d.before == nil && d.limit == 50)
         let c = try HostArgs.BotCreate(Args(["name": "n"]))
         #expect(c.avatar == "" && c.defaultLevel == "active")
+        let g = try HostArgs.GatewaySet(Args(["url": "https://gw.test/", "registerKey": "s3cret"]))
+        #expect(g.url == "https://gw.test/" && g.registerKey == "s3cret")
+        let none = try HostArgs.GatewaySet(Args(["url": NSNull(), "registerKey": ""]))
+        #expect(none.url == nil && none.registerKey == nil, "null url: the default gateway; empty key: none")
         let u = try HostArgs.BotUpdate(Args(["botId": "b", "name": "x"]))
         #expect(u.name == "x" && u.avatar == nil && u.defaultLevel == nil)
         #expect(Args(["muted": true]).bool("muted") == true)
@@ -127,12 +131,12 @@ private func chat(_ j: JSON) -> ChatSummary {
         }
         for s in try results("honk.gateway.get") {
             let r = s["result"] as! JSON
-            #expect(try canon(HostJSON.gatewayGet(url: r["url"] as! String, defaultURL: r["defaultURL"] as! String, custom: r["custom"] as! Bool)) == canon(r))
+            #expect(try canon(HostJSON.gatewayGet(url: r["url"] as! String, defaultURL: r["defaultURL"] as! String, custom: r["custom"] as! Bool, registerKey: r["registerKey"] as! String)) == canon(r))
         }
         for s in try results("honk.gateway.test") {
             let r = s["result"] as! JSON
             let out = r["ok"] as! Bool
-                ? HostJSON.gatewayTest(url: r["url"] as! String, version: r["version"] as! String)
+                ? HostJSON.gatewayTest(url: r["url"] as! String, version: r["version"] as! String, registerKeyRequired: r["registerKeyRequired"] as! Bool)
                 : HostJSON.gatewayTest(error: r["error"] as! String)
             #expect(try canon(out) == canon(r))
         }

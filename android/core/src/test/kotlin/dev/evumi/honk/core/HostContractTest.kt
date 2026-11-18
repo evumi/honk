@@ -98,6 +98,8 @@ class HostContractTest {
         assertEquals(HostArgs.Messages("aZ3kQ9xT", 8, 20), HostArgs.Messages(Args(mapOf("botId" to "aZ3kQ9xT", "before" to "8", "limit" to 20))))
         assertEquals(HostArgs.Messages("b", null, 50), HostArgs.Messages(Args(mapOf("botId" to "b"))))
         assertEquals(HostArgs.BotCreate("n", "", "active"), HostArgs.BotCreate(Args(mapOf("name" to "n"))))
+        assertEquals(HostArgs.GatewaySet("https://gw.test/", "s3cret"), HostArgs.GatewaySet(Args(mapOf("url" to "https://gw.test/", "registerKey" to "s3cret"))))
+        assertEquals("null url: the default gateway; empty key: none", HostArgs.GatewaySet(null, null), HostArgs.GatewaySet(Args(mapOf("url" to null, "registerKey" to ""))))
         assertEquals(HostArgs.BotUpdate("b", "x", null, null), HostArgs.BotUpdate(Args(mapOf("botId" to "b", "name" to "x"))))
         assertEquals(null, Args(mapOf("n" to true)).string("n"))
         assertEquals("5", Args(mapOf("n" to 5)).string("n"))
@@ -140,12 +142,12 @@ class HostContractTest {
         for (s in samples("honk.gateway.get")) {
             val r = s.getValue("result").jsonObject
             fun str(k: String) = r.getValue(k).jsonPrimitive.content
-            assertEquals(r, json(HostJson.gatewayGet(str("url"), str("defaultURL"), r.getValue("custom").jsonPrimitive.boolean)))
+            assertEquals(r, json(HostJson.gatewayGet(str("url"), str("defaultURL"), r.getValue("custom").jsonPrimitive.boolean, str("registerKey"))))
         }
         for (s in samples("honk.gateway.test")) {
             val r = s.getValue("result").jsonObject
             fun str(k: String) = r.getValue(k).jsonPrimitive.content
-            val out = if (r.getValue("ok").jsonPrimitive.boolean) HostJson.gatewayTest(str("url"), str("version")) else HostJson.gatewayTestFailed(str("error"))
+            val out = if (r.getValue("ok").jsonPrimitive.boolean) HostJson.gatewayTest(str("url"), str("version"), r.getValue("registerKeyRequired").jsonPrimitive.boolean) else HostJson.gatewayTestFailed(str("error"))
             assertEquals(r, json(out))
         }
         for (s in samples("honk.gateway.set")) {

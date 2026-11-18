@@ -108,17 +108,24 @@
     "honk.notifications.open": { "samples": [{ "args": null, "result": true }] },
     "honk.device.delete": { "samples": [{ "args": null, "result": true }] },
     "honk.gateway.get": {
-      "samples": [{ "args": null, "result": { "url": "https://gw.test/", "defaultURL": "https://honk.example.com/", "custom": true } }]
+      "optional": ["registerKey"],
+      "samples": [
+        { "args": null, "result": { "url": "https://gw.test/", "defaultURL": "https://honk.example.com/", "custom": true, "registerKey": "s3cret" } },
+        { "args": null, "result": { "url": "https://honk.example.com/", "defaultURL": "https://honk.example.com/", "custom": false, "registerKey": "" } }
+      ]
     },
     "honk.gateway.test": {
-      "optional": ["url", "version", "error"],
+      "optional": ["url", "version", "error", "registerKeyRequired"],
       "samples": [
-        { "args": { "url": "gw.test" }, "result": { "ok": true, "url": "https://gw.test/", "version": "0.2.0" } },
+        { "args": { "url": "gw.test" }, "result": { "ok": true, "url": "https://gw.test/", "version": "0.2.0", "registerKeyRequired": false } },
+        { "args": { "url": "locked.test" }, "result": { "ok": true, "url": "https://locked.test/", "version": "0.2.0", "registerKeyRequired": true } },
         { "args": { "url": "nope" }, "result": { "ok": false, "error": "无法连接到这个地址" } }
       ]
     },
     "honk.gateway.set": {
+      "optional": ["registerKey"],
       "samples": [
+        { "args": { "url": "https://gw.test/", "registerKey": "s3cret" }, "result": { "url": "https://gw.test/", "registered": true } },
         { "args": { "url": "https://gw.test/" }, "result": { "url": "https://gw.test/", "registered": true } },
         { "args": { "url": null }, "result": { "url": "https://honk.example.com/", "registered": false } }
       ]

@@ -43,6 +43,15 @@ object HostArgs {
         constructor(a: Args) : this(a.requireString("botId"), a.string("name"), a.string("avatar"), a.string("defaultLevel"))
     }
 
+    data class GatewaySet(
+        /** Null: back to the build's default gateway. */
+        val url: String?,
+        /** The gateway's register key; null (or empty) when it has none. */
+        val registerKey: String?,
+    ) {
+        constructor(a: Args) : this(a.string("url"), a.string("registerKey")?.takeIf { it.isNotEmpty() })
+    }
+
     /** [payload] is `load` (open), `path` (click) or `state` (set); empty for close. */
     data class CardCall(val key: String, val payload: String) {
         constructor(a: Args, payload: String?) : this(a.requireString("key"), payload?.let { a.requireString(it) }.orEmpty())
@@ -65,7 +74,7 @@ object HostArgs {
             "honk.bot.update" -> BotUpdate(a)
             "honk.message.delete" -> a.require("messageId")
             "honk.gateway.test" -> a.requireString("url")
-            "honk.gateway.set" -> Unit // a missing url means the default gateway
+            "honk.gateway.set" -> GatewaySet(a) // a missing url means the default gateway
             "honk.avatar.save" -> a.requireString("data")
             "honk.avatar.image" -> a.requireString("avatar")
             "honk.card.open" -> CardCall(a, "load")
@@ -113,10 +122,12 @@ object HostJson {
         put("appBuild", appBuild)
     }
 
-    fun gatewayGet(url: String, defaultUrl: String, custom: Boolean): Map<String, Any?> =
-        mapOf("url" to url, "defaultURL" to defaultUrl, "custom" to custom)
+    /** [registerKey]: the one saved for the gateway, empty when none. */
+    fun gatewayGet(url: String, defaultUrl: String, custom: Boolean, registerKey: String): Map<String, Any?> =
+        mapOf("url" to url, "defaultURL" to defaultUrl, "custom" to custom, "registerKey" to registerKey)
 
-    fun gatewayTest(url: String, version: String): Map<String, Any?> = mapOf("ok" to true, "url" to url, "version" to version)
+    fun gatewayTest(url: String, version: String, registerKeyRequired: Boolean): Map<String, Any?> =
+        mapOf("ok" to true, "url" to url, "version" to version, "registerKeyRequired" to registerKeyRequired)
 
     fun gatewayTestFailed(error: String): Map<String, Any?> = mapOf("ok" to false, "error" to error)
 

@@ -66,6 +66,8 @@ export interface Gateway {
   url: string;
   defaultURL: string;
   custom: boolean;
+  /** The register key saved for the gateway (it asks for one when set up with HONK_REGISTER_KEY); empty when none. */
+  registerKey?: string;
 }
 
 export interface GatewayTest {
@@ -73,6 +75,8 @@ export interface GatewayTest {
   url?: string;
   version?: string;
   error?: string;
+  /** The gateway only registers devices that send its register key. */
+  registerKeyRequired?: boolean;
 }
 
 /** Test hook (host.contract.test.ts): sees every host call before it is made, host or not. */
@@ -160,8 +164,13 @@ export const api = {
   retryRegistration: () => call<Status>("honk.register.retry"),
   gateway: () => call<Gateway>("honk.gateway.get"),
   testGateway: (url: string) => call<GatewayTest>("honk.gateway.test", { url }),
-  /** `null`: back to the build's default gateway. Clears this device's bots and messages. */
-  setGateway: (url: string | null) => call<{ url: string; registered: boolean }>("honk.gateway.set", { url }),
+  /**
+   * `null`: back to the build's default gateway. Clears this device's bots and
+   * messages when the gateway changes. `registerKey` is what that gateway asks
+   * for when registering a device, if anything; missing or empty: none.
+   */
+  setGateway: (url: string | null, registerKey?: string) =>
+    call<{ url: string; registered: boolean }>("honk.gateway.set", { url, registerKey }),
   /**
    * Keeps a picked image (base64 JPEG or PNG) on this phone and resolves with
    * the avatar that names it, `local:<file>`. The gateway stores only that

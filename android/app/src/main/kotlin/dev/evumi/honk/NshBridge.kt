@@ -96,20 +96,22 @@ class NshBridge(
         // gateway
 
         handle("honk.gateway.get") {
-            HostJson.gatewayGet(service.gatewayUrl, service.defaultGatewayUrl, service.isCustomGateway)
+            HostJson.gatewayGet(service.gatewayUrl, service.defaultGatewayUrl, service.isCustomGateway, service.registerKey.orEmpty())
         }
         handle("honk.gateway.test") { a ->
             try {
                 val checked = service.testGateway(a.requireString("url"))
-                HostJson.gatewayTest(checked.url, checked.version)
+                HostJson.gatewayTest(checked.url, checked.version, checked.registerKeyRequired)
             } catch (e: Exception) {
                 HostJson.gatewayTestFailed(Gateway.describe(e))
             }
         }
         handle("honk.gateway.set") { a ->
-            // `url` null or missing: back to the default gateway. Failures reject the call.
+            // `url` null or missing: back to the default gateway; `registerKey` missing or empty: none.
+            // Failures reject the call.
+            val g = HostArgs.GatewaySet(a)
             try {
-                service.switchGateway(a.string("url"))
+                service.switchGateway(g.url, g.registerKey)
             } catch (e: Exception) {
                 throw IllegalStateException(Gateway.describe(e), e)
             }

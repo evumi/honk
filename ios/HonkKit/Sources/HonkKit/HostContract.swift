@@ -93,6 +93,18 @@ public enum HostArgs {
         }
     }
 
+    public struct GatewaySet: Equatable {
+        /// `nil`: back to the build's default gateway.
+        public let url: String?
+        /// The gateway's register key; `nil` (or empty) when it has none.
+        public let registerKey: String?
+
+        public init(_ a: Args) throws {
+            url = a.string("url")
+            registerKey = a.string("registerKey").flatMap { $0.isEmpty ? nil : $0 }
+        }
+    }
+
     public struct CardCall: Equatable {
         public let key: String
         /// `load` (open), `path` (click) or `state` (set); empty for close.
@@ -124,7 +136,7 @@ public enum HostArgs {
             let _: Int64 = try a.require("messageId")
         case "honk.gateway.test":
             let _: String = try a.require("url")
-        case "honk.gateway.set": break // a missing url means the default gateway
+        case "honk.gateway.set": _ = try GatewaySet(a) // a missing url means the default gateway
         case "honk.avatar.save":
             let _: String = try a.require("data")
         case "honk.avatar.image":
@@ -167,12 +179,13 @@ public enum HostJSON {
         return out
     }
 
-    public static func gatewayGet(url: String, defaultURL: String, custom: Bool) -> [String: Any] {
-        ["url": url, "defaultURL": defaultURL, "custom": custom]
+    /// `registerKey`: the one saved for the gateway, empty when none.
+    public static func gatewayGet(url: String, defaultURL: String, custom: Bool, registerKey: String) -> [String: Any] {
+        ["url": url, "defaultURL": defaultURL, "custom": custom, "registerKey": registerKey]
     }
 
-    public static func gatewayTest(url: String, version: String) -> [String: Any] {
-        ["ok": true, "url": url, "version": version]
+    public static func gatewayTest(url: String, version: String, registerKeyRequired: Bool) -> [String: Any] {
+        ["ok": true, "url": url, "version": version, "registerKeyRequired": registerKeyRequired]
     }
 
     public static func gatewayTest(error: String) -> [String: Any] {

@@ -54,6 +54,49 @@ public struct CredentialStore: Sendable {
     }
 }
 
+/// Keeps the register key of a gateway that asks for one (HONK_REGISTER_KEY),
+/// which the app sends when it registers the device.
+public struct RegisterKeyStore: Sendable {
+    let service: String
+    let accessGroup: String?
+
+    public init(service: String = "dev.evumi.honk.register-key", accessGroup: String?) {
+        self.service = service
+        self.accessGroup = accessGroup
+    }
+
+    private func query(group: String?) -> [String: Any] {
+        var q: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: "key",
+        ]
+        if let group { q[kSecAttrAccessGroup as String] = group }
+        return q
+    }
+
+    /// The saved key; `nil` when there is none.
+    public func load() -> String? {
+        for group in Keychain.groups(accessGroup) {
+            if let data = Keychain.read(query(group: group)) { return String(data: data, encoding: .utf8) }
+        }
+        return nil
+    }
+
+    /// Saves the key; `nil` or an empty one removes it.
+    public func save(_ key: String?) {
+        guard let key, !key.isEmpty else {
+            clear()
+            return
+        }
+        _ = Keychain.write(Data(key.utf8), accessGroup) { query(group: $0) }
+    }
+
+    public func clear() {
+        for group in Keychain.groups(accessGroup) { SecItemDelete(query(group: group) as CFDictionary) }
+    }
+}
+
 /// Keychain helpers. A build without the shared access group entitlement (an
 /// unsigned or ad hoc simulator build) gets errSecMissingEntitlement for it;
 /// such builds fall back to the app's own keychain, which the extension then

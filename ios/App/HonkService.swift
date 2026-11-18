@@ -10,6 +10,8 @@ final class HonkService {
     private(set) var config = HonkConfig.fromBundle()
     let credentials: CredentialStore
     let botTokens: BotTokenStore
+    /// The register key of the gateway, when it asks for one.
+    let registerKeys: RegisterKeyStore
     let store: LocalStore
     let images: ImageCache
 
@@ -56,6 +58,7 @@ final class HonkService {
     private init() {
         credentials = CredentialStore(accessGroup: config.keychainGroup)
         botTokens = BotTokenStore(accessGroup: config.keychainGroup)
+        registerKeys = RegisterKeyStore(accessGroup: config.keychainGroup)
         do {
             store = try LocalStore(appGroup: config.appGroup)
         } catch {
@@ -110,7 +113,7 @@ final class HonkService {
                     return
                 }
             }
-            let reg = try await APIClient(baseURL: config.gatewayURL, secret: nil).registerDevice(pushToken: pushToken)
+            let reg = try await APIClient(baseURL: config.gatewayURL, secret: nil).registerDevice(pushToken: pushToken, registerKey: registerKeys.load())
             try credentials.save(Credentials(deviceID: reg.device.id, secret: reg.deviceSecret, pushToken: pushToken))
             setRegistration(.registered)
             await refresh()
@@ -233,13 +236,21 @@ final class HonkService {
 
     /// Moves the device to another gateway (`nil`: the build's default). The
     /// new gateway knows nothing of this device, so its local data goes and it
-    /// registers again; the bots on the old gateway stay there.
-    func switchGateway(to address: String?) async throws {
+    /// registers again; the bots on the old gateway stay there. `registerKey`
+    /// is the key that gateway asks for when registering, if any; it replaces
+    /// the saved one. With the same gateway only the key changes.
+    func switchGateway(to address: String?, registerKey: String? = nil) async throws {
         var target = config.defaultGatewayURL
         if let address {
             target = try await testGateway(address).url
         }
-        guard target != config.gatewayURL else { return }
+        // Only after the address checked out, so a typo never changes the key.
+        registerKeys.save(registerKey)
+        guard target != config.gatewayURL else {
+            // Only the key may have changed: a device that could not register may now.
+            if !isRegistered { await retryRegistration() }
+            return
+        }
         let pushToken = credentials.load()?.pushToken
         HonkConfig.setGatewayOverride(target == config.defaultGatewayURL ? nil : target, appGroup: config.appGroup)
         config = HonkConfig.fromBundle()

@@ -185,6 +185,11 @@ const EN: Record<string, string> = {
   "自定义": "Custom",
   "默认": "Default",
   "恢复默认网关": "Restore default gateway",
+  "注册口令": "Register key",
+  "可选": "Optional",
+  "需要注册口令": "needs a register key",
+  "网关设置了注册口令（HONK_REGISTER_KEY）时，填在这里，注册这台设备时会带上；没有就留空。":
+    "If the gateway is set up with a register key (HONK_REGISTER_KEY), enter it here; it is sent when this device registers. Leave it empty otherwise.",
   "切换中…": "Switching…",
   "保存并切换": "Save and switch",
 };

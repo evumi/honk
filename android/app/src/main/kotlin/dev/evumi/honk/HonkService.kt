@@ -39,6 +39,7 @@ class HonkService private constructor(context: Context) {
     val store: LocalStore = LocalStore(AndroidSql(File(this.context.noBackupFilesDir, "honk.sqlite")))
     val notifier = Notifier(this.context)
     private val prefs: SharedPreferences = this.context.getSharedPreferences("honk", Context.MODE_PRIVATE)
+    private val secure: SharedPreferences = SecurePrefs.open(this.context)
 
     /** Where registration with the gateway stands; the settings page shows it. */
     sealed class Registration(val name: String) {
@@ -64,7 +65,6 @@ class HonkService private constructor(context: Context) {
     private val syncing = AtomicBoolean(false)
 
     init {
-        val secure = SecurePrefs.open(this.context)
         credentials = PrefsCredentialStore(secure)
         botTokens = PrefsBotTokenStore(secure)
         if (credentials.load() != null) registration = Registration.Registered
@@ -80,6 +80,13 @@ class HonkService private constructor(context: Context) {
         get() = prefs.getString(KEY_GATEWAY, null)?.let(Gateway::normalize) ?: defaultGatewayUrl
 
     val isCustomGateway: Boolean get() = gatewayUrl != defaultGatewayUrl
+
+    /** The register key of the gateway, when it asks for one (HONK_REGISTER_KEY); sent when registering. */
+    var registerKey: String?
+        get() = secure.getString(KEY_REGISTER_KEY, null)?.takeIf { it.isNotEmpty() }
+        private set(v) {
+            secure.edit().apply { if (v.isNullOrEmpty()) remove(KEY_REGISTER_KEY) else putString(KEY_REGISTER_KEY, v) }.commit()
+        }
 
     val api: ApiClient get() = ApiClient(gatewayUrl, credentials.load()?.secret)
     val isRegistered: Boolean get() = credentials.load() != null
@@ -107,7 +114,7 @@ class HonkService private constructor(context: Context) {
         prefs.edit().putString(KEY_LAST_PUSH_TOKEN, pushToken).apply()
         if (registration != Registration.Registered) setRegistration(Registration.Registering)
         try {
-            val r = DeviceRegistrar(gatewayUrl, credentials).register(pushToken)
+            val r = DeviceRegistrar(gatewayUrl, credentials, registerKey = registerKey).register(pushToken)
             setRegistration(Registration.Registered)
             if (r == DeviceRegistrar.Result.REGISTERED) refresh()
         } catch (e: Exception) {
@@ -180,11 +187,19 @@ class HonkService private constructor(context: Context) {
     /**
      * Moves the device to another gateway (null: the build's default). The new
      * gateway knows nothing of this device, so its local data goes and it
-     * registers again; the bots on the old gateway stay there. Blocking.
+     * registers again; the bots on the old gateway stay there. [registerKey]
+     * is the key that gateway asks for when registering, if any; it replaces
+     * the saved one. With the same gateway only the key changes. Blocking.
      */
-    fun switchGateway(address: String?) {
+    fun switchGateway(address: String?, registerKey: String? = null) {
         val target = if (address == null) defaultGatewayUrl else testGateway(address).url
-        if (target == gatewayUrl) return
+        // Only after the address checked out, so a typo never changes the key.
+        this.registerKey = registerKey
+        if (target == gatewayUrl) {
+            // Only the key may have changed: a device that could not register may now.
+            if (!isRegistered) retryRegistration()
+            return
+        }
         val pushToken = credentials.load()?.pushToken
         prefs.edit().apply {
             if (target == defaultGatewayUrl) remove(KEY_GATEWAY) else putString(KEY_GATEWAY, target)
@@ -363,6 +378,7 @@ class HonkService private constructor(context: Context) {
         private const val TAG = "honk"
         private const val KEY_GATEWAY = "gatewayURL"
         private const val KEY_LAST_PUSH_TOKEN = "lastPushToken"
+        private const val KEY_REGISTER_KEY = "register-key"
         @Volatile private var instance: HonkService? = null
 
         fun get(context: Context): HonkService =

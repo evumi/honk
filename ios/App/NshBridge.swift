@@ -90,19 +90,21 @@ final class NshBridge {
         handle("honk.gateway.get") { [service] _ in
             HostJSON.gatewayGet(url: service.config.gatewayURL.absoluteString,
                                 defaultURL: service.config.defaultGatewayURL.absoluteString,
-                                custom: service.config.isCustomGateway)
+                                custom: service.config.isCustomGateway,
+                                registerKey: service.registerKeys.load() ?? "")
         }
         handle("honk.gateway.test") { [service] args in
             do {
                 let (url, info) = try await service.testGateway(try Args(args).require("url"))
-                return HostJSON.gatewayTest(url: url.absoluteString, version: info.version)
+                return HostJSON.gatewayTest(url: url.absoluteString, version: info.version, registerKeyRequired: info.registerKeyRequired)
             } catch {
                 return HostJSON.gatewayTest(error: error.localizedDescription)
             }
         }
         handle("honk.gateway.set") { [service] args in
-            // `url` null or missing: back to the default gateway.
-            try await service.switchGateway(to: Args(args).string("url"))
+            // `url` null or missing: back to the default gateway. `registerKey` missing or empty: none.
+            let g = try HostArgs.GatewaySet(Args(args))
+            try await service.switchGateway(to: g.url, registerKey: g.registerKey)
             return HostJSON.gatewaySet(url: service.config.gatewayURL.absoluteString, registered: service.isRegistered)
         }
 

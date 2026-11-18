@@ -178,7 +178,26 @@ test("the gateway page tests an address before switching", async () => {
   app.onDialog(() => "切换");
   await app.press("id:save-gateway");
   await app.waitUntil(() => app.host.calls().some((c) => c.name === "honk.gateway.set"));
-  expect(app.host.calls().find((c) => c.name === "honk.gateway.set")?.data).toEqual({ url: "https://mine.example/" });
+  expect(app.host.calls().find((c) => c.name === "honk.gateway.set")?.data).toEqual({ url: "https://mine.example/", registerKey: "" });
+});
+
+test("the gateway page sends the register key, and changing only the key asks nothing", async () => {
+  const app = await open("./App.tsx", {
+    locale: "zh-Hans-CN",
+    host: host({
+      "honk.gateway.get": { url: "https://gw.test/", defaultURL: "https://gw.test/", custom: false, registerKey: "" },
+      "honk.gateway.test": (d: unknown) => ({ ok: true, url: (d as { url: string }).url, version: "0.2.0", registerKeyRequired: true }),
+    }),
+  });
+  await app.press("id:tab-settings");
+  await app.press("id:gateway-row");
+  await app.press("id:test-gateway");
+  await app.waitFor("text:连接正常 · 网关版本 0.2.0 · 需要注册口令");
+  await app.type("id:register-key", "s3cret");
+  await app.press("id:save-gateway");
+  await app.waitUntil(() => app.host.calls().some((c) => c.name === "honk.gateway.set"));
+  expect(app.host.calls().find((c) => c.name === "honk.gateway.set")?.data).toEqual({ url: "https://gw.test/", registerKey: "s3cret" });
+  expect(app.dialogs().length).toBe(0);
 });
 
 test("settings deletes this device's data after a confirmation", async () => {

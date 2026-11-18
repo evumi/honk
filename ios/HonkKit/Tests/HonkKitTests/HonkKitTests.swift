@@ -366,6 +366,23 @@ final class MockGateway: URLProtocol {
     }
 }
 
+@Suite struct RegisterKeyTests {
+    @Test func saveLoadAndClear() {
+        let store = RegisterKeyStore(service: "dev.evumi.honk.test.\(UUID().uuidString)", accessGroup: nil)
+        defer { store.clear() }
+        #expect(store.load() == nil)
+        store.save("s3cret")
+        #expect(store.load() == "s3cret")
+        store.save("other")
+        #expect(store.load() == "other")
+        store.save("")
+        #expect(store.load() == nil, "an empty key removes it")
+        store.save("again")
+        store.save(nil)
+        #expect(store.load() == nil)
+    }
+}
+
 @Suite struct LocalAvatarTests {
     func temp() -> LocalAvatars {
         LocalAvatars(dir: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true))
