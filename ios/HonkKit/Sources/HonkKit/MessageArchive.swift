@@ -71,7 +71,8 @@ public enum MessageArchive {
             let line = raw.last == 0x0D ? raw.dropLast() : raw
             if line.allSatisfy({ $0 == 0x20 || $0 == 0x09 }) { continue }
             if let m = try? decoder.decode(QueuedMessage.self, from: Data(line)), m.id > 0, !m.botID.isEmpty {
-                out.messages.append(m)
+                // An archive is as untrusted as a sealed message: apply the limits the gateway checks for plaintext.
+                out.messages.append(ContentLimits.sanitize(m))
             } else {
                 out.invalid += 1
             }

@@ -105,6 +105,9 @@ public struct QueuedMessage: Codable, Equatable, Sendable {
     public var allowQueries: Bool
     /// Unix milliseconds.
     public var date: Int64
+    /// Set by `MessageOpener` on the stand-in it makes for a message it could not open; never on the wire.
+    /// `LocalStore` marks the stored row so real content can replace it later.
+    public var placeholder: Bool = false
 
     enum CodingKeys: String, CodingKey {
         case kind, title, body, html, data, level, group, url, copy, icon, date, open, image, silent, ciphertext
@@ -119,7 +122,8 @@ public struct QueuedMessage: Codable, Equatable, Sendable {
     public init(id: Int64, botID: String, kind: Kind = .message, targetID: Int64 = 0, title: String = "", body: String = "",
                 html: String = "", data: String = "", level: String = "", group: String = "", url: String = "",
                 copy: String = "", icon: String = "", ciphertext: String = "", open: String = "", image: String = "", parseMode: String = "",
-                silent: Bool = false, collapseID: String = "", allowQueries: Bool = false, date: Int64 = 0) {
+                silent: Bool = false, collapseID: String = "", allowQueries: Bool = false, date: Int64 = 0,
+                placeholder: Bool = false) {
         self.id = id
         self.botID = botID
         self.kind = kind
@@ -141,6 +145,7 @@ public struct QueuedMessage: Codable, Equatable, Sendable {
         self.collapseID = collapseID
         self.allowQueries = allowQueries
         self.date = date
+        self.placeholder = placeholder
     }
 
     // The gateway omits empty fields.

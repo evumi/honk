@@ -115,6 +115,21 @@ enum Keychain {
         return out as? Data
     }
 
+    /// The account names of the items matching `query` (a service's items) in the access group and the app's own keychain.
+    static func accounts(_ query: [String: Any], _ accessGroup: String?) -> [String] {
+        var seen: [String] = []
+        for group in groups(accessGroup) {
+            var q = query
+            if let group { q[kSecAttrAccessGroup as String] = group }
+            q[kSecReturnAttributes as String] = true
+            q[kSecMatchLimit as String] = kSecMatchLimitAll
+            var out: CFTypeRef?
+            guard SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess, let rows = out as? [[String: Any]] else { continue }
+            for row in rows { if let a = row[kSecAttrAccount as String] as? String, !seen.contains(a) { seen.append(a) } }
+        }
+        return seen
+    }
+
     static func write(_ data: Data, _ accessGroup: String?, query: (String?) -> [String: Any]) -> OSStatus {
         let attrs: [String: Any] = [
             kSecValueData as String: data,
@@ -140,6 +155,12 @@ public protocol BotTokenStoring: Sendable {
     func token(botID: String) -> String?
     func save(_ token: String, botID: String)
     func remove(botID: String)
+    /// The ids of the bots that have a token here; used to drop the tokens of bots the gateway no longer lists.
+    func ids() -> [String]
+}
+
+public extension BotTokenStoring {
+    func ids() -> [String] { [] }
 }
 
 public struct BotTokenStore: BotTokenStoring, Sendable {
@@ -172,6 +193,8 @@ public struct BotTokenStore: BotTokenStoring, Sendable {
     public func remove(botID: String) {
         for group in Keychain.groups(accessGroup) { SecItemDelete(query(botID, group: group) as CFDictionary) }
     }
+
+    public func ids() -> [String] { Keychain.accounts(query(nil, group: nil), accessGroup) }
 
     /// Removes every bot's token.
     public func removeAll() {

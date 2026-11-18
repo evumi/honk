@@ -109,8 +109,17 @@ public struct SyncEngine: Sendable {
     public func run() async throws -> Outcome {
         var out = Outcome()
         var cursor = store.syncCursor
+        var restarted = false
         while true {
             let page = try await api.sync(cursor: cursor)
+            if page.reset, !restarted, cursor != 0 {
+                // The gateway merged groups or otherwise needs this device to start over: apply is
+                // idempotent, so replay everything from 0 (once per run).
+                restarted = true
+                cursor = 0
+                try store.setSyncCursor(0)
+                continue
+            }
             for item in page.messages {
                 guard let m = opener.open(item) else { continue }
                 let r = try store.apply(m)

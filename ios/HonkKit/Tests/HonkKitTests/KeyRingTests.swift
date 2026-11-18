@@ -50,7 +50,7 @@ private func bot(_ id: String, wrapped: String = "", encrypted: Bool = true) -> 
         let a = ring()
         let key1 = Seal.generateKey()
         a.keys.save(key1, botID: "b1")
-        let wrapped1 = try #require(a.wrapped(botID: "b1"))
+        let wrapped1 = try #require(a.wrapped(botID: "b1", createGroupKey: true))
 
         // B has the group key (paired) but no bot key yet.
         let b = KeyRing(keys: MemoryBotKeys(), group: MemoryGroupKey(a.group.groupKey()))
@@ -62,7 +62,7 @@ private func bot(_ id: String, wrapped: String = "", encrypted: Bool = true) -> 
         // A resets the key; B follows on the next refresh.
         let key2 = Seal.generateKey()
         a.keys.save(key2, botID: "b1")
-        let wrapped2 = try #require(a.wrapped(botID: "b1"))
+        let wrapped2 = try #require(a.wrapped(botID: "b1", createGroupKey: true))
         await b.reconcile(bots: [bot("b1", wrapped: wrapped2)]) { _, _ in }
         #expect(b.keys.key(botID: "b1") == key2)
 
@@ -74,7 +74,7 @@ private func bot(_ id: String, wrapped: String = "", encrypted: Bool = true) -> 
     @Test func aDeviceWithoutTheGroupKeyCannotOpenIt() async throws {
         let a = ring()
         a.keys.save(Seal.generateKey(), botID: "b1")
-        let wrapped = try #require(a.wrapped(botID: "b1"))
+        let wrapped = try #require(a.wrapped(botID: "b1", createGroupKey: true))
         let stranger = ring()
         var patched = 0
         await stranger.reconcile(bots: [bot("b1", wrapped: wrapped)]) { _, _ in patched += 1 }
@@ -114,13 +114,13 @@ private func bot(_ id: String, wrapped: String = "", encrypted: Bool = true) -> 
         let k1 = Seal.generateKey()
         creator.keys.save(k1, botID: "b1")
         let bundle = LinkBundle(tokens: [:], keys: creator.bundleKeys(botIDs: ["b1"]), groupKey: Seal.encode(creator.ensureGroupKey()))
-        let wrapped1 = try #require(creator.wrapped(botID: "b1"))
+        let wrapped1 = try #require(creator.wrapped(botID: "b1", createGroupKey: true))
 
         // The claimer already encrypted its own bot b2, wrapped with its own group key.
         let claimer = ring()
         let k2 = Seal.generateKey()
         claimer.keys.save(k2, botID: "b2")
-        let oldWrapped2 = try #require(claimer.wrapped(botID: "b2"))
+        let oldWrapped2 = try #require(claimer.wrapped(botID: "b2", createGroupKey: true))
         let oldGroup = try #require(claimer.group.groupKey())
 
         claimer.adopt(bundle)

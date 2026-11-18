@@ -83,6 +83,7 @@ public final class LocalStore: @unchecked Sendable {
         try migrateV2()
         try migrateSendOptions()
         try migrateWidgetQueries()
+        try migratePlaceholder()
     }
 
     private func migrateV1() throws {
@@ -206,6 +207,18 @@ public final class LocalStore: @unchecked Sendable {
         }
     }
 
+    /// v5: whether a message is the stand-in for one that could not be decrypted, so real content can replace it.
+    private func migratePlaceholder() throws {
+        guard try scalar("PRAGMA user_version") ?? 0 < 5 else { return }
+        try transaction {
+            guard try scalar("PRAGMA user_version") ?? 0 < 5 else { return }
+            try exec("""
+            ALTER TABLE messages ADD COLUMN placeholder INTEGER NOT NULL DEFAULT 0;
+            PRAGMA user_version = 5;
+            """)
+        }
+    }
+
     // MARK: applying queued items
 
     /// Applies an item from the gateway. Safe to call twice with the same item
@@ -235,11 +248,24 @@ public final class LocalStore: @unchecked Sendable {
             }
         }
         try run("""
-            INSERT INTO messages (id, bot_id, title, body, html, data, level, group_key, url, copy_text, icon, open_mode, image, parse_mode, silent, collapse_id, allow_queries, date, notif_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET data = excluded.data, allow_queries = excluded.allow_queries, notif_id = COALESCE(messages.notif_id, excluded.notif_id)
+            INSERT INTO messages (id, bot_id, title, body, html, data, level, group_key, url, copy_text, icon, open_mode, image, parse_mode, silent, collapse_id, allow_queries, date, notif_id, placeholder)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+              title = CASE WHEN messages.placeholder = 1 AND excluded.placeholder = 0 THEN excluded.title ELSE messages.title END,
+              body = CASE WHEN messages.placeholder = 1 AND excluded.placeholder = 0 THEN excluded.body ELSE messages.body END,
+              html = CASE WHEN messages.placeholder = 1 AND excluded.placeholder = 0 THEN excluded.html ELSE messages.html END,
+              copy_text = CASE WHEN messages.placeholder = 1 AND excluded.placeholder = 0 THEN excluded.copy_text ELSE messages.copy_text END,
+              url = CASE WHEN messages.placeholder = 1 AND excluded.placeholder = 0 THEN excluded.url ELSE messages.url END,
+              icon = CASE WHEN messages.placeholder = 1 AND excluded.placeholder = 0 THEN excluded.icon ELSE messages.icon END,
+              open_mode = CASE WHEN messages.placeholder = 1 AND excluded.placeholder = 0 THEN excluded.open_mode ELSE messages.open_mode END,
+              image = CASE WHEN messages.placeholder = 1 AND excluded.placeholder = 0 THEN excluded.image ELSE messages.image END,
+              parse_mode = CASE WHEN messages.placeholder = 1 AND excluded.placeholder = 0 THEN excluded.parse_mode ELSE messages.parse_mode END,
+              data = CASE WHEN messages.placeholder = 0 AND excluded.placeholder = 1 THEN messages.data ELSE excluded.data END,
+              allow_queries = CASE WHEN messages.placeholder = 0 AND excluded.placeholder = 1 THEN messages.allow_queries ELSE excluded.allow_queries END,
+              placeholder = CASE WHEN messages.placeholder = 1 THEN excluded.placeholder ELSE 0 END,
+              notif_id = COALESCE(messages.notif_id, excluded.notif_id)
             """, [m.id, m.botID, m.title, m.body, m.html, m.data, m.level, m.group, m.url, m.copy, m.icon, m.open, m.image, m.parseMode,
-                  m.silent ? 1 : 0, m.collapseID, m.allowQueries, m.date, notificationID])
+                  m.silent ? 1 : 0, m.collapseID, m.allowQueries, m.date, notificationID, m.placeholder ? 1 : 0])
         result.message = try message(id: m.id)
         return result
     }
@@ -511,12 +537,15 @@ public final class LocalStore: @unchecked Sendable {
         try locked {
             try transaction {
                 var summary = ImportSummary()
-                for m in items where m.kind == .message {
+                for raw in items where raw.kind == .message {
+                    let m = ContentLimits.sanitize(raw)
                     guard try scalar("SELECT COUNT(*) FROM bots WHERE id = ?", [m.botID]) == 1 else {
                         summary.unknownBot += 1
                         continue
                     }
-                    let stored = try scalar("SELECT id FROM messages WHERE id = ?", [m.id]) != nil
+                    let stored = try scalar("SELECT id FROM messages WHERE id = ? AND placeholder = 0", [m.id]) != nil
+                    // A stored stand-in for an undecryptable message is repaired by the archived content.
+                    let repair = try !m.placeholder && scalar("SELECT id FROM messages WHERE id = ? AND placeholder = 1", [m.id]) != nil
                     var newer: Int64?
                     if !m.collapseID.isEmpty {
                         newer = try scalar("SELECT id FROM messages WHERE bot_id = ? AND collapse_id = ? AND id > ? LIMIT 1",
@@ -527,7 +556,7 @@ public final class LocalStore: @unchecked Sendable {
                         continue
                     }
                     _ = try insert(m, notificationID: nil)
-                    try run("UPDATE messages SET read = 1 WHERE id = ?", [m.id])
+                    if !repair { try run("UPDATE messages SET read = 1 WHERE id = ?", [m.id]) }
                     summary.imported += 1
                 }
                 return summary
