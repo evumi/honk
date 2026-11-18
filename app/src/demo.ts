@@ -91,10 +91,20 @@ const ciCard = `<style>
 <div class="failures"><p style="margin:4px 0">${L("失败的测试", "Failing tests")}</p><code>{{failing}}</code></div>
 </div>`;
 
+// An analytics report with its visitor trend as inline SVG (fixed colours, so
+// it reads in light and dark), as Evumi sends it.
+const trendCard = `<div style="padding:4px 0">
+<p style="margin:0;font-size:13px;color:var(--tg-theme-hint-color)">{{site}} · ${L("过去 24 小时", "Last 24 hours")}</p>
+<div style="display:flex;align-items:baseline;gap:8px;margin:2px 0 8px"><h2 style="margin:0">{{visitors}}</h2><span style="color:#1a9e6e;font-size:13px">▲ {{change}}</span></div>
+<svg viewBox="0 0 320 112" width="100%" height="112" preserveAspectRatio="none"><path d="M0 2H320" stroke="#8e8e93" stroke-opacity="0.3"/><path d="M0 90L40 60L80 70L120 20L160 40L200 10L240 50L280 30L320 80" fill="none" stroke="#6366f1" stroke-width="2"/><path d="M0 90L40 60L80 70L120 20L160 40L200 10L240 50L280 30L320 80L320 110L0 110Z" fill="#6366f1" fill-opacity="0.1"/></svg>
+<p style="margin:8px 0 0;font-size:13px;color:var(--tg-theme-hint-color)">${L("访客", "Visitors")} · ${L("高峰", "peak")} {{peak}}</p>
+</div>`;
+
 const bots: Bot[] = [
   { id: "Bx7kQ2mT", name: L("Berth 部署", "Berth Deploys"), avatar: "preset:box:#1c1c1e", defaultLevel: "active", createdAt: now - 864e5 * 5 },
   { id: "aR4nW9pZ", name: L("服务器告警", "Server Alerts"), avatar: "preset:alert:#c2410c", defaultLevel: "timeSensitive", createdAt: now - 864e5 * 4 },
   { id: "Kc3vH8sL", name: L("CI 构建", "CI Builds"), avatar: "preset:check:#2f6f3e", defaultLevel: "active", createdAt: now - 864e5 * 3 },
+  { id: "Ev5tR2nD", name: L("Evumi 报告", "Evumi Reports"), avatar: "preset:chart:#6366f1", defaultLevel: "active", createdAt: now - 864e5 * 2 },
 ];
 
 let nextId = 100;
@@ -130,6 +140,10 @@ const messages: Message[] = [
       cpu: [41, 44, 52, 58, 63, 71, 79, 86, 91, 94, 92, 96],
       cpu24: [22, 18, 15, 14, 19, 33, 47, 52, 49, 61, 78, 96],
     }),
+  }),
+  msg("Ev5tR2nD", 140, {
+    title: L("evumi.com 日报", "evumi.com daily report"), body: L("过去 24 小时 1,284 位访客，比前一天多 18%。", "1,284 visitors in the last 24 hours, up 18% on the day before."), html: trendCard, read: true,
+    data: JSON.stringify({ site: "evumi.com", visitors: "1,284", change: "18%", peak: "14:00" }),
   }),
 ];
 const DEFAULT_GATEWAY = "https://honk.example.com/";

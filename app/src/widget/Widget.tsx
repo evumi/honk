@@ -5,7 +5,8 @@ import type { JSX } from "nsh";
 // and its style attributes. A card with scripts (profile 2) runs them in the
 // host's QuickJS sandbox (native/card) and is drawn from the trees it hands
 // back, checked against the whitelist; until then, and when the host cannot
-// run it, it is the static card.
+// run it, it is the static card. Inline <svg> is written back out as SVG
+// markup (svg.ts) and drawn as an image.
 import { cleanup, Clipboard, effect, Image, lifecycle, locale, openUrl, signal, Text, untracked, View } from "nsh";
 import { cards, on } from "../host";
 import type { Palette } from "../theme";
@@ -13,6 +14,7 @@ import { widgetVars } from "../theme";
 import { countNodes, fill, parse, parseData, type ElementNode, type WidgetNode } from "./parse";
 import { cascade, parseDecls, parseSheet, styleText, type Scheme, type Sheet } from "./css";
 import { cleanTree } from "./sanitize";
+import { svgDataUrl, svgFit, svgMarkup, viewBoxRatio } from "./svg";
 import type { TreeEnv } from "./selector";
 
 const MAX_NODES = 2000;
@@ -20,9 +22,9 @@ const MAX_NODES = 2000;
 const BLOCK = new Set([
   "div", "p", "h1", "h2", "h3", "h4", "h5", "h6", "section", "article", "header", "footer", "main", "aside", "nav",
   "pre", "blockquote", "figure", "figcaption", "ul", "ol", "li", "dl", "dt", "dd", "table", "caption", "thead",
-  "tbody", "tfoot", "tr", "td", "th", "details", "summary", "hr", "img", "button",
+  "tbody", "tfoot", "tr", "td", "th", "details", "summary", "hr", "img", "button", "svg",
 ]);
-const SKIP = new Set(["style", "script", "svg", "colgroup", "col", "title"]);
+const SKIP = new Set(["style", "script", "colgroup", "col", "title"]);
 
 type Style = Record<string, unknown>;
 
@@ -262,7 +264,8 @@ function hidden(n: WidgetNode): boolean {
 
 function renderInline(node: WidgetNode, ctx: Ctx, inherited: Style): JSX.Element | null {
   if (node.type === "text") return node.text ? f(node.text, ctx).replace(/\s+/g, " ") : null;
-  if (SKIP.has(node.tag) || hidden(node)) return null;
+  // An svg inside a run of text has no box of its own to draw in.
+  if (SKIP.has(node.tag) || node.tag === "svg" || hidden(node)) return null;
   if (node.tag === "br") return "\n";
   const own = tagStyle(node.tag, ctx.p);
   const { css, ctx: inner } = computed(node, ctx);
@@ -330,6 +333,7 @@ function renderBlock(el: ElementNode, ctx: Ctx, inherited: Style, listTag?: stri
     const h = length(el.attrs.height ?? "") ?? 0;
     return <Image src={src} style={{ width: w || "100%", height: h || 120, borderRadius: 8, ...box } as never} />;
   }
+  if (el.tag === "svg") return renderSvg(el, ctx, box, text);
   if (el.tag === "hr") return <View style={box as never} />;
   const href = el.tag === "a" || el.tag === "button" ? link(el, ctx) : null;
   const press = pressHandler(el, ctx, href);
@@ -350,6 +354,33 @@ function renderBlock(el: ElementNode, ctx: Ctx, inherited: Style, listTag?: stri
       {children}
     </View>
   );
+}
+
+/**
+ * An inline <svg> as an image of its markup. Its size comes from its CSS, else
+ * its width and height attributes (`width="100%"`: the container's width), else
+ * its viewBox's aspect ratio; preserveAspectRatio sets how it fills the box.
+ */
+function renderSvg(el: ElementNode, ctx: Ctx, box: Style, text: Style): JSX.Element {
+  const color = typeof text.color === "string" ? text.color : undefined;
+  const value = (s: string) => {
+    const v = resolveVars(f(s, ctx), ctx);
+    return color ? v.replace(/\bcurrentColor\b/gi, color) : v;
+  };
+  const size = (v: unknown) => (typeof v === "number" || (typeof v === "string" && v.endsWith("%")) ? v : undefined);
+  const width = size(box.width) ?? size(length(f(el.attrs.width ?? "", ctx))) ?? "100%";
+  let height = size(box.height) ?? size(length(f(el.attrs.height ?? "", ctx)));
+  const ratio = viewBoxRatio(el);
+  let aspectRatio: number | undefined;
+  if (height === undefined) {
+    if (ratio && typeof width === "number") height = width / ratio;
+    else if (ratio) aspectRatio = ratio;
+    else height = 150;
+  }
+  const title = el.children.find((c): c is ElementNode => c.type === "element" && c.tag === "title");
+  const label = f(el.attrs["aria-label"] ?? (title ? title.children.map((c) => (c.type === "text" ? c.text : "")).join("") : ""), ctx).trim();
+  const style = { ...box, width, height, ...(aspectRatio ? { aspectRatio } : {}), ...svgFit(el) };
+  return <Image src={svgDataUrl(svgMarkup(el, value))} style={style as never} accessibilityLabel={label || undefined} />;
 }
 
 /** Renders a card, or nothing when the HTML is empty or over the limits. */

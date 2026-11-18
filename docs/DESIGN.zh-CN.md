@@ -265,6 +265,7 @@ App 用 TSX 写，跑在 QuickJS 上。页面：
    - `var(--tg-theme-*)` 从当前主题取色，深色模式自动切换
    - `https://` 链接和 `button[data-url]` 点击后用系统打开
    - 超过 2000 个节点时不渲染卡片，只显示正文
+   - 内联 `<svg>`：`svg.ts` 把已经过白名单的子树重新序列化成 SVG 标记（只写 SVG 元素和白名单属性，`use` 只能引用 `#id`，`url()` 只能是 `url(#id)`，属性值和文本都转义；属性名按 SVG 恢复大小写，如 `viewBox`、`linearGradient`），先替换 `{{key}}`、`var()`、`currentColor`，再作为 `data:image/svg+xml` 交给 nsh 的 `Image` 栅格化。宽高取 CSS，其次 `width`/`height` 属性（`100%` 为容器宽度），再次 `viewBox` 比例；`preserveAspectRatio="none"` 对应 `objectFit: "fill"`，`slice` 对应 `cover`，其余 `contain`。行内文字里的 `<svg>` 不画。演示数据里“Evumi 报告”的卡片是一张内联 SVG 折线图
 3. 带脚本的卡片（profile 2）见下面「卡片脚本」。
 
 ### 样式表
