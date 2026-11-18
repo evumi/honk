@@ -18,6 +18,48 @@ const card = `<div style="padding:4px 0">
 <a href="{{url}}" style="display:block;padding:12px;border-radius:12px;background:var(--tg-theme-text-color);color:var(--tg-theme-bg-color);text-align:center">${L("在 Berth 中查看", "View in Berth")}</a>
 </div>`;
 
+// A card with a script (profile 2): a CPU chart that switches between 1 h and
+// 24 h, a live "for N min" counter and a button that copies the SSH command.
+// The phone apps run it in QuickJS (native/card); without a host (`nsh run`
+// on a desktop) and in older apps it shows the static part with its data.
+const alertCard = `<div style="padding:4px 0">
+<div style="display:flex;align-items:center;justify-content:space-between">
+<h3 style="margin:0">{{host}}</h3>
+<span style="padding:2px 10px;border-radius:999px;background:#d9480f;color:#fff;font-size:13px">CPU {{cpu_now}}%</span>
+</div>
+<p style="margin:4px 0 10px;color:var(--tg-theme-hint-color)">${L("超过阈值", "Above the threshold for")} <span id="dur">{{minutes}} ${L("分钟", "min")}</span> · ${L("阈值", "threshold")} 85%</p>
+<div id="bars" style="display:flex;align-items:flex-end;gap:3px;height:64px"></div>
+<p id="range" style="margin:6px 0 0;font-size:12px;color:var(--tg-theme-hint-color)"></p>
+<div style="display:flex;gap:8px">
+<button id="toggle" style="flex:1">${L("看 24 小时", "Show 24 h")}</button>
+<button id="copy" style="flex:1;background:var(--tg-theme-secondary-bg-color);color:var(--tg-theme-text-color)">${L("复制 SSH", "Copy SSH")}</button>
+</div>
+<script>
+var d = JSON.parse(TelegramWidget.chatData || "{}");
+var range = "1h";
+var labels = { "1h": "${L("过去 1 小时，每 5 分钟", "Last hour, every 5 min")}", "24h": "${L("过去 24 小时，每 2 小时", "Last 24 h, every 2 h")}" };
+function draw() {
+  var series = range === "1h" ? d.cpu : d.cpu24;
+  document.getElementById("bars").replaceChildren(...series.map(function (v) {
+    var b = document.createElement("div");
+    b.style.cssText = "flex:1;border-radius:2px;height:" + Math.round(v * 0.64) + "px;background:" + (v >= 85 ? "#d9480f" : "var(--tg-theme-hint-color)");
+    return b;
+  }));
+  document.getElementById("range").textContent = labels[range];
+  document.getElementById("toggle").textContent = range === "1h" ? "${L("看 24 小时", "Show 24 h")}" : "${L("看 1 小时", "Show 1 h")}";
+}
+function tick() {
+  var m = Math.max(0, Math.floor((Date.now() - d.since) / 60000));
+  document.getElementById("dur").textContent = m + " ${L("分钟", "min")}";
+}
+document.getElementById("toggle").addEventListener("click", function () { range = range === "1h" ? "24h" : "1h"; draw(); });
+document.getElementById("copy").addEventListener("click", function () { TelegramWidget.copyText(d.ssh); });
+draw();
+tick();
+setInterval(tick, 1000);
+</script>
+</div>`;
+
 // A card written as for a Telegram widget: classes and a <style> block, theme
 // variables, dark-mode media, and {{status}} in a class that shows or hides
 // the failures.
@@ -79,6 +121,14 @@ const messages: Message[] = [
     data: JSON.stringify({
       repo: "evumi/honk", run: 483, branch: "main", duration: L("3 分 41 秒", "3m 41s"), status: "failed", status_label: L("失败", "Failed"),
       passed: 126, failed: 2, skipped: 3, failing: "widget › css cascade, sync › ack after edit",
+    }),
+  }),
+  msg("aR4nW9pZ", 12, {
+    title: "hk-edge-02 CPU 96%", body: L("持续超过阈值 85%，点开看负载曲线。", "Above the 85% threshold; open for the load chart."), html: alertCard,
+    data: JSON.stringify({
+      host: "hk-edge-02", cpu_now: 96, minutes: 17, since: now - 17 * 6e4, ssh: "ssh ops@hk-edge-02.example.com",
+      cpu: [41, 44, 52, 58, 63, 71, 79, 86, 91, 94, 92, 96],
+      cpu24: [22, 18, 15, 14, 19, 33, 47, 52, 49, 61, 78, 96],
     }),
   }),
 ];

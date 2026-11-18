@@ -11,6 +11,9 @@ configFiles:
 packages:
   HonkKit:
     path: HonkKit
+  # Card scripts: quickjs-ng and the card sandbox, shared with Android (native/).
+  HonkCard:
+    path: ../native
 targets:
   Honk:
     type: application
@@ -24,6 +27,7 @@ targets:
         buildPhase: resources
     dependencies:
       - package: HonkKit
+      - package: HonkCard
       - target: NotificationService
       - framework: Frameworks/NativeShell.xcframework
         embed: false

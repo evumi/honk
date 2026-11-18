@@ -13,7 +13,7 @@ Monorepo. `gateway/` is the Go module `github.com/evumi/honk/gateway`; `app/` is
 - `cmd/honk` wires config, store, push and API. `internal/store` is SQLite through modernc (pure Go, no cgo) with one connection; the schema is `internal/store/schema.sql`, versioned with `PRAGMA user_version`. Add a new migration step for schema changes instead of editing v1 once it has shipped.
 - Timestamps are Unix milliseconds; device ids are UUIDv7; message ids are SQLite integers. A bot's public id is 8 random base62 characters starting with a letter (`bots.public_id`, v2); the integer row id stays private. Never show users a sequence number as an id. A bot token is `<bot id>:<secret>`; only sha256 hashes of tokens and device secrets are stored, so pre-v2 `<integer>:<secret>` tokens still work.
 - Pushes carry the banner text and `msg_id` only; devices fetch the message (card included) from the queue. Keep APNs/FCM payloads under 4 KB.
-- `internal/widget` is the server-side card whitelist (profile v1, static HTML/CSS). It mirrors Telegram's HTML widget limits: 32 KB raw, 4 KB zlib level 9, 1 KB data.
+- `internal/widget` is the server-side card whitelist: static HTML/CSS (profile 1) plus inline classic `<script>`s (profile 2); `on*` handlers, `src`/module scripts and scripts whose text has `<!--`, `<script` or `</script` are removed. It mirrors Telegram's HTML widget limits: 32 KB raw, 4 KB zlib level 9, 1 KB data.
 - The bot API keeps Telegram's naming and `{"ok":…}` envelope; keep new methods consistent with it.
 
 ## iOS (ios/)
@@ -37,9 +37,15 @@ Monorepo. `gateway/` is the Go module `github.com/evumi/honk/gateway`; `app/` is
 - `cd app && nsh check App.tsx && nsh test`. With no host (`nsh run App.tsx` on a desktop) the app uses `src/demo.ts`.
 - The host contract is `app/src/host.ts` on one side and `ios/App/NshBridge.swift` and `android/app/src/main/kotlin/dev/evumi/honk/NshBridge.kt` on the other; change all three together.
 - Read the generated declarations in `app/.nsh/types` (created by `nsh init`/`nsh check`) for the nsh API; `calc(env(...))` is not valid for `top`/`bottom`, use `safeArea()`.
-- `app/src/widget` renders cards (profile v1). `<style>` rules are applied by `css.ts` (cascade, `@media (prefers-color-scheme)`, custom properties, 400 rules) with selectors from `selector.ts`. Keep its limits and CSS checks (`sanitize.ts`) in step with `gateway/internal/widget`.
+- `app/src/widget` renders cards. A card with `<script>` is run by the host (`honk.card.*`, see `native/`) and drawn from the trees it returns, always passed through `cleanTree` in `sanitize.ts` first. `<style>` rules are applied by `css.ts` (cascade, `@media (prefers-color-scheme)`, custom properties, 400 rules) with selectors from `selector.ts`. Keep its limits and CSS checks (`sanitize.ts`) in step with `gateway/internal/widget`.
 - UI strings are written in Chinese and wrapped in `tr("…")` (`app/src/i18n.ts`); add the English to its `EN` table in the same change. The language follows `locale()`: Chinese for `zh*`, English otherwise. Tests pin `locale: "zh-Hans-CN"`.
 - Pages hide the system header (`NavPage headerVisible={false}`) and draw their own: `TopBar` (floating glass back button, title pill, avatar or text action, over a blurred top edge) and `FormBody` (scrolling content, a footer button pinned above the home indicator and the keyboard) in `app/src/components.tsx`. Floating controls use `glass(p)`; icons are `Icon` with `UI_ICONS` (24-unit stroke paths), never text glyphs. The design canvas is the reference for layout.
 - App Store images: `public/appstore/README.md` (regenerate with `scripts/brand/`).
+
+## Card scripts (native/)
+
+- `native/quickjs` is vendored quickjs-ng (engine core only, no quickjs-libc; see its `VERSION`). `native/card` is the sandbox shared by both apps: `honk_card.c` (one runtime per card, limits, checks on everything a card returns) and `runtime.js` (the DOM and `TelegramWidget` inside the card). After editing `runtime.js` run `make -C native runtime` (CI checks `runtime_js.h` is current).
+- `make -C native test asan` runs the C tests; `cd native && swift test` the iOS `CardHost` (`native/swift`, with the Command Line Tools add the flags `ios/Makefile` uses); `cd android && ./gradlew :core:test` the Android `CardHost` through JNI (it builds `native/build/libhonkcard.*` with `make -C native jni`).
+- iOS links the local package `native/Package.swift` (`project.yml`); Android builds `libhonkcard.so` from `native/jni/CMakeLists.txt` (`externalNativeBuild`). Keep `CardHost.swift` and `CardHost.kt` in step, and the `honk.card.*` calls in `host.ts` and both `NshBridge`s.
 
 Docs come in pairs: update README.md and README.zh-CN.md together. The design document is docs/DESIGN.zh-CN.md; keep it in step with the code.

@@ -83,6 +83,14 @@ android {
         jvmTarget = "17"
     }
 
+    // libhonkcard.so: card scripts (quickjs-ng and the card sandbox, native/), for CardHost in :core.
+    externalNativeBuild {
+        cmake {
+            path = rootProject.file("../native/jni/CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
+
     // The nsh app built by scripts/build-nsh-bundle.sh: app/dist/nsh → assets/nsh.
     sourceSets["main"].assets.srcDir(rootProject.file("../app/dist"))
 }

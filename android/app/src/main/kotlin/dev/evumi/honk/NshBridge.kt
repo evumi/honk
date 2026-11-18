@@ -11,6 +11,7 @@ import androidx.lifecycle.lifecycleScope
 import com.longbridge.nsh.NshHostReply
 import com.longbridge.nsh.NshView
 import dev.evumi.honk.core.Bot
+import dev.evumi.honk.core.CardHost
 import dev.evumi.honk.core.ChatSummary
 import dev.evumi.honk.core.Gateway
 import dev.evumi.honk.core.LocalAvatars
@@ -32,7 +33,9 @@ import java.util.Base64
  * honk.bot.resetToken, honk.bot.delete, honk.bot.setMuted, honk.bot.setPinned,
  * honk.message.delete, honk.chat.clear, honk.notifications.open, honk.avatar.save, honk.avatar.image,
  * honk.gateway.get, honk.gateway.test, honk.gateway.set, honk.register.retry.
- * Events: honk.changed (the store changed), honk.open { botId } (open a chat).
+ * Card scripts: honk.card.open, honk.card.click, honk.card.set, honk.card.close.
+ * Events: honk.changed (the store changed), honk.open { botId } (open a chat),
+ * honk.card.changed { key, result } (a card's timer changed it).
  *
  * nsh calls the handlers on the UI thread with the JSON arguments as Map,
  * List, String, Number and Boolean; each handler does its work on the IO
@@ -45,8 +48,22 @@ class NshBridge(
 ) {
     private var removeListener: (() -> Unit)? = null
 
+    // Card scripts run on their own thread, each in a QuickJS runtime (native/card);
+    // the strings in and out are JSON the app reads. Timer changes go to the UI thread.
+    private val cards = CardHost { key, result ->
+        activity.runOnUiThread { nsh.send("honk.card.changed", mapOf("key" to key, "result" to result)) }
+    }
+
     fun install() {
         removeListener = service.addChangeListener { nsh.send("honk.changed", null) }
+
+        handle("honk.card.open") { a -> cards.open(a.requireString("key"), a.requireString("load")) }
+        handle("honk.card.click") { a -> cards.click(a.requireString("key"), a.requireString("path")) }
+        handle("honk.card.set") { a -> cards.set(a.requireString("key"), a.requireString("state")) }
+        handle("honk.card.close") { a ->
+            cards.close(a.requireString("key"))
+            true
+        }
 
         handle("honk.status") { status() }
         handle("honk.register.retry") {
@@ -168,6 +185,7 @@ class NshBridge(
     }
 
     fun uninstall() {
+        cards.shutdown()
         removeListener?.invoke()
         removeListener = null
     }

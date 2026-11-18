@@ -1,13 +1,15 @@
 // Package widget checks and cleans the HTML card a bot sends with a message.
 //
 // The format follows Telegram's HTML widgets (Bot API 10.4): one small HTML
-// document, at most 32 KB raw and 4 KB after zlib at level 9. This is profile
-// v1: static HTML and CSS only. Scripts and inline event handlers are removed;
-// the client fills {{key}} placeholders from the message's data. The client
-// applies its own CSS whitelist when it renders, so the server only removes
-// what could reach the network or run code. <style> blocks stay as they are
-// when they load nothing; the app applies their rules (up to 400, as
-// Telegram does).
+// document, at most 32 KB raw and 4 KB after zlib at level 9. Profile 1 is
+// static HTML and CSS; the client fills {{key}} placeholders from the
+// message's data. Profile 2 adds inline scripts, which the apps run in a
+// QuickJS runtime per card (native/card) with no network; older apps skip
+// them and show the static card. Inline event handlers (on*), external and
+// module scripts and every other way to load a resource are removed. The
+// client applies its own CSS whitelist when it renders, so the server only
+// removes what could reach the network. <style> blocks stay as they are when
+// they load nothing; the app applies their rules (up to 400, as Telegram does).
 package widget
 
 import (
@@ -114,6 +116,13 @@ func clean(n *html.Node) []*html.Node {
 	if unwrap[name] {
 		return cleanChildren(n)
 	}
+	if name == "script" {
+		if !keepScript(n) {
+			return nil
+		}
+		n.Attr = nil
+		return []*html.Node{n}
+	}
 	if !allowed[name] {
 		return nil
 	}
@@ -143,6 +152,39 @@ func clean(n *html.Node) []*html.Node {
 		n.AppendChild(k)
 	}
 	return []*html.Node{n}
+}
+
+// keepScript reports an inline classic script in HTML (not SVG): no src, and
+// no type other than JavaScript. Modules are dropped: a card cannot import.
+func keepScript(n *html.Node) bool {
+	if n.Namespace != "" {
+		return false
+	}
+	for _, a := range n.Attr {
+		switch strings.ToLower(a.Key) {
+		case "src":
+			return false
+		case "type":
+			switch strings.ToLower(strings.TrimSpace(a.Val)) {
+			case "", "text/javascript", "application/javascript":
+			default:
+				return false
+			}
+		}
+	}
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		if c.Type != html.TextNode {
+			return false
+		}
+		// Script text with "<!--", "<script" or "</script" parses differently
+		// here (the HTML spec's escaped states) and in the app's simpler
+		// parser, which would read what follows as markup the whitelist never saw.
+		t := strings.ToLower(c.Data)
+		if strings.Contains(t, "<!--") || strings.Contains(t, "<script") || strings.Contains(t, "</script") {
+			return false
+		}
+	}
+	return true
 }
 
 func cleanChildren(n *html.Node) []*html.Node {

@@ -6,6 +6,8 @@ export interface ElementNode {
   tag: string;
   attrs: Record<string, string>;
   children: WidgetNode[];
+  /** A card script listens for clicks on it (trees from a card's runtime only). */
+  on?: boolean;
 }
 
 export interface TextNode {

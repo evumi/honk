@@ -88,7 +88,7 @@ bot token 形如 `<bot id>:<32 位随机串>`；token 和 device secret 都只�
 
 ### 校验与限制
 
-- **卡片**（`internal/widget`）：原文 ≤ 32KB，zlib 9 压缩后 ≤ 4KB，`data` ≤ 1KB。按白名单清理：删掉脚本、`on*` 属性、表单控件、外部资源；链接只允许 `https://`、`#id`、`{{key}}`；CSS 里禁止 `@import`、`expression()`、非 data: 的 `url()` 和反斜杠转义。
+- **卡片**（`internal/widget`）：原文 ≤ 32KB，zlib 9 压缩后 ≤ 4KB，`data` ≤ 1KB，脚本也算在里面。按白名单清理：保留内联的普通 `<script>`（profile 2，见第 6 节「卡片脚本」）；删掉其他脚本、`on*` 属性、表单控件、外部资源；链接只允许 `https://`、`#id`、`{{key}}`；CSS 里禁止 `@import`、`expression()`、非 data: 的 `url()` 和反斜杠转义。
 - **字段长度**：`title` ≤ 256 字，`body` ≤ 4096 字，`id` ≤ 128 字节，`icon` 必须是 https。
 - **限流**：每个 bot 每秒 5 条，突发 20 条（可配）。
 - **模拟器身份**：push token 以 `simulator-` 开头的设备照常注册和排队，但不发推送（见第 5 节「模拟器开发」）。
@@ -265,7 +265,7 @@ App 用 TSX 写，跑在 QuickJS 上。页面：
    - `var(--tg-theme-*)` 从当前主题取色，深色模式自动切换
    - `https://` 链接和 `button[data-url]` 点击后用系统打开
    - 超过 2000 个节点时不渲染卡片，只显示正文
-3. **v1 不执行 JS**。v2 计划在 QuickJS 里做精简 DOM，并提供和 `TelegramWidget` 同名的接口。
+3. 带脚本的卡片（profile 2）见下面「卡片脚本」。
 
 ### 样式表
 
@@ -281,6 +281,72 @@ Telegram 的 widget 一般用 class 加 `<style>` 写，所以 Honk 也按样式
 网关早就保留 `<style>`（有危险写法时整块删掉），这次没有改规则，只加了测试，确认 class、id、媒体查询、变量和 `{{key}}` 原样保留。
 
 演示数据（`src/demo.ts`）里“CI 构建”的最新一条是用 class 和 `<style>` 写的卡片：`{{status}}` 写在 class 里，失败时才显示失败的测试，深色模式换一组颜色。
+
+### 卡片脚本（profile 2）
+
+#### Telegram 的做法（Bot API 10.4，2026-11-09）
+
+依据 https://core.telegram.org/bots/widgets 和 Bot API 10.4 的更新日志整理：
+
+- **格式**：一个自包含的 HTML 文档，内联 CSS 和 JavaScript；HTML ≤ 32768 字节，zlib 9 压缩后 ≤ 4096 字节。图片只能是 data: URL 或内联 SVG，外部脚本、样式、字体、图片都不加载。消息里没有声明“是否带脚本”的字段；`TelegramWidget.profile` 是 Telegram 自己的接口级别（现在是 1），`isProfileAtLeast(n)` 用来做特性检测，客户端不支持的特性会被去掉，其余照常运行。
+- **运行环境**：JS 跑在 QuickJS（ES2023）里，“不在 WebView 或浏览器里”，DOM 是 Telegram 自己实现的。`fetch`、`XMLHttpRequest`、`WebSocket`、`EventSource`、`RTCPeerConnection`、`sendBeacon`、`importScripts`、`Worker`、`BroadcastChannel` 抛 `NetworkDisabledError`；没有 `location`、`history`，`alert` 不显示，`confirm` 返回 false，`prompt` 返回 null；没有剪贴板、分享、震动、定位、媒体、通知、Shadow DOM、自定义元素、Blob、WebGL。`eval` 和 `new Function` 可以用（在沙箱内）。`localStorage` / `sessionStorage` 每条消息各 4KB，不上传给 bot。
+- **接口 `window.TelegramWidget`**（在 Telegram 之外是 undefined）：
+  - 属性：`profile`、`colorScheme`、`themeParams`（冻结对象，键名同 Mini Apps：`bg_color`、`text_color`、`hint_color`、`link_color`、`button_color`、`button_text_color`、`secondary_bg_color`、`accent_text_color` 等）、`isActive`、`isPreview`、`isForward`、`chatType`、`viewer`、`publicData` / `chatData`（≤ 1024 字节的字符串或 null，只读）、`wallet`、`contentSafeAreaInset`、`HapticFeedback`
+  - 方法：`isProfileAtLeast`、`request(data)`（1–64 字节，返回 Promise，bot 用 `answerWidgetQuery` 在 15 秒内回答）、`copyText`、`openLink`（https、≤ 256 字符，需要用户确认）、`openTelegramLink`、`watchPublicData` / `unwatchPublicData`、`setResizeAnchor`、`ready`、`onEvent` / `offEvent`
+  - 事件：`themeChanged`、`activated`、`deactivated`、`chatDataChanged`、`publicDataChanged`、`contentSafeAreaChanged`；处理函数的 `this` 是 `TelegramWidget`，没有参数，每种最多 16 个
+  - 链接、复制、`request` 只能在一次真实点击的处理函数里同步调用，每次点击一次
+  - CSS 变量写在根元素上：`--tg-theme-*`、`--tg-color-scheme`、`--tg-text-*`、`--tg-button-*`、安全区变量；`prefers-color-scheme` 跟随聊天主题
+- **输入**：click、pointer 事件、dblclick、contextmenu；没有键盘、文本输入、触摸事件和滚轮
+- **限制**：JS 每秒最多 300ms，单个任务 500ms 就停掉 widget；内存 8MB；节点 2000；每个任务 DOM 修改 10000 次、布局读取 128 次；定时器 64 个；动画 64 个；CSS 400 条规则；连续崩溃 2 次后停止到下次启动。离开屏幕时暂停（`deactivated`），隐藏时定时器每秒最多触发一次，widget 随时可能被销毁重建
+- **bot 端**：`sendWidget`（`html`、`caption`、`width` / `height`、`chat_data`、`public_data`、`allow_queries`、`is_shared`）、`editMessageWidgetData`、`editSharedWidgetData`、`answerWidgetQuery`，更新类型 `widget_query` / `shared_widget_query`
+- **降级**：不支持 widget 的客户端把消息显示成“不支持的媒体”加 caption，所以一定要带 caption
+
+#### Honk 的实现
+
+每张卡片一个独立的 QuickJS 运行时（[quickjs-ng](https://github.com/quickjs-ng/quickjs) v0.18.0，MIT），由 iOS / Android 宿主在后台线程上运行。nsh 只给 App 一个 QuickJS 上下文、不能另开，App 自己的 Rust crate 也进不了预编译的嵌入框架，所以引擎放在宿主里；两端共用同一份 C 代码。
+
+| 位置 | 作用 |
+| --- | --- |
+| `native/quickjs/` | quickjs-ng 的引擎核心（只有 `quickjs.c`、`libregexp.c`、`libunicode.c`、`dtoa.c` 和头文件），不带 `quickjs-libc`，所以卡片没有文件、网络、进程和 `std` / `os` 模块。版本见 `VERSION` |
+| `native/card/honk_card.c` | 沙箱：每张卡片一个 `JSRuntime`，自己的分配器计内存（超过 8MB 拒绝分配并中断，脚本抓不到），中断回调按截止时间停任务，栈上限 256KB；每秒脚本时间超过 300ms 时，下一次 tick 推到下一秒。读脚本返回的东西时只读自有数据属性和自己解析的 JSON，不会触发卡片的 getter；链接只放行 https、≤ 256 字符、每次点击一次，复制 1–256 字符、每次点击一次；树超过 512KB 就停止卡片 |
+| `native/card/runtime.js` | 卡片里的页面：精简 DOM（节点、属性、`classList`、`style`、`dataset`、`innerHTML`、选择器、事件冒泡、`onclick`）、定时器（由宿主的 tick 驱动）、4KB 的 `localStorage` / `sessionStorage`、`console`、`TelegramWidget`。`gen_runtime.py` 把它生成 `runtime_js.h` 编进 C 里 |
+| `native/Package.swift`、`native/swift/HonkCard/CardHost.swift` | iOS：本地 Swift 包。`CardHost` 把所有卡片放在一个串行队列上，按 `honk_card_next` 安排 tick，最多同时保留 16 张卡片（多了关掉最久没用的） |
+| `native/jni/`、`android/core/.../CardHost.kt` | Android：JNI（字符串用 UTF-8 字节数组传，JNI 自己的字符串是修改过的 UTF-8）和与 Swift 相同的 `CardHost`，在一个 4MB 栈的后台线程上；`libhonkcard.so` 由 `android/app` 的 CMake 构建 |
+| `app/src/widget/Widget.tsx`、`sanitize.ts` | App：有 `<script>` 的卡片先显示静态卡片，再把填好 `{{key}}` 的节点树交给宿主；之后按宿主返回的树渲染。返回的树一律再过一遍白名单（`cleanTree`：标签、属性、链接、CSS、2000 个节点、128 层），因为卡片在自己的运行时里能改掉一切 |
+
+宿主协议新增（`host.ts` ↔ `NshBridge.swift` ↔ `NshBridge.kt`），参数和返回都是 JSON 字符串：
+
+| 调用 | 参数 | 返回 |
+| --- | --- | --- |
+| `honk.card.open` | `{key, load}`：`load` 是 `{tree, data, theme, language, active}` | 结果 |
+| `honk.card.click` | `{key, path}`：从根开始的子节点下标，如 `[0,2]` | 结果 |
+| `honk.card.set` | `{key, state}`：`{theme}` 或 `{active}` | 结果 |
+| `honk.card.close` | `{key}` | `true` |
+| 事件 `honk.card.changed` | `{key, result}` | 定时器或 Promise 改了卡片 |
+
+结果是 `{tree, prevented, open?, copy?, stopped, logs}`：`tree` 只在变化时给；`open` / `copy` 由 App 用已有的 `openUrl` 和剪贴板执行；`prevented` 为假时，再执行被点元素自己的链接。有点击处理函数的元素在树里带 `on: true`，App 只让这些元素可点。
+
+限制，和 Telegram 对比：
+
+| 项目 | Honk | Telegram |
+| --- | --- | --- |
+| 单个任务（加载时的每个脚本、一次 tick、一次点击） | 200ms，超时停止卡片 | 500ms |
+| 每秒脚本时间 | 300ms，超出后 tick 推迟到下一秒 | 300ms |
+| 内存 | 8MB（含运行时本身），超出停止卡片 | 8MB |
+| 节点 | 2000 | 2000 |
+| 每个任务的 DOM 修改 | 10000 | 10000 |
+| 定时器 | 64；`setInterval` 最短 16ms；App 不在前台时每秒最多一次 | 64 |
+| 每种事件的处理函数 | 16 | 16 |
+| `localStorage` | 4KB，只在这次运行内有效 | 4KB / 条消息 |
+| 同时运行的卡片 | 16 | |
+
+脚本在宿主的后台线程上跑，卡死也不会卡住界面。“停止”：卡片保留最后一次画出的样子，不再响应；因为超时停止的卡片还会把最后的树交出来。没被捕获的异常只写日志（`logs`，App 打到控制台），卡片继续运行。
+
+和 Telegram 不同的地方：`request()` 一律以 `WidgetRequestError`（`NOT_ALLOWED`）拒绝，Honk 还没有 bot 回调；只有 click 事件；`getBoundingClientRect` 返回全 0；没有 canvas；`HapticFeedback` 什么也不做；`publicData`、`viewer`、`wallet` 都是 null。`editMessageData` 改了数据时，会话里这张卡片按新数据重建，脚本重新运行；滚出屏幕再回来时也会重建。
+
+兼容：网关保留内联的普通 `<script>`（去掉属性），删掉带 `src`、`type` 不是 JavaScript、在 SVG 里，或文本里有 `<!--`、`<script`、`</script` 的脚本（后几种在 HTML 规范和 App 的解析器里切分不同，可能把脚本后面的内容当成没清理过的标记）。旧版 App 的渲染器本来就跳过 `<script>`；没有宿主（`nsh run` 演示）或宿主调用失败时，新版 App 也显示静态卡片。所以卡片在不跑脚本时也要能看：关键信息写在 HTML 里，脚本只做增强。
+
+测试：`make -C native test asan`（C：隔离、死循环、内存、递归、点击和链接、伪造结果、定时器和 Promise、每秒预算、节点和输出上限、语法错误、主题事件；ASan / UBSan，Linux 上查内存泄漏），`cd native && swift test`（iOS 的 `CardHost`），`./gradlew :core:test`（Android 的 `CardHost` 通过 JNI 在 JVM 上跑，库由 `make -C native jni` 在本机构建），`app/src/widget/Widget.test.tsx`（模拟宿主：渲染、白名单、点击、链接、复制、事件）。CI 另外构建 iOS 模拟器版和 Android debug 版。演示数据里“服务器告警”的最新一条是带脚本的卡片（CPU 柱状图切换 1 小时 / 24 小时、每秒更新的“持续 N 分钟”、复制 SSH 命令）；桌面上 `nsh run` 没有宿主，只显示静态部分。
 
 ## 7. 推送字段映射
 
@@ -315,7 +381,9 @@ cd android && make setup && ./gradlew assembleDebug   # 下载 nsh AAR 并编译
 - [ ] 真机跑通 APNs、NSE 和通讯通知头像（模拟器已能连真实网关完成注册、建 bot、发送和同步）
 - [ ] 用 Android SDK 编译 `android/app`（`./gradlew test assembleDebug`），在有 GMS 的设备或模拟器上跑通 FCM、通知和 nsh 界面
 - [ ] Android 预设头像现在画的是 bot 名称首字，和 App 内的图标不一致；可以给 Android 加一套对应的矢量图标
-- [ ] 卡片 v2：JS、`TelegramWidget` 兼容接口、按钮回调（需要 bot webhook）
+- [x] 卡片 profile 2：JS（宿主里的 quickjs-ng）、`TelegramWidget` 兼容接口
+- [ ] 卡片按钮回调：`TelegramWidget.request()` 和 `answerWidgetQuery`（需要 bot webhook 或长轮询）；`publicData` / 共享卡片
+- [ ] 卡片脚本在真机上的耗时和内存还没测过；pointer 事件、canvas 没有
 - [ ] 推送内容端到端加密（参考 Bark 的 ciphertext），消息在网关上只存密文
 - **nsh 还是 0.5.x**：推送和扩展全部用原生写，nsh 只负责 App 内界面，把升级的影响面控制在 UI 层。
 - **NSE 资源有限**：NSE 内存约 24MB、运行约 30 秒，所以只做拉取、写库和渲染头像，不加载 nsh。

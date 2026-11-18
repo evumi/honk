@@ -1,3 +1,4 @@
+import HonkCard
 import HonkKit
 import NativeShell
 import UIKit
@@ -10,12 +11,15 @@ import UIKit
 /// honk.refresh, honk.bot.create, honk.bot.update, honk.bot.token,
 /// honk.bot.resetToken, honk.bot.delete, honk.bot.setMuted, honk.bot.setPinned,
 /// honk.message.delete, honk.chat.clear, honk.notifications.open, honk.avatar.save, honk.avatar.image,
-/// honk.gateway.get, honk.gateway.test, honk.gateway.set, honk.register.retry.
-/// Events: honk.changed (the store changed), honk.open { botId } (open a chat).
+/// honk.gateway.get, honk.gateway.test, honk.gateway.set, honk.register.retry,
+/// honk.card.open, honk.card.click, honk.card.set, honk.card.close.
+/// Events: honk.changed (the store changed), honk.open { botId } (open a chat),
+/// honk.card.changed { key, result } (a card's timer changed it).
 @MainActor
 final class NshBridge {
     private unowned let app: NshAppView
     private let service: HonkService
+    private var cards: CardHost?
 
     init(app: NshAppView, service: HonkService) {
         self.app = app
@@ -24,6 +28,29 @@ final class NshBridge {
 
     func install() {
         service.onChange = { [weak self] in self?.app.send("honk.changed") }
+
+        // Card scripts run off the main thread in their own QuickJS runtimes
+        // (native/card); the strings in and out are JSON the app reads.
+        let cards = CardHost { [weak self] key, result in
+            Task { @MainActor in self?.app.send("honk.card.changed", ["key": key, "result": result]) }
+        }
+        self.cards = cards
+        handle("honk.card.open") { args in
+            let a = Args(args)
+            return await cards.open(key: try a.require("key"), load: try a.require("load"))
+        }
+        handle("honk.card.click") { args in
+            let a = Args(args)
+            return await cards.click(key: try a.require("key"), path: try a.require("path"))
+        }
+        handle("honk.card.set") { args in
+            let a = Args(args)
+            return await cards.set(key: try a.require("key"), state: try a.require("state"))
+        }
+        handle("honk.card.close") { args in
+            await cards.close(key: try Args(args).require("key"))
+            return true
+        }
 
         handle("honk.status") { [service] _ in await Self.status(service) }
         handle("honk.register.retry") { [service] _ in

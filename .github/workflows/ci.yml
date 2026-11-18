@@ -21,6 +21,9 @@ jobs:
       ios: ${{ steps.filter.outputs.ios }}
       app: ${{ steps.filter.outputs.app }}
       assets: ${{ steps.filter.outputs.assets }}
+      native: ${{ steps.filter.outputs.native }}
+      android: ${{ steps.filter.outputs.android }}
+      iosapp: ${{ steps.filter.outputs.iosapp }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -34,6 +37,19 @@ jobs:
               - 'ios/HonkKit/**'
               - '.github/workflows/ci.yml'
             app:
+              - 'app/**'
+              - '.github/workflows/ci.yml'
+            native:
+              - 'native/**'
+              - '.github/workflows/ci.yml'
+            android:
+              - 'android/**'
+              - 'native/**'
+              - 'app/**'
+              - '.github/workflows/ci.yml'
+            iosapp:
+              - 'ios/**'
+              - 'native/**'
               - 'app/**'
               - '.github/workflows/ci.yml'
             assets:
@@ -86,3 +102,64 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: scripts/check-app-store-assets.sh
+
+  # Card scripts: quickjs-ng and the card sandbox (C), with sanitizers and leak checks.
+  native:
+    needs: changes
+    if: needs.changes.outputs.native == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: make -C native check test asan
+
+  # The iOS side of card scripts (native/Package.swift): CardHost on macOS.
+  honkcard:
+    needs: changes
+    if: needs.changes.outputs.native == 'true'
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - run: swift test
+        working-directory: native
+
+  # :core's tests (CardHost through JNI on the JVM) and the app with libhonkcard.so.
+  android:
+    needs: changes
+    if: needs.changes.outputs.android == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-35 build-tools;35.0.0 cmake;3.22.1'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Install nsh
+        run: curl -fsSL https://nsh.dev/install.sh | NSH_VERSION=v0.5.1 sh && echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - run: NSH_VERSION=v0.5.1 ../scripts/fetch-nsh-android.sh
+      - run: ./gradlew :core:test :app:assembleDebug --no-daemon
+
+  # The iOS app for the simulator (unsigned), with HonkCard linked in.
+  iosapp:
+    needs: changes
+    if: needs.changes.outputs.iosapp == 'true'
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install xcodegen longbridge/tap/nsh
+      - run: scripts/fetch-nsh-ios.sh
+      - run: make -C ios project
+      - run: >-
+          xcodebuild -project ios/Honk.xcodeproj -scheme Honk -configuration Debug
+          -destination 'generic/platform=iOS Simulator' -derivedDataPath ios/build
+          CODE_SIGNING_ALLOWED=NO build
