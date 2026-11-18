@@ -129,7 +129,7 @@ bot token 形如 `<bot id>:<32 位随机串>`；token 和 device secret 都只�
 
 #### App
 
-- `AppDelegate`：申请通知权限，注册推送；收到静默推送就拉取并应用修改或删除；正在看的会话来消息时不弹横幅；点击通知时进入对应会话（消息的 `url` 在会话里点消息打开）。
+- `AppDelegate`：申请通知权限，注册推送；收到静默推送就拉取并应用修改或删除；正在看的会话来消息时不弹横幅；点击通知时进入对应会话（消息的 `url` 在会话里点消息打开）。App 调用 `honk.incoming.listen` 之后，App 在前台时（不在该会话里）不弹系统横幅（通知仍安静地进通知中心），改发 `honk.incoming { botId, messageId }`，由 App 自己显示站内横幅（`app/src/InAppBanner.tsx`，设计稿 `docs/design/InApp.dc.html`）：4 秒后收起（时效性 8 秒、左侧橙色细边），点按进入会话，上滑关掉；同一个 Bot 连续来消息合并计数，静音的 Bot 不弹。
 - `HonkService`：注册或更新 push token（网关返回 401 时自动重新注册）、刷新 bot 列表、同步、角标、切换网关。
   - 注册状态有四种：等待推送 token、注册中、已注册、失败（带原因）。设置页显示状态，失败时可以重试；重试会先检查已有设备，再用上次的 token 注册，都没有就重新向 APNs 要 token。
   - 切换网关：先请求 `/v1/info` 确认是 Honk 网关，地址存进 App Group（NSE 也读这里），然后清空本机的 bot、消息、token，在新网关上重新注册。旧网关上的 bot 不受影响。
@@ -185,7 +185,7 @@ Gradle 工程，minSdk 26，compileSdk / targetSdk 35。只支持有 GMS 的设�
   - MessagingStyle，发送者是代表 bot 的 `Person`，头像是 bot 头像（https 头像下载并缓存，5 秒超时、最大 2MB；`local:` 头像读 `noBackupFilesDir/avatars` 里的文件，规则同 iOS，见 `core/LocalAvatars.kt`；预设头像画成色块加 bot 名称首字）。每个 bot 推一个长期会话快捷方式，Android 11+ 会把它显示在“对话”区。
   - 通知 tag：有 collapse id 时是 `c<bot>:<collapse id>`，同 id 的新消息原地替换旧通知；否则是 `m<msg_id>`。tag 存在本地库的 `notif_id` 里，删除、替换、标记已读时据此撤掉通知。
   - `level=passive` 或 bot 静音时不响铃、不弹横幅（`setSilent`）。正在看的会话来消息时不发通知，直接标为已读。
-- `MainActivity`：全屏 `NshView`，按 `assets/nsh/capabilities.json` 授权后 `loadAssetBundle("nsh")`；debug 构建可以用 intent extra `nshDevUrl` 连 `nsh dev` 热更新。Android 13+ 首次启动申请 `POST_NOTIFICATIONS`，被拒后在设置页里引导去系统设置。点击通知：发 `honk.open` 进入会话（消息的 `url` 在会话里点消息打开）。
+- `MainActivity`：全屏 `NshView`，按 `assets/nsh/capabilities.json` 授权后 `loadAssetBundle("nsh")`；debug 构建可以用 intent extra `nshDevUrl` 连 `nsh dev` 热更新。Android 13+ 首次启动申请 `POST_NOTIFICATIONS`，被拒后在设置页里引导去系统设置。点击通知：发 `honk.open` 进入会话（消息的 `url` 在会话里点消息打开）。App 调用 `honk.incoming.listen` 之后，App 在前台时（不在该会话里）通知安静地进通知栏（不响铃、不弹出），并发 `honk.incoming`，由 App 显示站内横幅。
 - 旧 bot id（`core/Sync.kt` 的 `LegacyBotIds`，与 HonkKit 的 `LegacyBotIDs.swift` 规则相同）：本地还有纯数字 id、而网关列表里没有它的 bot 时：
   1. 有 token 就调 `getMe` 查出短 id（旧 token 仍有效）；
   2. 没有 token，或网关答 401 / 404（token 已失效），就按 `created_at` + 名称匹配：网关列表里恰好一个本机还没有的 bot 两者都相同，本机也只有这一个旧 bot 是这个组合，才算匹配；

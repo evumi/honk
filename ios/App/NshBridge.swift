@@ -14,6 +14,7 @@ import UIKit
 /// honk.gateway.get, honk.gateway.test, honk.gateway.set, honk.register.retry,
 /// honk.card.open, honk.card.click, honk.card.set, honk.card.close.
 /// Events: honk.changed (the store changed), honk.open { botId } (open a chat),
+/// honk.incoming { botId, messageId } (a message arrived while the app is open; it shows its own banner),
 /// honk.card.changed { key, result } (a card's timer changed it).
 @MainActor
 final class NshBridge {
@@ -28,6 +29,13 @@ final class NshBridge {
 
     func install() {
         service.onChange = { [weak self] in self?.app.send("honk.changed") }
+        // Only once the app listens: until then pushes get the system banner.
+        handle("honk.incoming.listen") { [weak self, service] _ in
+            service.onIncoming = { botID, messageID in
+                self?.app.send("honk.incoming", ["botId": botID, "messageId": messageID])
+            }
+            return true
+        }
 
         // Card scripts run off the main thread in their own QuickJS runtimes
         // (native/card); the strings in and out are JSON the app reads.

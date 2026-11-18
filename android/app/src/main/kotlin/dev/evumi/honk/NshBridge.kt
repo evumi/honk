@@ -35,6 +35,7 @@ import java.util.Base64
  * honk.gateway.get, honk.gateway.test, honk.gateway.set, honk.register.retry.
  * Card scripts: honk.card.open, honk.card.click, honk.card.set, honk.card.close.
  * Events: honk.changed (the store changed), honk.open { botId } (open a chat),
+ * honk.incoming { botId, messageId } (a message arrived while the app is open; it shows its own banner),
  * honk.card.changed { key, result } (a card's timer changed it).
  *
  * nsh calls the handlers on the UI thread with the JSON arguments as Map,
@@ -56,6 +57,11 @@ class NshBridge(
 
     fun install() {
         removeListener = service.addChangeListener { nsh.send("honk.changed", null) }
+        // Only once the app listens: until then pushes get a system notification.
+        handle("honk.incoming.listen") {
+            service.onIncoming = { botId, messageId -> nsh.send("honk.incoming", mapOf("botId" to botId, "messageId" to messageId)) }
+            true
+        }
 
         handle("honk.card.open") { a -> cards.open(a.requireString("key"), a.requireString("load")) }
         handle("honk.card.click") { a -> cards.click(a.requireString("key"), a.requireString("path")) }
@@ -188,6 +194,7 @@ class NshBridge(
         cards.shutdown()
         removeListener?.invoke()
         removeListener = null
+        service.onIncoming = null
     }
 
     fun openChat(botId: String) {

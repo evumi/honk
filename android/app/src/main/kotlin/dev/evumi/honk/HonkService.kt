@@ -54,6 +54,8 @@ class HonkService private constructor(context: Context) {
     /** The bot whose chat is on screen while the activity is resumed; its messages show no notification. */
     @Volatile var focusedBotId: String? = null
     @Volatile var foreground = false
+    /** A message arrived while the app is open (not for the open chat): the app shows its own banner. Main thread. */
+    @Volatile var onIncoming: ((botId: String, messageId: Long) -> Unit)? = null
 
     private val listeners = CopyOnWriteArrayList<() -> Unit>()
     private val main = Handler(Looper.getMainLooper())
@@ -271,6 +273,10 @@ class HonkService private constructor(context: Context) {
             changed()
             return
         }
+        // The app is open: it shows its own banner, and the notification goes
+        // to the shade quietly (no sound or heads-up).
+        val incoming = onIncoming.takeIf { foreground }
+        if (incoming != null) main.post { incoming(info.botId, info.messageId) }
         val bot = store.bot(info.botId)
         notifier.show(
             Notifier.Content(
@@ -284,7 +290,7 @@ class HonkService private constructor(context: Context) {
                 group = stored?.group ?: info.group,
                 level = stored?.level?.takeIf { it.isNotEmpty() } ?: info.level,
                 date = stored?.date?.takeIf { it > 0 } ?: System.currentTimeMillis(),
-                muted = store.isMuted(info.botId),
+                muted = store.isMuted(info.botId) || incoming != null,
             ),
         )
     }
