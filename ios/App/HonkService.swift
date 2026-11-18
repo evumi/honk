@@ -16,6 +16,12 @@ final class HonkService {
     private(set) var config = HonkConfig.fromBundle()
     let credentials: CredentialStore
     let botTokens: BotTokenStore
+    /// Each bot's end-to-end key; with `opener` it decrypts what the queue delivers.
+    let botKeys: BotKeyStore
+    /// The group key, which wraps each bot's key for the gateway so the group's other devices can unwrap it.
+    let groupKey: GroupKeyStore
+    let keyRing: KeyRing
+    let opener: MessageOpener
     /// The register key of the gateway, when it asks for one.
     let registerKeys: RegisterKeyStore
     let store: LocalStore
@@ -64,6 +70,10 @@ final class HonkService {
     private init() {
         credentials = CredentialStore(accessGroup: config.keychainGroup)
         botTokens = BotTokenStore(accessGroup: config.keychainGroup)
+        botKeys = BotKeyStore(accessGroup: config.keychainGroup)
+        groupKey = GroupKeyStore(accessGroup: config.keychainGroup)
+        keyRing = KeyRing(keys: botKeys, group: groupKey)
+        opener = MessageOpener(keys: botKeys)
         registerKeys = RegisterKeyStore(accessGroup: config.keychainGroup)
         do {
             store = try LocalStore(appGroup: config.appGroup)
@@ -285,6 +295,8 @@ final class HonkService {
     private func clearAccountData() {
         credentials.clear()
         botTokens.removeAll()
+        botKeys.removeAll()
+        groupKey.remove()
         removeNotifications((try? store.reset()) ?? [])
     }
 
@@ -354,7 +366,10 @@ final class HonkService {
 
     /// A pairing code for another phone, with this phone's bot tokens sealed in it.
     func createLink() async throws -> DeviceLinking.Created {
-        try await DeviceLinking.create(api: api, store: store, tokens: botTokens)
+        // The bundle carries the group key (made now if this is the first pairing) and the bot keys.
+        try await DeviceLinking.create(api: api, store: store, tokens: botTokens,
+                                       keys: keyRing.bundleKeys(botIDs: try store.botIDs()),
+                                       groupKey: Seal.encode(keyRing.ensureGroupKey()))
     }
 
     /// Joins the group that made `code`: stores the tokens it holds, then
@@ -363,11 +378,22 @@ final class HonkService {
     func claimLink(code: String) async throws {
         if !isRegistered { await retryRegistration() }
         do {
-            try await DeviceLinking.claim(code, api: api, store: store, tokens: botTokens)
+            // Adopt the creator's group key and bot keys; the refresh below re-wraps
+            // this phone's own encrypted bots with it (KeyRing.reconcile).
+            let bundle = try await DeviceLinking.claim(code, api: api, store: store, tokens: botTokens)
+            keyRing.adopt(bundle)
         } catch let e as APIError {
             throw Failure(reason: Self.describe(e))
         }
         await refresh()
+    }
+
+    /// Fetches the bot list and reconciles the keys: another device of the group
+    /// may have turned encryption on or reset a key since the last refresh.
+    func refreshKeys() async {
+        let api = self.api
+        guard let bots = try? await api.listBots() else { return }
+        await keyRing.reconcile(bots: bots) { id, wrapped in _ = try await api.updateBot(id: id, keyWrapped: wrapped) }
     }
 
     // MARK: sync
@@ -387,7 +413,9 @@ final class HonkService {
                 try await api.getMe(token: $0)
             }
             try store.replaceBots(bots, keeping: renamed.pending)
-            let out = try await SyncEngine(api: api, store: store).run()
+            // Keys other devices turned on or reset arrive here; ours are published.
+            await keyRing.reconcile(bots: bots) { id, wrapped in _ = try await api.updateBot(id: id, keyWrapped: wrapped) }
+            let out = try await SyncEngine(api: api, store: store, opener: opener).run()
             removeNotifications(out.staleNotificationIDs)
             pruneExpired()
             LocalAvatars(appGroup: config.appGroup).prune(keeping: Set(bots.map(\.avatar)))
@@ -412,7 +440,9 @@ final class HonkService {
         await LegacyBotIDs.renameBeforePush(store: store, tokens: botTokens,
                                             api: APIClient(baseURL: config.gatewayURL, secret: credentials.load()?.secret, timeout: 5))
         do {
-            let m = try await api.message(id: info.messageID)
+            let item = try await api.message(id: info.messageID)
+            if !opener.opens(item) { await refreshKeys() }
+            guard let m = opener.open(item) else { return true }
             let r = try store.apply(m)
             removeNotifications(r.staleNotificationIDs)
             changed()

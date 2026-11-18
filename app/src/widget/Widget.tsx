@@ -11,9 +11,9 @@ import { cleanup, Clipboard, effect, Image, lifecycle, locale, openUrl, signal, 
 import { cards, on } from "../host";
 import type { Palette } from "../theme";
 import { widgetVars } from "../theme";
-import { countNodes, fill, parse, parseData, type ElementNode, type WidgetNode } from "./parse";
+import { countNodes, fill, parseData, type ElementNode, type WidgetNode } from "./parse";
 import { cascade, parseDecls, parseSheet, styleText, type Scheme, type Sheet } from "./css";
-import { cleanTree } from "./sanitize";
+import { cleanHTML, cleanTree } from "./sanitize";
 import { svgDataUrl, svgFit, svgMarkup, viewBoxRatio } from "./svg";
 import type { TreeEnv } from "./selector";
 
@@ -395,7 +395,7 @@ const parsed = new Map<string, WidgetNode[]>();
 function parseCached(html: string): WidgetNode[] {
   let nodes = parsed.get(html);
   if (!nodes) {
-    nodes = parse(html);
+    nodes = cleanHTML(html);
     if (parsed.size >= 200) parsed.delete(parsed.keys().next().value!);
     parsed.set(html, nodes);
   }

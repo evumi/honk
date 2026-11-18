@@ -20,6 +20,7 @@ function host(overrides: Record<string, unknown> = {}) {
       "honk.refresh": true,
       "honk.bot.create": (d: unknown) => ({ bot: { ...bot, id: "bQ7mN2pR", name: (d as { name: string }).name }, token: "bQ7mN2pR:secret-token" }),
       "honk.bot.token": "aZ3kQ9xT:abcdefghijklmnop",
+      "honk.bot.encryption.key": null,
       "honk.bot.delete": true,
       "honk.message.delete": true,
       "honk.avatar.save": (d: unknown) => ((d as { type: string }).type === "image/png" ? "local:a1b2.png" : "local:a1b2.jpg"),
@@ -122,6 +123,35 @@ test("bot settings masks the stored token", async () => {
   await app.press("id:chat-aZ3kQ9xT");
   await app.press("id:open-settings");
   await app.waitFor("text:aZ3kQ9xT:abcd••••••••nop");
+});
+
+test("bot settings turns end-to-end encryption on, shows the key, resets and turns it off", async () => {
+  let key: string | null = null;
+  const app = await open("./App.tsx", {
+    locale: "zh-Hans-CN",
+    host: host({
+      "honk.bot.encryption.key": () => key,
+      "honk.bot.encryption.enable": () => (key = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"),
+      "honk.bot.encryption.resetKey": () => (key = "Hh4dGxkYFhQSEA4MCggGBAIA_v38-vj29PLw7uzq6Obk4uA"),
+      "honk.bot.encryption.disable": () => ((key = null), true),
+    }),
+  });
+  await app.press("id:chat-aZ3kQ9xT");
+  await app.press("id:open-settings");
+  await app.press("label:端到端加密");
+  await app.waitFor("id:e2e-key");
+  expect(app.texts()).toContain("AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8");
+  await app.press("id:copy-key");
+  await app.waitFor("text:已复制");
+
+  app.onDialog(() => "重置");
+  await app.press("id:reset-key");
+  await app.waitFor("text:Hh4dGxkYFhQSEA4MCggGBAIA_v38-vj29PLw7uzq6Obk4uA");
+
+  app.onDialog(() => "关闭加密");
+  await app.press("label:端到端加密");
+  await app.waitUntil(() => app.host.calls().some((c) => c.name === "honk.bot.encryption.disable"));
+  expect(app.host.calls().find((c) => c.name === "honk.bot.encryption.disable")?.data).toEqual({ botId: "aZ3kQ9xT" });
 });
 
 test("a message turns to dust before it is deleted", async () => {

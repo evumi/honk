@@ -404,3 +404,51 @@ func waitFor(t *testing.T, ok func() bool) {
 	}
 	t.Fatal("timed out")
 }
+
+// app/src/e2e.vector.json is also checked by HonkKit (Swift) and :core
+// (Kotlin): a message sealed by any of the three opens in the others.
+func TestSharedVector(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("..", "..", "..", "app", "src", "e2e.vector.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var v struct{ Key, AAD, Plaintext, Ciphertext string }
+	if err := json.Unmarshal(b, &v); err != nil {
+		t.Fatal(err)
+	}
+	key, err := ParseKey(v.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pt, err := Decrypt(key, v.AAD, v.Ciphertext)
+	if err != nil || string(pt) != v.Plaintext {
+		t.Fatalf("vector = %q, %v", pt, err)
+	}
+	if _, err := Decrypt(key, "other", v.Ciphertext); err == nil {
+		t.Error("a different AAD must fail")
+	}
+	// The wrapped bot key of the multi-device design.
+	var vw struct {
+		KeyWrap map[string]string `json:"key_wrap"`
+	}
+	if err := json.Unmarshal(b, &vw); err != nil {
+		t.Fatal(err)
+	}
+	kw := vw.KeyWrap
+	gk, _ := ParseKey(kw["group_key"])
+	bk, _ := ParseKey(kw["bot_key"])
+	got, err := UnwrapBotKey(gk, kw["wrapped"], kw["bot_id"])
+	if err != nil || !bytes.Equal(got, bk) {
+		t.Fatalf("unwrap = %x, %v", got, err)
+	}
+	if _, err := UnwrapBotKey(gk, kw["wrapped"], "other"); err == nil {
+		t.Error("another bot id must not unwrap")
+	}
+	if len(kw["wrapped"]) != 80 {
+		t.Errorf("wrapped is %d characters", len(kw["wrapped"]))
+	}
+	// nonce (12) + content + tag (16): the format, byte for byte.
+	if raw, err := base64.RawURLEncoding.DecodeString(v.Ciphertext); err != nil || len(raw) != 12+len(v.Plaintext)+16 {
+		t.Errorf("ciphertext shape: %d bytes, %v", len(raw), err)
+	}
+}

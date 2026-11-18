@@ -35,12 +35,18 @@ public struct Bot: Codable, Equatable, Sendable {
     public var defaultLevel: String
     public var createdAt: Int64
     public var updatedAt: Int64
+    /// End-to-end encryption is on for this bot (the gateway refuses its plaintext).
+    public var encrypted: Bool = false
+    /// The bot's key sealed with the group key (`KeyWrap`); empty when there is none.
+    public var keyWrapped: String = ""
 
     enum CodingKeys: String, CodingKey {
         case id, name, avatar
         case defaultLevel = "default_level"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
+        case encrypted
+        case keyWrapped = "key_wrapped"
     }
 
     public init(id: String, name: String, avatar: String = "", defaultLevel: String = "active", createdAt: Int64 = 0, updatedAt: Int64 = 0) {
@@ -60,6 +66,8 @@ public struct Bot: Codable, Equatable, Sendable {
         defaultLevel = try c.decodeIfPresent(String.self, forKey: .defaultLevel) ?? "active"
         createdAt = try c.decodeIfPresent(Int64.self, forKey: .createdAt) ?? 0
         updatedAt = try c.decodeIfPresent(Int64.self, forKey: .updatedAt) ?? 0
+        encrypted = try c.decodeIfPresent(Bool.self, forKey: .encrypted) ?? false
+        keyWrapped = try c.decodeIfPresent(String.self, forKey: .keyWrapped) ?? ""
     }
 }
 
@@ -89,6 +97,8 @@ public struct QueuedMessage: Codable, Equatable, Sendable {
     public var parseMode: String
     /// Stored and counted, but with no banner.
     public var silent: Bool
+    /// The end-to-end sealed content (`Seal`); `MessageOpener` replaces it with the fields above.
+    public var ciphertext: String
     /// The sender's replaceable id (`id` in the bot API).
     public var collapseID: String
     /// The sender let the card's `request()` reach the bot (`allow_queries`).
@@ -97,7 +107,7 @@ public struct QueuedMessage: Codable, Equatable, Sendable {
     public var date: Int64
 
     enum CodingKeys: String, CodingKey {
-        case kind, title, body, html, data, level, group, url, copy, icon, date, open, image, silent
+        case kind, title, body, html, data, level, group, url, copy, icon, date, open, image, silent, ciphertext
         case parseMode = "parse_mode"
         case allowQueries = "allow_queries"
         case id = "message_id"
@@ -108,7 +118,7 @@ public struct QueuedMessage: Codable, Equatable, Sendable {
 
     public init(id: Int64, botID: String, kind: Kind = .message, targetID: Int64 = 0, title: String = "", body: String = "",
                 html: String = "", data: String = "", level: String = "", group: String = "", url: String = "",
-                copy: String = "", icon: String = "", open: String = "", image: String = "", parseMode: String = "",
+                copy: String = "", icon: String = "", ciphertext: String = "", open: String = "", image: String = "", parseMode: String = "",
                 silent: Bool = false, collapseID: String = "", allowQueries: Bool = false, date: Int64 = 0) {
         self.id = id
         self.botID = botID
@@ -127,6 +137,7 @@ public struct QueuedMessage: Codable, Equatable, Sendable {
         self.image = image
         self.parseMode = parseMode
         self.silent = silent
+        self.ciphertext = ciphertext
         self.collapseID = collapseID
         self.allowQueries = allowQueries
         self.date = date
@@ -152,6 +163,7 @@ public struct QueuedMessage: Codable, Equatable, Sendable {
         image = try c.decodeIfPresent(String.self, forKey: .image) ?? ""
         parseMode = try c.decodeIfPresent(String.self, forKey: .parseMode) ?? ""
         silent = try c.decodeIfPresent(Bool.self, forKey: .silent) ?? false
+        ciphertext = try c.decodeIfPresent(String.self, forKey: .ciphertext) ?? ""
         collapseID = try c.decodeIfPresent(String.self, forKey: .collapseID) ?? ""
         allowQueries = try c.decodeIfPresent(Bool.self, forKey: .allowQueries) ?? false
         date = try c.decodeIfPresent(Int64.self, forKey: .date) ?? 0

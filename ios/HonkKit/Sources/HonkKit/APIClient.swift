@@ -189,11 +189,14 @@ public struct APIClient: Sendable {
         try await request("POST", "v1/bots", body: ["name": name, "avatar": avatar, "default_level": defaultLevel])
     }
 
-    public func updateBot(id: String, name: String? = nil, avatar: String? = nil, defaultLevel: String? = nil) async throws -> Bot {
-        var body: [String: String] = [:]
+    public func updateBot(id: String, name: String? = nil, avatar: String? = nil, defaultLevel: String? = nil,
+                          encrypted: Bool? = nil, keyWrapped: String? = nil) async throws -> Bot {
+        var body: [String: Any] = [:]
         body["name"] = name
         body["avatar"] = avatar
         body["default_level"] = defaultLevel
+        body["encrypted"] = encrypted
+        body["key_wrapped"] = keyWrapped
         return try await request("PATCH", "v1/bots/\(id)", body: body)
     }
 

@@ -34,6 +34,23 @@ export function lang(): Lang {
 
 const EN: Record<string, string> = {
   "图片": "Image",
+  "端到端加密": "End-to-end encryption",
+  "无法更改加密设置": "Can't change the encryption setting",
+  "关闭端到端加密？": "Turn off end-to-end encryption?",
+  "关闭后这个 Bot 可以再用明文发送，这台设备上的密钥会删除。已收到的消息不受影响。":
+    "This bot can send plaintext again, and this device's key is deleted. Messages already received are not affected.",
+  "关闭加密": "Turn off encryption",
+  "重置密钥？": "Reset the key?",
+  "旧密钥立即作废，发送方需要换成新密钥，否则新消息无法解密。已收到的消息不受影响。":
+    "The old key stops working at once. Senders must switch to the new one or new messages can't be decrypted. Messages already received are not affected.",
+  "复制密钥": "Copy key",
+  "重置密钥": "Reset key",
+  "发送方需要 token 和这个密钥：honk send --key，或照 README 里的示例加密。网关、推送中继、苹果和谷歌都看不到通知内容。":
+    "Senders need the token and this key: honk send --key, or encrypt as in the README's examples. The gateway, push relay, Apple and Google can't see the content.",
+  "打开后，通知内容在发送方加密，只有你的设备能解开。网关、推送中继、苹果和谷歌都读不到。":
+    "Once on, content is encrypted by the sender and only your device can open it. The gateway, push relay, Apple and Google can't read it.",
+  "要端到端加密？在 Bot 设置里打开，然后用 honk send --key 密钥 发送。":
+    "Want end-to-end encryption? Turn it on in the bot's settings, then send with honk send --key KEY.",
   "上传图片": "Upload image",
   "无法使用这张图片": "Can't use this image",
   "图片太大，请换一张小一点的": "The image is too large; pick a smaller one",

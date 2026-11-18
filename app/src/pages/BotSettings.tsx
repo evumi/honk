@@ -14,6 +14,11 @@ export function BotSettings(props: { botId: string }) {
   const token = signal<string | null>(null);
   const copied = signal(false);
   void api.token(props.botId).then((t) => token.set(t));
+  // End-to-end encryption: the bot has a key on this device, or it has not.
+  const key = signal<string | null>(null);
+  const keyCopied = signal(false);
+  const keyBusy = signal(false);
+  void api.encryption.key(props.botId).then((k) => key.set(k)).catch(() => {});
 
   const confirm = async (title: string, description: string, label: string) => {
     const { action } = await AlertDialog.show({
@@ -27,6 +32,43 @@ export function BotSettings(props: { botId: string }) {
     if (!(await confirm(tr("重置 token？"), tr("旧 token 立即失效，用到它的发送方需要换成新的。"), tr("重置")))) return;
     token.set(await api.resetToken(props.botId));
     copied.set(false);
+  };
+  const failed = (e: unknown) =>
+    AlertDialog.show({
+      title: tr("无法更改加密设置"),
+      description: String((e as Error)?.message ?? e),
+      actions: [{ id: "ok", label: tr("好") }],
+    });
+  const setEncryption = async (on: boolean) => {
+    if (keyBusy()) return;
+    if (!on && !(await confirm(tr("关闭端到端加密？"), tr("关闭后这个 Bot 可以再用明文发送，这台设备上的密钥会删除。已收到的消息不受影响。"), tr("关闭加密")))) return;
+    keyBusy.set(true);
+    try {
+      if (on) key.set(await api.encryption.enable(props.botId));
+      else {
+        await api.encryption.disable(props.botId);
+        key.set(null);
+      }
+      keyCopied.set(false);
+    } catch (e) {
+      await failed(e);
+    } finally {
+      keyBusy.set(false);
+    }
+  };
+  const resetKey = async () => {
+    if (!(await confirm(tr("重置密钥？"), tr("旧密钥立即作废，发送方需要换成新密钥，否则新消息无法解密。已收到的消息不受影响。"), tr("重置")))) return;
+    try {
+      key.set(await api.encryption.resetKey(props.botId));
+      keyCopied.set(false);
+    } catch (e) {
+      await failed(e);
+    }
+  };
+  const copyKey = async () => {
+    if (!key()) return;
+    await Clipboard.writeText(key()!);
+    keyCopied.set(true);
   };
   const pickLevel = async () => {
     const { action } = await AlertDialog.show({
@@ -85,6 +127,32 @@ export function BotSettings(props: { botId: string }) {
               right={token() ? <Icon name={copied() ? "check" : "copy"} color={p().accent} size={19} weight={2} /> : undefined}
             />
             <Row p={p()} label={tr("重置 token")} color={p().accent} onPress={() => void resetToken()} testID="reset-token" />
+          </Section>
+
+          <Section
+            title={tr("端到端加密")}
+            p={p()}
+            footer={
+              key()
+                ? tr("发送方需要 token 和这个密钥：honk send --key，或照 README 里的示例加密。网关、推送中继、苹果和谷歌都看不到通知内容。")
+                : tr("打开后，通知内容在发送方加密，只有你的设备能解开。网关、推送中继、苹果和谷歌都读不到。")
+            }
+          >
+            <ToggleRow p={p()} first label={tr("端到端加密")} checked={key() !== null} onChange={(v) => void setEncryption(v)} />
+            <If when={key()}>
+              <View selectable testID="key-row" style={{ padding: 16, borderTopWidth: 0.5, borderTopColor: p().separator }}>
+                <Text testID="e2e-key" style={{ fontFamily: "Menlo", fontSize: 14, lineHeight: 20, color: p().text }}>{key()!}</Text>
+              </View>
+              <Row
+                p={p()}
+                label={keyCopied() ? tr("已复制") : tr("复制密钥")}
+                color={p().accent}
+                testID="copy-key"
+                onPress={() => void copyKey()}
+                right={<Icon name={keyCopied() ? "check" : "copy"} color={p().accent} size={19} weight={2} />}
+              />
+              <Row p={p()} label={tr("重置密钥")} color={p().accent} onPress={() => void resetKey()} testID="reset-key" />
+            </If>
           </Section>
 
           <Section title={tr("通知")} p={p()}>

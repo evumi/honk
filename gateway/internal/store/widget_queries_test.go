@@ -25,6 +25,9 @@ func TestMigrateWidgetQueries(t *testing.T) {
 		`ALTER TABLE messages DROP COLUMN allow_queries`,
 		`ALTER TABLE bots DROP COLUMN webhook_url`,
 		`ALTER TABLE bots DROP COLUMN webhook_secret`,
+		`ALTER TABLE bots DROP COLUMN encrypted`,
+		`ALTER TABLE bots DROP COLUMN key_wrapped`,
+		`ALTER TABLE messages DROP COLUMN ciphertext`,
 		`PRAGMA user_version = 5`,
 	} {
 		if _, err := db.Exec(q); err != nil {

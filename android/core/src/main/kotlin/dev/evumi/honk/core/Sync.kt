@@ -1,7 +1,11 @@
 package dev.evumi.honk.core
 
-/** Pulls everything queued since the stored cursor, applies it and acks it, page by page. */
-class SyncEngine(private val api: ApiClient, private val store: LocalStore) {
+/**
+ * Pulls everything queued since the stored cursor, applies it and acks it, page by page.
+ * [opener] decrypts end-to-end sealed items before they are stored; it is
+ * required so no path applies a ciphertext as it is.
+ */
+class SyncEngine(private val api: ApiClient, private val store: LocalStore, private val opener: MessageOpener) {
     data class Outcome(val applied: Int = 0, val staleNotificationIds: List<String> = emptyList())
 
     fun run(pageSize: Int = 100): Outcome {
@@ -10,7 +14,8 @@ class SyncEngine(private val api: ApiClient, private val store: LocalStore) {
         var cursor = store.syncCursor
         while (true) {
             val page = api.sync(cursor, pageSize)
-            for (m in page.messages) {
+            for (item in page.messages) {
+                val m = opener.open(item) ?: continue
                 stale += store.apply(m).staleNotificationIds
                 applied++
             }

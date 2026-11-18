@@ -10,4 +10,5 @@
     <string name="action_open_link">Open link</string>
     <string name="action_mark_read">Mark as read</string>
     <string name="export_messages">Export messages</string>
+    <string name="undecryptable_notification">Couldn\'t decrypt this notification</string>
 </resources>

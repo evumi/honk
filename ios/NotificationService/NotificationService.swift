@@ -56,7 +56,20 @@ final class NotificationService: UNNotificationServiceExtension {
             // id: rename it first so its name, avatar and mute flag apply.
             await LegacyBotIDs.renameBeforePush(store: store, tokens: BotTokenStore(accessGroup: config.keychainGroup),
                                                 api: APIClient(baseURL: config.gatewayURL, secret: creds.secret, timeout: 5))
-            if let m = try? await api.message(id: info.messageID),
+            // A sealed message is decrypted here (the key is in the shared keychain
+            // group); one that cannot be opened is stored as a placeholder and
+            // the banner says so.
+            let keys = BotKeyStore(accessGroup: config.keychainGroup)
+            let opener = MessageOpener(keys: keys)
+            let item = try? await api.message(id: info.messageID)
+            if let item, !opener.opens(item) {
+                // Another device of the group may have turned encryption on or reset the
+                // key: unwrap what the gateway holds, then try again.
+                let ring = KeyRing(keys: keys, group: GroupKeyStore(accessGroup: config.keychainGroup))
+                let quick = APIClient(baseURL: config.gatewayURL, secret: creds.secret, timeout: 5)
+                if let bots = try? await quick.listBots() { await ring.reconcile(bots: bots) { _, _ in } }
+            }
+            if let item, let m = opener.open(item),
                let r = try? store.apply(m, notificationID: request.identifier) {
                 message = r.message
                 if !r.staleNotificationIDs.isEmpty {

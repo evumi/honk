@@ -129,6 +129,7 @@ APNs 和 FCM 只接受带已发布 App 凭据签名的推送，自建网关手�
 | `body` | 是 | 正文，最多 4096 字符。横幅显示它，卡片下方也显示它；客户端不支持卡片时就只显示它 |
 | `title` | | 标题，最多 256 字符 |
 | `html` | | 卡片 HTML：原文最多 32 KB，zlib 压缩后最多 4 KB |
+| `ciphertext` | | 端到端加密的内容，替代 `title`、`body`、`html`、`data`、`url`、`copy`、`icon`（见[端到端加密](#端到端加密)）；bot 打开加密后必须用它。此时 `body` 不必填，最大 64 KB |
 | `data` | | 卡片数据，最多 1 KB，通常是 JSON；用来填卡片里的 `{{key}}` 占位符 |
 | `level` | | `passive`、`active` 或 `timeSensitive`；不填用 bot 的默认级别 |
 | `group` | | 同一 bot 内的通知分组 |
@@ -154,7 +155,7 @@ curl https://honk.example.com/bot$TOKEN/sendMessage \
 
 ### editMessageData
 
-修改卡片数据，不弹新通知。用 `message_id` 或 `id` 指定是哪条消息，`data` 是新数据。
+修改卡片数据，不弹新通知。用 `message_id` 或 `id` 指定是哪条消息，`data` 是新数据（加密的 bot 改发 `ciphertext`，明文是 `{"data":"…"}`）。
 
 ### deleteMessage
 
@@ -250,7 +251,118 @@ honk preview card.html --data data.json --watch             # 每次保存都重
 - `send` 的参数：`--title`、`--body`（或直接写在命令后、或走标准输入）、`--html`、`--data`（这两个可写成 `@文件`）、`--id`、`--level`、`--group`、`--link`（即 `url` 参数）、`--copy`、`--icon`、`--dry-run`。
 - `preview` 用固定的 `id`（默认 `honk-preview`）和 `level=passive` 发送，手机上那条消息原地更新而且不响。它先做一次 `dry_run`，打印大小和白名单删掉了什么。见[卡片手册](docs/CARDS.zh-CN.md)。
 - 退出码：成功 0；网关或网络出错 1（网关返回的 `description` 打到标准错误）；用法错误 2。
-- `--key <base64 密钥>`（或 `HONK_KEY`）在客户端加密消息内容：title、body、html、data、url、copy、icon 放进一段 AES-256-GCM 密文（12 字节 nonce、密文、16 字节 tag，无填充 base64url；token 里冒号前的 bot id 作附加认证数据），以 `ciphertext` 发送，`level`、`group`、`id` 仍是明文。**网关目前还不接受 `ciphertext`**：这是之后端到端加密版本的发送端部分，现在不要对现有网关使用 `--key`。
+- `--key <base64 密钥>`（或 `HONK_KEY`，或配置文件里的 `"key"`）在客户端加密消息内容：title、body、html、data、url、copy、icon 放进一段 AES-256-GCM 密文，以 `ciphertext` 发送，`level`、`group`、`id` 仍是明文。密钥就是 App 在 bot 设置里显示的那一把，见[端到端加密](#端到端加密)。
+
+## 端到端加密
+
+按 bot 打开：Bot 设置里的「端到端加密」。App 生成 32 字节的随机密钥，存在 iOS 与通知扩展共用的钥匙串组，或 Android 的 Keystore 加密偏好里，和 token 并排显示并可复制，同时告诉网关这个 bot 已加密（`PATCH /v1/bots/:id {"encrypted":true}`）。之后网关对这个 bot 的明文 `sendMessage`、`editMessageData` 一律返回 400。发送方需要 token 和密钥。重置密钥会换一把新的，旧的作废，已收到的消息不受影响。多台设备（[设备组](#工作方式)）时，设备组有一把 32 字节的组密钥，第一次配对时生成，各设备存在自己的钥匙串 / Keystore 里，不会明文到网关：配对数据包（用配对码封装）把它和各 bot 的密钥带给新手机。任何一台设备打开加密或重置密钥时，App 用组密钥把 bot 密钥封装起来，存到网关上作为 bot 的 `key_wrapped`（`PATCH /v1/bots/:id`，`GET /v1/bots` 返回），组里的其他设备在下次刷新时、或收到解不开的消息时解开它，马上就能解密。带着自己加密 bot 的手机加入设备组时，采用组的密钥并用它重新封装这些 bot 的密钥。网关打不开 `key_wrapped`；关闭加密会删除本机的密钥，bot 又可以发明文。
+
+它让网关运营者、泄露的数据库、推送中继、苹果和谷歌读不到消息内容。它不防发送方被攻破、设备本机被攻破和流量分析：网关仍然知道哪个 bot 在什么时候收到多大的消息，以及仍是明文的 `level`、`group`、`id`、`ttl`、`silent`。加密消息的推送不带标题、正文和 bot 名（横幅在设备上解密后再生成）；解不开的消息（这台设备没有密钥、密钥不对）显示为「无法解密的通知」。
+
+| | |
+| --- | --- |
+| 参数 | `sendMessage` 的 `ciphertext`，base64url，最大 64 KB。此时 `body` 不必填；旁边再带 `title`、`body`、`html`、`data`、`url`、`copy`、`icon` 会被拒绝 |
+| 字节 | 12 字节 nonce，接 AES-256-GCM 密文，再接 16 字节 tag；无填充 base64url |
+| 明文 | JSON `{"title","body","html","data","url","copy","icon","image"}`，字段都是字符串且可省略（`data` 和明文发送一样是 JSON 文本） |
+| AAD | bot 的短 id，即 token 里冒号前的部分 |
+| 仍是明文 | `level`、`group`、`id`、`ttl`、`silent` |
+| 修改 | `editMessageData` 的 `ciphertext`，明文是 `{"data":"…"}` |
+
+网关读不到内容就没法校验，所以 App 解密后再做：卡片原文超过 32 KB 或 zlib 后超过 4 KB、`data` 超过 1 KB 就丢掉卡片（消息保留正文）；标题超过 256、正文超过 4096 个字符会被截断；`url` 不是 http(s)、`icon` 不是 https 会被清空。App 画卡片之前还会用自己的白名单再清理一遍。一个 bot 在本机有密钥之后，发给它的明文同样不被信任，显示为占位消息。
+
+`honk send --key 密钥`（或 `HONK_KEY`）已经做了这些。用代码发送：
+
+Python（`pip install cryptography`）：
+
+```python
+# pip install cryptography
+import base64, json, os, urllib.request
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+url, token, key = os.environ["HONK_URL"], os.environ["HONK_TOKEN"], os.environ["HONK_KEY"]
+b64d = lambda s: base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
+b64e = lambda b: base64.urlsafe_b64encode(b).rstrip(b"=").decode()
+
+content = {"title": "Deploy", "body": "api v1.8.2 is live", "html": "<b>{{status}}</b>", "data": json.dumps({"status": "live"})}
+nonce = os.urandom(12)
+# AESGCM returns ciphertext || tag; the bot id (before the ":") is the AAD.
+sealed = AESGCM(b64d(key)).encrypt(nonce, json.dumps(content).encode(), token.split(":")[0].encode())
+body = {"ciphertext": b64e(nonce + sealed), "level": "active"}
+
+req = urllib.request.Request(f"{url}/bot{token}/sendMessage", json.dumps(body).encode(), {"Content-Type": "application/json"})
+print(urllib.request.urlopen(req).read().decode())
+```
+
+Node（18 或更新）：
+
+```js
+import { createCipheriv, randomBytes } from "node:crypto";
+
+const { HONK_URL: url, HONK_TOKEN: token, HONK_KEY: key } = process.env;
+
+const content = { title: "Deploy", body: "api v1.8.2 is live", html: "<b>{{status}}</b>", data: JSON.stringify({ status: "live" }) };
+const nonce = randomBytes(12);
+const cipher = createCipheriv("aes-256-gcm", Buffer.from(key, "base64url"), nonce);
+cipher.setAAD(Buffer.from(token.split(":")[0])); // the bot id (before the ":")
+const sealed = Buffer.concat([nonce, cipher.update(JSON.stringify(content)), cipher.final(), cipher.getAuthTag()]);
+
+const res = await fetch(`${url}/bot${token}/sendMessage`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ ciphertext: sealed.toString("base64url"), level: "active" }),
+});
+console.log(await res.text());
+```
+
+Go：
+
+```go
+package main
+
+import (
+	"bytes"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"strings"
+)
+
+func main() {
+	url, token, keyText := os.Getenv("HONK_URL"), os.Getenv("HONK_TOKEN"), os.Getenv("HONK_KEY")
+	key, err := base64.RawURLEncoding.DecodeString(strings.TrimRight(keyText, "="))
+	if err != nil || len(key) != 32 {
+		panic("HONK_KEY must be 32 bytes of base64url")
+	}
+
+	content, _ := json.Marshal(map[string]string{
+		"title": "Deploy", "body": "api v1.8.2 is live", "html": "<b>{{status}}</b>", "data": `{"status":"live"}`,
+	})
+	block, _ := aes.NewCipher(key)
+	gcm, _ := cipher.NewGCM(block)
+	nonce := make([]byte, gcm.NonceSize()) // 12 bytes
+	rand.Read(nonce)
+	botID, _, _ := strings.Cut(token, ":")
+	// Seal appends ciphertext || tag to the nonce; the bot id is the AAD.
+	sealed := gcm.Seal(nonce, nonce, content, []byte(botID))
+
+	body, _ := json.Marshal(map[string]string{"ciphertext": base64.RawURLEncoding.EncodeToString(sealed), "level": "active"})
+	res, err := http.Post(url+"/bot"+token+"/sendMessage", "application/json", bytes.NewReader(body))
+	if err != nil {
+		panic(err)
+	}
+	defer res.Body.Close()
+	out, _ := io.ReadAll(res.Body)
+	fmt.Println(string(out))
+}
+```
+
+运行时设好 `HONK_URL`、`HONK_TOKEN` 和 `HONK_KEY`，密钥就是 App 里显示的那一把。修改消息时，加密 `{"data":"…"}`，作为 `ciphertext` 发给 `editMessageData`，再带 `id` 或 `message_id`。
 
 ## 接入现有工具
 
@@ -295,7 +407,7 @@ GitHub 适配不校验 `X-Hub-Signature-256`：URL 里的 token 就是密钥，�
 | `POST /v1/links` | `{"link_id","bundle"}`：保存一份配对数据（不透明的 base64url，最大 16 KB；`link_id` 是 16 到 64 个 base64url 字符），10 分钟有效，每个设备组同时只有一个，返回 `expires_in` 秒数；`link_id` 已被占用时返回 409 |
 | `POST /v1/links/claim` | 新设备发 `{"link_id"}`：把它所在的整个设备组（设备、bot、排队的消息）并入创建配对的设备组，返回 `bundle`。只能用一次；未知、过期或已用过返回 404；合并后超过 bot 上限返回 400；同一 IP 尝试太多返回 429（突发 5 次，之后每小时 10 次） |
 | `GET` / `POST /v1/bots` | 列出 bot；创建 bot：`{"name","avatar","default_level"}`，返回 `bot` 和 `token`。`avatar` 是 `preset:<icon>:<#rrggbb>`、https URL，或 `local:<文件名>`：用户在 App 里从相册选的图片，只存在手机上（网关只存这个名字） |
-| `GET` / `PATCH` / `DELETE /v1/bots/:id` | 读取、修改、删除一个 bot（`:id` 是 bot 的短 id） |
+| `GET` / `PATCH` / `DELETE /v1/bots/:id` | 读取、修改、删除一个 bot（`:id` 是 bot 的短 id）。`PATCH` 接受 `name`、`avatar`、`default_level`、`encrypted`（`true`：拒绝这个 bot 的明文发送）和 `key_wrapped`（用组密钥封装的 bot 密钥，80 个 base64url 字符，空串表示清除；密钥本身不会明文到网关） |
 | `POST /v1/bots/:id/token` | 重置 token，旧 token 立即失效 |
 | `GET /v1/messages/:id` | 拉一条消息；条目可能是 `message`、`edit` 或 `delete` |
 | `GET /v1/sync?cursor=&limit=` | 拉 cursor 之后的消息，返回 `messages`、`cursor`、`has_more` |

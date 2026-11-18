@@ -122,7 +122,8 @@ Serving a relay: set `HONK_RELAY_SERVE=true` next to your own credentials. It se
 
   Without `parse_mode`, `https://` links in the body can be tapped. Notifications have a "Copy" button when the message has `copy`, an "Open link" button when it has `url`, and always "Mark as read".
 - `sendMessage` also takes `dry_run` (`true`): validate only. Nothing is queued or pushed; the result is `{"dry_run":true,"html":<cleaned card>,"input_size","raw_size","compressed_size","removed":[…]}` with the sizes of the cleaned card (limits 32768 and 4096) and what the whitelist removed (`"onclick on <div>"`, `"<iframe>"`). It counts against the rate limit.
-- `editMessageData`: `message_id` or `id`, and `data`. Updates the card silently.
+- `sendMessage` also takes `ciphertext` instead of the content parameters, for a bot with [end-to-end encryption](#end-to-end-encryption) (required once the bot has it turned on); `level`, `group`, `id`, `ttl` and `silent` stay plain.
+- `editMessageData`: `message_id` or `id`, and `data` (or `ciphertext` sealing `{"data":"…"}`). Updates the card silently.
 - `deleteMessage`: `message_id` or `id`. Removes the message and its notification.
 - `getMe`: the bot.
 - Widget queries, as in Telegram's Bot API (field names follow `WidgetQuery` and `answerWidgetQuery`). A card sent with `allow_queries` can call `request(data)` (1–64 bytes); the app posts it to the gateway, which hands it to the bot as the update `{"update_id":N,"widget_query":{"id","message_id","data"}}` and holds the app's request for up to 15 s. The bot picks the update up in one of two ways, not both:
@@ -169,7 +170,118 @@ honk preview card.html --data data.json --watch             # resend on every sa
 - `send` flags: `--title`, `--body` (or the arguments, or stdin), `--html`, `--data` (both accept `@file`), `--id`, `--level`, `--group`, `--link` (the `url` parameter), `--copy`, `--icon`, `--dry-run`.
 - `preview` sends with a fixed `id` (default `honk-preview`) and `level=passive`, so the message on the phone is replaced in place and stays quiet. It runs a `dry_run` first and prints the sizes and what the whitelist removed. See the [card cookbook](docs/CARDS.md).
 - Exit status is 0 on success, 1 when the gateway or the network fails (the gateway's `description` is printed to stderr) and 2 for a usage error.
-- `--key <base64 key>` (or `HONK_KEY`) encrypts the message content on the client: title, body, html, data, url, copy and icon go into one AES-256-GCM ciphertext (12-byte nonce, ciphertext, 16-byte tag, unpadded base64url; the bot id before the `:` of the token is the authenticated additional data), sent as `ciphertext`, while `level`, `group` and `id` stay plain. **The gateway does not accept `ciphertext` yet**; this is the sender side of the end-to-end encryption planned for a later release, so do not use `--key` against today's gateway.
+- `--key <base64 key>` (or `HONK_KEY`, or `"key"` in the config file) encrypts the message content on the client: title, body, html, data, url, copy and icon go into one AES-256-GCM ciphertext, sent as `ciphertext`, while `level`, `group` and `id` stay plain. The key is the one the app shows in the bot's settings; see [End-to-end encryption](#end-to-end-encryption).
+
+## End-to-end encryption
+
+Turn it on per bot: Bot settings, End-to-end encryption. The app generates a 32-byte key, keeps it in the keychain shared with the notification extension (iOS) or in Keystore-backed encrypted preferences (Android), shows it next to the token with a copy button, and tells the gateway the bot is encrypted (`PATCH /v1/bots/:id {"encrypted":true}`). From then on the gateway answers a plaintext `sendMessage` or `editMessageData` for that bot with a 400. A sender needs the token and the key. Resetting the key makes a new one and invalidates the old; messages already received stay readable. With several devices (a [device group](#how-it-works)), the group has a 32-byte group key made on the first pairing; each device keeps it in its keychain or keystore, and it never reaches the gateway in clear: the pairing bundle, sealed with the pairing code, carries it (with the bots' keys) to a new phone. When a bot's key is turned on or reset on any device, the app seals it with the group key and stores the result on the gateway as the bot's `key_wrapped` (`PATCH /v1/bots/:id`, returned by `GET /v1/bots`), and the group's other devices unwrap it on their next refresh or when a message does not open, so they can decrypt right away. A phone that joins a group with its own encrypted bots adopts the group key and re-wraps those keys with it. The gateway cannot open `key_wrapped`. Turning encryption off deletes the key on the device and lets the bot send plaintext again.
+
+It keeps message content from the gateway operator, a leaked database, a push relay, Apple and Google. It does not protect against a compromised sender, a compromised device, or traffic analysis: the gateway still sees which bot gets a message, when, how big, and the plaintext `level`, `group`, `id`, `ttl` and `silent`. Pushes for encrypted messages carry no title, body or bot name (the banner is built on the device after decrypting); a message that cannot be decrypted (no key on this device, the wrong key) shows as "Couldn't decrypt this notification".
+
+| | |
+| --- | --- |
+| Parameter | `ciphertext` on `sendMessage`, base64url, at most 64 KB. `body` is not required then, and `title`, `body`, `html`, `data`, `url`, `copy`, `icon` next to it are refused |
+| Bytes | 12-byte nonce, then the AES-256-GCM ciphertext, then the 16-byte tag; unpadded base64url |
+| Plaintext | JSON `{"title","body","html","data","url","copy","icon","image"}`; every field is a string and optional (`data` is the JSON text, as in a plain send) |
+| AAD | the bot's short id, the part of the token before the `:` |
+| Still plain | `level`, `group`, `id`, `ttl`, `silent` |
+| Edit | `editMessageData` takes `ciphertext` whose plaintext is `{"data":"…"}` |
+
+The gateway cannot check what it cannot read, so the app does it after decrypting: a card over 32 KB raw or 4 KB zlib, `data` over 1 KB, a title over 256 or a body over 4096 characters (cut), a `url` that is not http(s) or an `icon` that is not https (dropped). An invalid card is dropped and the message keeps its body. The app also cleans every card with its own copy of the whitelist before drawing it. Once a bot has a key on the device, plaintext for it is not trusted either and shows as the placeholder.
+
+`honk send --key KEY` (or `HONK_KEY`) does all of this. In code:
+
+Python (`pip install cryptography`):
+
+```python
+# pip install cryptography
+import base64, json, os, urllib.request
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+url, token, key = os.environ["HONK_URL"], os.environ["HONK_TOKEN"], os.environ["HONK_KEY"]
+b64d = lambda s: base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
+b64e = lambda b: base64.urlsafe_b64encode(b).rstrip(b"=").decode()
+
+content = {"title": "Deploy", "body": "api v1.8.2 is live", "html": "<b>{{status}}</b>", "data": json.dumps({"status": "live"})}
+nonce = os.urandom(12)
+# AESGCM returns ciphertext || tag; the bot id (before the ":") is the AAD.
+sealed = AESGCM(b64d(key)).encrypt(nonce, json.dumps(content).encode(), token.split(":")[0].encode())
+body = {"ciphertext": b64e(nonce + sealed), "level": "active"}
+
+req = urllib.request.Request(f"{url}/bot{token}/sendMessage", json.dumps(body).encode(), {"Content-Type": "application/json"})
+print(urllib.request.urlopen(req).read().decode())
+```
+
+Node (18 or later):
+
+```js
+import { createCipheriv, randomBytes } from "node:crypto";
+
+const { HONK_URL: url, HONK_TOKEN: token, HONK_KEY: key } = process.env;
+
+const content = { title: "Deploy", body: "api v1.8.2 is live", html: "<b>{{status}}</b>", data: JSON.stringify({ status: "live" }) };
+const nonce = randomBytes(12);
+const cipher = createCipheriv("aes-256-gcm", Buffer.from(key, "base64url"), nonce);
+cipher.setAAD(Buffer.from(token.split(":")[0])); // the bot id (before the ":")
+const sealed = Buffer.concat([nonce, cipher.update(JSON.stringify(content)), cipher.final(), cipher.getAuthTag()]);
+
+const res = await fetch(`${url}/bot${token}/sendMessage`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ ciphertext: sealed.toString("base64url"), level: "active" }),
+});
+console.log(await res.text());
+```
+
+Go:
+
+```go
+package main
+
+import (
+	"bytes"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"strings"
+)
+
+func main() {
+	url, token, keyText := os.Getenv("HONK_URL"), os.Getenv("HONK_TOKEN"), os.Getenv("HONK_KEY")
+	key, err := base64.RawURLEncoding.DecodeString(strings.TrimRight(keyText, "="))
+	if err != nil || len(key) != 32 {
+		panic("HONK_KEY must be 32 bytes of base64url")
+	}
+
+	content, _ := json.Marshal(map[string]string{
+		"title": "Deploy", "body": "api v1.8.2 is live", "html": "<b>{{status}}</b>", "data": `{"status":"live"}`,
+	})
+	block, _ := aes.NewCipher(key)
+	gcm, _ := cipher.NewGCM(block)
+	nonce := make([]byte, gcm.NonceSize()) // 12 bytes
+	rand.Read(nonce)
+	botID, _, _ := strings.Cut(token, ":")
+	// Seal appends ciphertext || tag to the nonce; the bot id is the AAD.
+	sealed := gcm.Seal(nonce, nonce, content, []byte(botID))
+
+	body, _ := json.Marshal(map[string]string{"ciphertext": base64.RawURLEncoding.EncodeToString(sealed), "level": "active"})
+	res, err := http.Post(url+"/bot"+token+"/sendMessage", "application/json", bytes.NewReader(body))
+	if err != nil {
+		panic(err)
+	}
+	defer res.Body.Close()
+	out, _ := io.ReadAll(res.Body)
+	fmt.Println(string(out))
+}
+```
+
+Run each with `HONK_URL`, `HONK_TOKEN` and `HONK_KEY` set; the key is the one the app shows. For an edit, seal `{"data":"…"}` and send it as `ciphertext` to `editMessageData` with `id` or `message_id`.
 
 ## Connect existing tools
 
@@ -214,7 +326,7 @@ Everything except device registration needs `Authorization: Bearer <device_secre
 | `POST /v1/links` | `{"link_id","bundle"}`: store a pairing bundle (opaque base64url, at most 16 KB; `link_id` 16 to 64 base64url characters) for 10 minutes, one active link per group → `expires_in` seconds; 409 when the `link_id` is taken |
 | `POST /v1/links/claim` | `{"link_id"}` from the new device: merges its whole group (devices, bots, queued messages) into the group that made the link and returns `bundle`. Works once; 404 for an unknown, expired or used link; 400 when the merged group would exceed the bot limit; 429 after too many attempts from one IP (burst 5, then 10 an hour) |
 | `GET` / `POST /v1/bots` | list; create with `{"name","avatar","default_level"}` → `bot`, `token`. `avatar` is `preset:<icon>:<#rrggbb>`, an https URL, or `local:<file>` for an image the user picked in the app, which stays on the phone (the gateway stores only the name) |
-| `GET` / `PATCH` / `DELETE /v1/bots/:id` | read, change, delete a bot (`:id` is the short bot id) |
+| `GET` / `PATCH` / `DELETE /v1/bots/:id` | read, change, delete a bot (`:id` is the short bot id). `PATCH` takes `name`, `avatar`, `default_level`, `encrypted` (`true`: the bot's plaintext sends are refused) and `key_wrapped` (the bot's key sealed with the group key, 80 base64url characters, empty clears it; the key itself never reaches the gateway in clear) |
 | `POST /v1/bots/:id/token` | reset the token; the old one stops working |
 | `POST /v1/queries` | `{"message_id","data"}` (1–64 bytes): a card's `request()`; waits up to 15 s for the bot's answer → `{"data"}`. `403` when the message does not allow queries, `429` over 1 a second per device and bot (burst 5), `504` when the bot did not answer |
 | `GET /v1/messages/:id` | one queued item: `message`, `edit` or `delete` |

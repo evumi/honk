@@ -91,10 +91,14 @@ public enum ChangeSignal {
 public struct SyncEngine: Sendable {
     let api: APIClient
     let store: LocalStore
+    let opener: MessageOpener
 
-    public init(api: APIClient, store: LocalStore) {
+    /// `opener` decrypts end-to-end sealed items before they are stored; it is
+    /// required so no path applies a ciphertext as it is.
+    public init(api: APIClient, store: LocalStore, opener: MessageOpener) {
         self.api = api
         self.store = store
+        self.opener = opener
     }
 
     public struct Outcome: Sendable {
@@ -107,7 +111,8 @@ public struct SyncEngine: Sendable {
         var cursor = store.syncCursor
         while true {
             let page = try await api.sync(cursor: cursor)
-            for m in page.messages {
+            for item in page.messages {
+                guard let m = opener.open(item) else { continue }
                 let r = try store.apply(m)
                 out.staleNotificationIDs += r.staleNotificationIDs
                 out.applied += 1

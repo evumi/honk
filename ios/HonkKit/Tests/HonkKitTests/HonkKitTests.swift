@@ -289,12 +289,35 @@ final class MockGateway: URLProtocol {
         let store = try tempStore()
         let api = APIClient(baseURL: URL(string: "https://gw.test/")!, secret: "s", session: MockGateway.session())
 
-        let out = try await SyncEngine(api: api, store: store).run()
+        let out = try await SyncEngine(api: api, store: store, opener: MessageOpener(keys: MemoryBotKeys())).run()
         #expect(out.applied == 2)
         #expect(store.syncCursor == 2)
         #expect(try store.message(id: 1)?.data == "d")
         #expect(MockGateway.requests.filter { $0.url!.path == "/v1/ack" }.count == 2)
         #expect(MockGateway.requests.first?.value(forHTTPHeaderField: "Authorization") == "Bearer s")
+    }
+
+    @Test func syncDecryptsSealedItems() async throws {
+        let keys = MemoryBotKeys()
+        let key = Seal.generateKey()
+        keys.save(key, botID: "bot1")
+        let ct = try sealed(["body": "sealed body"], key: key)
+        MockGateway.requests = []
+        MockGateway.handler = { req in
+            let url = req.url!.absoluteString
+            if url.contains("cursor=0") {
+                return (200, #"{"ok":true,"result":{"messages":[{"message_id":1,"bot_id":"bot1","kind":"message","ciphertext":"\#(ct)","date":1}],"cursor":1,"has_more":false}}"#)
+            }
+            if url.hasSuffix("v1/ack") { return (200, #"{"ok":true,"result":{"acked":1}}"#) }
+            return (404, #"{"ok":false,"error_code":404,"description":"Not Found"}"#)
+        }
+        let store = try tempStore()
+        let api = APIClient(baseURL: URL(string: "https://gw.test/")!, secret: "s", session: MockGateway.session())
+        let out = try await SyncEngine(api: api, store: store, opener: opener(keys)).run()
+        #expect(out.applied == 1)
+        #expect(try store.message(id: 1)?.body == "sealed body")
+        keys.remove(botID: "bot1")
+        #expect(keys.key(botID: "bot1") == nil)
     }
 
     @Test func getMeByToken() async throws {
