@@ -13,7 +13,7 @@ Monorepo. `gateway/` is the Go module `github.com/evumi/honk/gateway`; `app/` is
 - `cmd/honk` wires config, store, push and API. `internal/store` is SQLite through modernc (pure Go, no cgo) with one connection; the schema is `internal/store/schema.sql`, versioned with `PRAGMA user_version`. Add a new migration step for schema changes instead of editing v1 once it has shipped.
 - Timestamps are Unix milliseconds; device ids are UUIDv7; message ids are SQLite integers. A bot's public id is 8 random base62 characters starting with a letter (`bots.public_id`, v2); the integer row id stays private. Never show users a sequence number as an id. A bot token is `<bot id>:<secret>`; only sha256 hashes of tokens and device secrets are stored, so pre-v2 `<integer>:<secret>` tokens still work.
 - Pushes carry the banner text and `msg_id` only; devices fetch the message (card included) from the queue. Keep APNs/FCM payloads under 4 KB.
-- `internal/widget` is the server-side card whitelist (profile v1, static HTML/CSS). It mirrors Telegram's HTML widget limits: 32 KB raw, 4 KB zlib level 9, 1 KB data.
+- `internal/widget` is the server-side card whitelist: static HTML/CSS (profile 1) plus inline classic `<script>`s (profile 2); `on*` handlers, `src` and module scripts are removed. It mirrors Telegram's HTML widget limits: 32 KB raw, 4 KB zlib level 9, 1 KB data.
 - The bot API keeps Telegram's naming and `{"ok":…}` envelope; keep new methods consistent with it.
 
 ## iOS (ios/)
@@ -37,7 +37,7 @@ Monorepo. `gateway/` is the Go module `github.com/evumi/honk/gateway`; `app/` is
 - `cd app && nsh check App.tsx && nsh test`. With no host (`nsh run App.tsx` on a desktop) the app uses `src/demo.ts`.
 - The host contract is `app/src/host.ts` on one side and `ios/App/NshBridge.swift` and `android/app/src/main/kotlin/dev/evumi/honk/NshBridge.kt` on the other; change all three together.
 - Read the generated declarations in `app/.nsh/types` (created by `nsh init`/`nsh check`) for the nsh API; `calc(env(...))` is not valid for `top`/`bottom`, use `safeArea()`.
-- `app/src/widget` renders cards (profile v1). Keep its limits in step with `gateway/internal/widget`.
+- `app/src/widget` renders cards. Scripts (profile 2) run in `sandbox.ts` on `interp.ts`, an interpreter for a JavaScript subset (`script.ts` parses it), never in the app's own context: card values are `Obj`s with no path to host objects, and every task has a time and allocation budget. Keep the whitelist (`sanitize.ts`) and limits in step with `gateway/internal/widget`.
 - UI strings are written in Chinese and wrapped in `tr("…")` (`app/src/i18n.ts`); add the English to its `EN` table in the same change. The language follows `locale()`: Chinese for `zh*`, English otherwise. Tests pin `locale: "zh-Hans-CN"`.
 - Pages hide the system header (`NavPage headerVisible={false}`) and draw their own: `TopBar` (floating glass back button, title pill, avatar or text action, over a blurred top edge) and `FormBody` (scrolling content, a footer button pinned above the home indicator and the keyboard) in `app/src/components.tsx`. Floating controls use `glass(p)`; icons are `Icon` with `UI_ICONS` (24-unit stroke paths), never text glyphs. The design canvas is the reference for layout.
 - App Store images: `public/appstore/README.md` (regenerate with `scripts/brand/`).

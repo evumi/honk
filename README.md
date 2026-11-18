@@ -11,7 +11,7 @@ Honk is a push notification service built around bots: each bot is its own chann
 | Directory | Contents | Status |
 | --- | --- | --- |
 | `gateway/` | Go + SQLite gateway: bot API, app API, short-term queue, APNs/FCM push | first version |
-| `app/` | nsh app (TSX): chat list, message stream, card rendering | first version |
+| `app/` | nsh app (TSX): chat list, message stream, card rendering and card scripts | first version |
 | `ios/` | Swift host, Notification Service Extension, shared HonkKit package | first version (not yet built in Xcode) |
 | `android/` | Kotlin host embedding the nsh app, FirebaseMessagingService, shared `:core` module (gateway client, local store, sync) | first version (`:core` tested on the JVM; the app is not yet built with the Android SDK) |
 
@@ -62,7 +62,19 @@ See `gateway/Dockerfile` for the container. Settings:
 
 Gateways before short bot ids (database schema v1) gave bots integer ids, so their tokens look like `4:Gw2K7mx…`. Upgrading gives every bot a short id; the old tokens keep working until they are reset, and a reset token starts with the short id. The app moves each bot's local messages and settings to its new id the first time it syncs, using the stored token to ask `getMe` which bot it is, or matching its creation time and name when it has no token; if the gateway can't be reached, it keeps the bot and tries again later. Update the apps before the gateway: older app builds cannot read short ids (`/v1/info` reports `api` 2), while new builds also work with an old gateway.
 
-Card HTML (profile v1) keeps whitelisted elements: text and structure, tables, `details`, `button`, `a`, `style`, `img` with `data:` images, and inline SVG. It removes scripts, `on*` handlers, form controls, external resources (links other than `https://`, `#id` or `{{key}}`) and CSS that loads anything (`@import`, `expression()`, `url()` other than `data:` images). The client applies its own CSS whitelist when rendering.
+Card HTML keeps whitelisted elements: text and structure, tables, `details`, `button`, `a`, `style`, `img` with `data:` images, inline SVG, and inline `<script>` (profile 2). It removes `on*` handlers, scripts with `src` or a non-JavaScript `type` (modules included), form controls, external resources (links other than `https://`, `#id` or `{{key}}`) and CSS that loads anything (`@import`, `expression()`, `url()` other than `data:` images). The client applies its own CSS whitelist when rendering.
+
+Card scripts work like those in Telegram's HTML widgets: `window.TelegramWidget` gives `chatData` (the message's `data`), `themeParams` and `colorScheme`, `onEvent('themeChanged' | 'activated' | 'deactivated', …)`, and `openLink(url)` / `copyText(text)` from a tap handler. They change the card through a small DOM (`getElementById`, `querySelector`, `textContent`, `innerHTML`, `classList`, `style`, `dataset`, `createElement`, `addEventListener('click', …)`) and have timers and a 4 KB `localStorage`. The app runs them in its own sandbox, an interpreter for a subset of JavaScript (no classes, `async`, generators or regular expressions), with no network and no access to the app. Each task (the scripts at load, a timer, a tap) gets 100 ms; past that, or past its memory budget, the card stops and keeps what it last drew. `request()` is always refused (`NOT_ALLOWED`): Honk has no bot callbacks yet. Apps without scripts, and cards whose script can't be parsed, show the static card with `{{key}}` filled in. Example:
+
+```html
+<p id="n">{{count}}</p><button id="b">+1</button>
+<script>
+  var n = Number(JSON.parse(TelegramWidget.chatData).count);
+  document.getElementById("b").addEventListener("click", function () {
+    document.getElementById("n").textContent = String(++n);
+  });
+</script>
+```
 
 ## App API
 

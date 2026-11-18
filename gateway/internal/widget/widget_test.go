@@ -22,7 +22,10 @@ func TestCleanKeepsCard(t *testing.T) {
 
 func TestCleanRemovesActiveContent(t *testing.T) {
 	cases := map[string]string{
-		"script":        `<div>a<script>alert(1)</script></div>`,
+		"script src":    `<div>a<script src="https://evil/x.js"></script></div>`,
+		"module":        `<script type="module">import x from "https://evil/m.js"</script>`,
+		"json script":   `<script type="text/plain">evil</script>`,
+		"svg script":    `<svg><script>evil()</script></svg>`,
 		"handler":       `<button onclick="x()">b</button>`,
 		"iframe":        `<iframe src="https://evil"></iframe>`,
 		"remote img":    `<img src="https://evil/p.png">`,
@@ -41,7 +44,7 @@ func TestCleanRemovesActiveContent(t *testing.T) {
 		"svg on":        `<svg onload="x()"></svg>`,
 		"foreignObject": `<svg><foreignObject><div>x</div></foreignObject></svg>`,
 	}
-	bad := []string{"script", "onclick", "iframe", "https://evil", "javascript:", "http://plain", "@import", `\72`, "<input", "onload", "<form", "foreignobject", "foreignObject"}
+	bad := []string{"<script", "evil", "onclick", "iframe", "https://evil", "javascript:", "http://plain", "@import", `\72`, "<input", "onload", "<form", "foreignobject", "foreignObject"}
 	for name, src := range cases {
 		got, err := Clean(src)
 		if err != nil {
@@ -53,6 +56,23 @@ func TestCleanRemovesActiveContent(t *testing.T) {
 				t.Errorf("%s: cleaned HTML still has %q: %s", name, b, got)
 			}
 		}
+	}
+}
+
+func TestCleanKeepsInlineScript(t *testing.T) {
+	src := `<p id="n">{{n}}</p><button id="b">+1</button>` +
+		`<script type="text/javascript" defer>document.getElementById("b").addEventListener("click", () => { if (1 < 2 && "</p>") n++ })</script>`
+	got, err := Clean(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `<script>document.getElementById("b").addEventListener("click", () => { if (1 < 2 && "</p>") n++ })</script>`
+	if !strings.Contains(got, want) {
+		t.Errorf("inline script changed:\n got %s\nwant %s", got, want)
+	}
+	// The script counts towards the size limits like the rest of the card.
+	if _, err := Clean("<script>" + strings.Repeat("x", MaxRaw) + "</script>"); err != ErrTooLarge {
+		t.Errorf("script over limit: got %v", err)
 	}
 }
 

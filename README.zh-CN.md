@@ -11,7 +11,7 @@ Honk 是一个以 bot 为渠道的推送通知服务：每个 bot 都是一个�
 | 目录 | 内容 | 状态 |
 | --- | --- | --- |
 | `gateway/` | Go + SQLite 网关：bot API、App API、短期消息队列、APNs/FCM 推送 | 第一版 |
-| `app/` | nsh App（TSX）：会话列表、消息流、卡片渲染 | 第一版 |
+| `app/` | nsh App（TSX）：会话列表、消息流、卡片渲染和卡片脚本 | 第一版 |
 | `ios/` | Swift 宿主、Notification Service Extension、共享包 HonkKit | 第一版（未在 Xcode 中编译验证） |
 | `android/` | Kotlin 宿主（嵌入 nsh App）、FirebaseMessagingService、共享模块 `:core`（网关客户端、本地库、同步） | 第一版（`:core` 已在 JVM 上测试；App 尚未用 Android SDK 编译） |
 
@@ -104,7 +104,7 @@ curl https://honk.example.com/bot$TOKEN/sendMessage \
 
 短 bot id 之前的网关（数据库 schema v1）用自增整数做 bot id，token 形如 `4:Gw2K7mx…`。升级后每个 bot 都会分到一个短 id；旧 token 在重置之前照常可用，重置后的新 token 以短 id 开头。App 第一次同步时会用本机存的 token 调 `getMe` 查出对应的短 id（没有 token 就按创建时间和名称匹配），把这个 bot 的本地消息和设置迁移过去；连不上网关时保留这个 bot，下次再试。先更新 App 再升级网关：旧版 App 读不了短 id（`/v1/info` 的 `api` 是 2），新版 App 连旧网关也能用。
 
-### 卡片 HTML（profile v1）
+### 卡片 HTML
 
 网关只保留白名单里的元素，其他元素连同子元素一起删掉：
 
@@ -113,14 +113,35 @@ curl https://honk.example.com/bot$TOKEN/sendMessage \
 - 样式：`style`
 - 图片：`img`（只接受 `data:` 图片）
 - 内联 SVG
+- 内联 `<script>`（profile 2，见下一节）
 
 以下内容会被删除：
 
-- 脚本、`on*` 事件属性、表单控件
+- `on*` 事件属性；带 `src` 或 `type` 不是 JavaScript 的脚本（包括 module）；表单控件
 - 外部链接；`a` 只允许 `https://`、`#id` 或 `{{key}}`
 - CSS 里引用外部资源的写法：`@import`、`expression()`、非 data: 的 `url()`
 
 渲染时客户端还会再按自己的 CSS 白名单过滤一遍。
+
+### 卡片脚本（profile 2）
+
+卡片里的脚本和 Telegram HTML widget 的用法一样：
+
+- `window.TelegramWidget`：`chatData`（消息的 `data`）、`themeParams`、`colorScheme`；`onEvent('themeChanged' | 'activated' | 'deactivated', …)`；在点击处理函数里调用 `openLink(url)`、`copyText(text)`
+- 精简 DOM：`getElementById`、`querySelector`、`textContent`、`innerHTML`、`classList`、`style`、`dataset`、`createElement`、`addEventListener('click', …)`
+- 定时器，以及 4 KB 的 `localStorage`
+
+App 在自己的沙箱里运行脚本：一个只支持 JavaScript 子集的解释器（不支持 class、`async`、生成器和正则表达式），不能联网，也碰不到 App。每个任务（加载时的脚本、一次定时器、一次点击）最多 100 毫秒，超时或超出内存预算时卡片停止运行，保留最后画出的样子。`request()` 一律返回 `NOT_ALLOWED`：Honk 还没有 bot 回调。不支持脚本的旧版 App，以及脚本无法解析的卡片，显示填好 `{{key}}` 的静态卡片。例子：
+
+```html
+<p id="n">{{count}}</p><button id="b">+1</button>
+<script>
+  var n = Number(JSON.parse(TelegramWidget.chatData).count);
+  document.getElementById("b").addEventListener("click", function () {
+    document.getElementById("n").textContent = String(++n);
+  });
+</script>
+```
 
 ## App API
 

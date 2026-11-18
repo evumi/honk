@@ -1,4 +1,4 @@
-// A small HTML parser for message cards (profile v1). The gateway has already
+// A small HTML parser for message cards. The gateway has already
 // removed everything outside the whitelist; this only builds a tree.
 
 export interface ElementNode {

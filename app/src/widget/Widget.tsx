@@ -1,11 +1,14 @@
 import type { JSX } from "nsh";
-// Renders a message card (profile v1: static HTML and inline CSS) with nsh
-// views. Block elements become Views, runs of inline content one Text with
-// nested spans. `{{key}}` placeholders come from the message's data.
-import { Image, openUrl, Text, View } from "nsh";
+// Renders a message card with nsh views. Block elements become Views, runs of
+// inline content one Text with nested spans. `{{key}}` placeholders come from
+// the message's data. A card with scripts (profile 2) runs them in a Sandbox
+// and is drawn again from its DOM whenever a script changes it; without
+// scripts, or when they cannot run, it is the static card of profile 1.
+import { cleanup, Clipboard, effect, Image, lifecycle, locale, openUrl, signal, Text, untracked, View } from "nsh";
 import type { Palette } from "../theme";
 import { widgetVars } from "../theme";
 import { countNodes, fill, parse, parseData, parseStyle, type ElementNode, type WidgetNode } from "./parse";
+import { Sandbox, scriptsOf } from "./sandbox";
 
 const MAX_NODES = 2000;
 
@@ -22,6 +25,13 @@ interface Ctx {
   data: Record<string, unknown>;
   vars: Record<string, string>;
   p: Palette;
+  /** The card's script sandbox: its tree is already filled, and elements with click handlers are pressable. */
+  sb?: Sandbox;
+}
+
+/** `{{key}}` from the data; a scripted card's tree was filled once, before its scripts ran. */
+function f(s: string, ctx: Ctx): string {
+  return ctx.sb ? s : fill(s, ctx.data);
 }
 
 // MARK: CSS values
@@ -193,7 +203,7 @@ function isBlock(el: ElementNode, display?: string): boolean {
 }
 
 function link(el: ElementNode, ctx: Ctx): string | null {
-  const href = fill(el.attrs.href ?? el.attrs["data-url"] ?? "", ctx.data).trim();
+  const href = f(el.attrs.href ?? el.attrs["data-url"] ?? "", ctx).trim();
   return href.startsWith("https://") ? href : null;
 }
 
@@ -201,16 +211,34 @@ function open(url: string) {
   openUrl(url).catch(() => {});
 }
 
+/** What a tap on `el` does: its click handlers, then its link unless a handler prevented it. */
+function pressHandler(el: ElementNode, ctx: Ctx, href: string | null): (() => void) | undefined {
+  const sb = ctx.sb;
+  if (sb && sb.hasListener(el)) {
+    return () => {
+      const prevented = sb.click(el);
+      // The link as it is after the handlers ran.
+      const after = link(el, ctx);
+      if (!prevented && after) open(after);
+    };
+  }
+  return href ? () => open(href) : undefined;
+}
+
+function hidden(n: WidgetNode): boolean {
+  return n.type === "element" && "hidden" in n.attrs;
+}
+
 function renderInline(node: WidgetNode, ctx: Ctx, inherited: Style): JSX.Element | null {
-  if (node.type === "text") return node.text ? fill(node.text, ctx.data).replace(/\s+/g, " ") : null;
-  if (SKIP.has(node.tag)) return null;
+  if (node.type === "text") return node.text ? f(node.text, ctx).replace(/\s+/g, " ") : null;
+  if (SKIP.has(node.tag) || hidden(node)) return null;
   if (node.tag === "br") return "\n";
   const own = tagStyle(node.tag, ctx.p);
-  const css = mapStyle(parseStyle(fill(node.attrs.style ?? "", ctx.data)), ctx);
+  const css = mapStyle(parseStyle(f(node.attrs.style ?? "", ctx)), ctx);
   const style = { ...own.text, ...css.text };
   const href = node.tag === "a" ? link(node, ctx) : null;
   return (
-    <Text style={style as never} onPress={href ? () => open(href) : undefined}>
+    <Text style={style as never} onPress={pressHandler(node, ctx, href)}>
       {node.children.map((c) => renderInline(c, ctx, { ...inherited, ...style }))}
     </Text>
   );
@@ -239,8 +267,8 @@ function renderChildren(children: WidgetNode[], ctx: Ctx, text: Style, listTag?:
     run = [];
   };
   for (const c of children) {
-    if (c.type === "element" && SKIP.has(c.tag)) continue;
-    const css = c.type === "element" ? mapStyle(parseStyle(fill(c.attrs.style ?? "", ctx.data)), ctx) : null;
+    if (c.type === "element" && (SKIP.has(c.tag) || hidden(c))) continue;
+    const css = c.type === "element" ? mapStyle(parseStyle(f(c.attrs.style ?? "", ctx)), ctx) : null;
     const boxy = css != null && BOX_KEYS.some((k) => k in css.box);
     if (c.type === "element" && (flex || boxy || isBlock(c, css?.display))) {
       flush();
@@ -256,7 +284,7 @@ function renderChildren(children: WidgetNode[], ctx: Ctx, text: Style, listTag?:
 
 function renderBlock(el: ElementNode, ctx: Ctx, inherited: Style, listTag?: string, index = 1, inFlex = false): JSX.Element {
   const own = tagStyle(el.tag, ctx.p);
-  const css = mapStyle(parseStyle(fill(el.attrs.style ?? "", ctx.data)), ctx);
+  const css = mapStyle(parseStyle(f(el.attrs.style ?? "", ctx)), ctx);
   const text = { ...inherited, ...own.text, ...css.text };
   const box: Style = { ...own.box, ...css.box };
   // Inline boxes (inline-flex, inline-block, a styled span) take their content's width.
@@ -271,6 +299,7 @@ function renderBlock(el: ElementNode, ctx: Ctx, inherited: Style, listTag?: stri
   }
   if (el.tag === "hr") return <View style={box as never} />;
   const href = el.tag === "a" || el.tag === "button" ? link(el, ctx) : null;
+  const press = pressHandler(el, ctx, href);
   const isFlex = css.display === "flex" || css.display === "inline-flex";
   if (isFlex && box.alignItems === undefined) box.alignItems = "stretch";
   const children = renderChildren(el.children, ctx, text, el.tag === "ul" || el.tag === "ol" ? el.tag : undefined, isFlex);
@@ -284,7 +313,7 @@ function renderBlock(el: ElementNode, ctx: Ctx, inherited: Style, listTag?: stri
     );
   }
   return (
-    <View style={box as never} onPress={href ? () => open(href) : undefined} activeStyle={href ? { opacity: 0.7 } : undefined}>
+    <View style={box as never} onPress={press} activeStyle={press ? { opacity: 0.7 } : undefined}>
       {children}
     </View>
   );
@@ -304,12 +333,58 @@ function parseCached(html: string): WidgetNode[] {
   return nodes;
 }
 
+/** A copy of the tree with `{{key}}` filled in text and attributes, for a script to change. */
+function fillTree(nodes: WidgetNode[], data: Record<string, unknown>): WidgetNode[] {
+  return nodes.map((n) => {
+    if (n.type === "text") return { type: "text", text: fill(n.text, data) };
+    if (n.tag === "script" || n.tag === "style") return n;
+    const attrs: Record<string, string> = {};
+    for (const [k, v] of Object.entries(n.attrs)) attrs[k] = fill(v, data);
+    return { type: "element", tag: n.tag, attrs, children: fillTree(n.children, data) };
+  });
+}
+
+// localStorage of scripted cards, by card and data, for as long as the app runs.
+const stores = new Map<string, Map<string, string>>();
+function storeFor(key: string): Map<string, string> {
+  let s = stores.get(key);
+  if (!s) {
+    if (stores.size >= 200) stores.delete(stores.keys().next().value!);
+    stores.set(key, (s = new Map()));
+  }
+  return s;
+}
+
 export function Widget(props: { html: string; data: string; palette: Palette }): JSX.Element {
   const nodes = parseCached(props.html);
   if (nodes.length === 0 || countNodes(nodes) > MAX_NODES) return <View />;
   const ctx: Ctx = { data: parseData(props.data), vars: widgetVars(props.palette), p: props.palette };
   const base: Style = { color: props.palette.text, fontSize: 15, lineHeight: 21 };
-  return <View>{renderChildren(nodes, ctx, base)}</View>;
+  if (scriptsOf(nodes).length === 0) return <View>{renderChildren(nodes, ctx, base)}</View>;
+  return <ScriptedWidget nodes={nodes} ctx={ctx} base={base} html={props.html} data={props.data} palette={props.palette} />;
+}
+
+function ScriptedWidget(props: { nodes: WidgetNode[]; ctx: Ctx; base: Style; html: string; data: string; palette: Palette }): JSX.Element {
+  const { nodes, ctx, base } = props;
+  const version = signal(0);
+  const sb = new Sandbox(fillTree(nodes, ctx.data), props.data, { vars: ctx.vars }, {
+    openLink: open,
+    copyText: (t) => void Clipboard.writeText(t).catch(() => {}),
+    changed: () => version.update((n) => n + 1),
+    storage: storeFor(`${props.html}\u0000${props.data}`),
+    language: untracked(locale),
+  });
+  // Scripts that cannot run leave the static card.
+  if (!sb.start()) return <View>{renderChildren(nodes, ctx, base)}</View>;
+  cleanup(() => sb.dispose());
+  effect(() => sb.setActive(lifecycle() === "active"));
+  effect(() => sb.setTheme({ vars: widgetVars(props.palette) }));
+  const live: Ctx = { ...ctx, sb };
+  return (
+    <View>
+      {(version(), renderChildren(sb.root.children, { ...live, vars: widgetVars(props.palette), p: props.palette }, { ...base, color: props.palette.text }))}
+    </View>
+  );
 }
 
 // Exposed for tests.
