@@ -75,8 +75,8 @@ export function svgDataUrl(markup: string): string {
 }
 
 /** How the image fits its box, from the svg's preserveAspectRatio. */
-export function svgFit(el: ElementNode): { objectFit: "fill" | "contain" | "cover"; objectPosition?: string } {
-  const par = (el.attrs.preserveaspectratio ?? "").trim().split(/\s+/);
+export function svgFit(preserveAspectRatio: string): { objectFit: "fill" | "contain" | "cover"; objectPosition?: string } {
+  const par = preserveAspectRatio.trim().split(/\s+/);
   if (par[0] === "none") return { objectFit: "fill" };
   const m = /^x(Min|Mid|Max)Y(Min|Mid|Max)$/.exec(par[0] ?? "");
   const pos = { Min: ["left", "top"], Mid: ["center", "center"], Max: ["right", "bottom"] } as const;
@@ -84,8 +84,8 @@ export function svgFit(el: ElementNode): { objectFit: "fill" | "contain" | "cove
   return { objectFit: par[1] === "slice" ? "cover" : "contain", ...(objectPosition ? { objectPosition } : {}) };
 }
 
-/** The svg's aspect ratio from its viewBox, if it has a usable one. */
-export function viewBoxRatio(el: ElementNode): number | undefined {
-  const vb = (el.attrs.viewbox ?? "").trim().split(/[\s,]+/).map(Number);
+/** The aspect ratio of a viewBox, if it is a usable one. */
+export function viewBoxRatio(viewBox: string): number | undefined {
+  const vb = viewBox.trim().split(/[\s,]+/).map(Number);
   return vb.length === 4 && vb[2] > 0 && vb[3] > 0 ? vb[2] / vb[3] : undefined;
 }

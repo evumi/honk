@@ -62,10 +62,11 @@ test("maps values before writing them, and escapes what they return", () => {
 });
 
 test("fit, ratio and data URL", () => {
-  expect(svgFit(svgOf(chart))).toEqual({ objectFit: "fill" });
-  expect(svgFit(svgOf(`<svg>`))).toEqual({ objectFit: "contain" });
-  expect(svgFit(svgOf(`<svg preserveAspectRatio="xMinYMax slice">`))).toEqual({ objectFit: "cover", objectPosition: "left bottom" });
-  expect(viewBoxRatio(svgOf(chart))).toBe(320 / 112);
-  expect(viewBoxRatio(svgOf(`<svg viewBox="0 0 0 10">`))).toBeUndefined();
+  expect(svgFit(svgOf(chart).attrs.preserveaspectratio)).toEqual({ objectFit: "fill" });
+  expect(svgFit("")).toEqual({ objectFit: "contain" });
+  expect(svgFit("xMinYMax slice")).toEqual({ objectFit: "cover", objectPosition: "left bottom" });
+  expect(viewBoxRatio(svgOf(chart).attrs.viewbox)).toBe(320 / 112);
+  expect(viewBoxRatio("0 0 0 10")).toBeUndefined();
+  expect(viewBoxRatio("")).toBeUndefined();
   expect(svgDataUrl('<svg a="#"/>')).toBe("data:image/svg+xml;charset=utf-8,%3Csvg%20a%3D%22%23%22%2F%3E");
 });

@@ -367,10 +367,13 @@ function renderSvg(el: ElementNode, ctx: Ctx, box: Style, text: Style): JSX.Elem
     const v = resolveVars(f(s, ctx), ctx);
     return color ? v.replace(/\bcurrentColor\b/gi, color) : v;
   };
+  const attr = (k: string) => value(el.attrs[k] ?? "");
   const size = (v: unknown) => (typeof v === "number" || (typeof v === "string" && v.endsWith("%")) ? v : undefined);
-  const width = size(box.width) ?? size(length(f(el.attrs.width ?? "", ctx))) ?? "100%";
-  let height = size(box.height) ?? size(length(f(el.attrs.height ?? "", ctx)));
-  const ratio = viewBoxRatio(el);
+  const width = size(box.width) ?? size(length(attr("width"))) ?? "100%";
+  // A percentage of a card's height, which follows its content, is no height (as in CSS).
+  const px = (v: unknown) => (typeof v === "number" ? v : undefined);
+  let height = px(box.height) ?? px(length(attr("height")));
+  const ratio = viewBoxRatio(attr("viewbox"));
   let aspectRatio: number | undefined;
   if (height === undefined) {
     if (ratio && typeof width === "number") height = width / ratio;
@@ -379,7 +382,9 @@ function renderSvg(el: ElementNode, ctx: Ctx, box: Style, text: Style): JSX.Elem
   }
   const title = el.children.find((c): c is ElementNode => c.type === "element" && c.tag === "title");
   const label = f(el.attrs["aria-label"] ?? (title ? title.children.map((c) => (c.type === "text" ? c.text : "")).join("") : ""), ctx).trim();
-  const style = { ...box, width, height, ...(aspectRatio ? { aspectRatio } : {}), ...svgFit(el) };
+  // A fixed width wider than the card shrinks to it rather than overflowing.
+  const maxWidth = box.maxWidth ?? (typeof width === "number" ? "100%" : undefined);
+  const style = { ...box, width, height, ...(maxWidth !== undefined ? { maxWidth } : {}), ...(aspectRatio ? { aspectRatio } : {}), ...svgFit(attr("preserveaspectratio")) };
   return <Image src={svgDataUrl(svgMarkup(el, value))} style={style as never} accessibilityLabel={label || undefined} />;
 }
 
