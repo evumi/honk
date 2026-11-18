@@ -74,6 +74,8 @@ data class QueuedMessage(
     val date: Long = 0,
     /** The sender let the card's `request()` reach the bot (`allow_queries`). */
     @SerialName("allow_queries") val allowQueries: Boolean = false,
+    /** The end-to-end sealed content ([Seal]); [MessageOpener] replaces it with the fields above. */
+    val ciphertext: String = "",
 ) {
     @Serializable
     enum class Kind {

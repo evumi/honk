@@ -29,4 +29,6 @@ tasks.test {
     systemProperty("honk.contract", rootDir.resolve("../app/src/host.contract.json").absolutePath)
     // DeviceLinkTest reads the pairing vectors shared with ios/HonkKit.
     systemProperty("honk.linkVectors", rootDir.resolve("../docs/link-vectors.json").absolutePath)
+    // EncryptionTest reads the vector shared with the Go client and HonkKit.
+    systemProperty("honk.e2e.vector", rootDir.resolve("../app/src/e2e.vector.json").absolutePath)
 }

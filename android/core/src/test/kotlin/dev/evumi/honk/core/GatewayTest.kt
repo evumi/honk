@@ -25,6 +25,9 @@ class FakeGateway(private val handler: (method: String, path: String, body: Stri
     }
 }
 
+/** An opener for tests that send no ciphertext: no keys, so plaintext passes through. */
+val plainOpener = MessageOpener(MemoryBotKeys(), "无法解密的通知")
+
 class MemoryTokens(val map: MutableMap<String, String> = mutableMapOf()) : BotTokenStore {
     override fun token(botId: String) = map[botId]
     override fun save(botId: String, token: String) { map[botId] = token }
@@ -57,7 +60,7 @@ class GatewayTest {
                 else -> FakeGateway.fail(404, "Not Found")
             }
         }
-        val out = SyncEngine(ApiClient(FakeGateway.BASE, "s3cret", gw), store).run(pageSize = 2)
+        val out = SyncEngine(ApiClient(FakeGateway.BASE, "s3cret", gw), store, plainOpener).run(pageSize = 2)
 
         assertEquals(3, out.applied)
         assertEquals(listOf("c1:dep-old"), out.staleNotificationIds)
@@ -76,7 +79,7 @@ class GatewayTest {
             if (path.startsWith("v1/sync?cursor=9")) FakeGateway.ok("""{"messages":[],"cursor":9,"has_more":false}""")
             else FakeGateway.fail(404, "Not Found")
         }
-        assertEquals(0, SyncEngine(ApiClient(FakeGateway.BASE, "s", gw), store).run().applied)
+        assertEquals(0, SyncEngine(ApiClient(FakeGateway.BASE, "s", gw), store, plainOpener).run().applied)
         assertTrue(gw.requests.none { it.path == "v1/ack" })
     }
 
@@ -92,7 +95,7 @@ class GatewayTest {
                 else -> FakeGateway.ok("""{"acked":1}""")
             }
         }
-        val engine = SyncEngine(ApiClient(FakeGateway.BASE, "s", gw), store)
+        val engine = SyncEngine(ApiClient(FakeGateway.BASE, "s", gw), store, plainOpener)
         assertThrows(ApiException.Gateway::class.java) { engine.run() }
         ackFails = false
         engine.run()

@@ -155,11 +155,18 @@ class ApiClient(
     fun createBot(name: String, avatar: String, defaultLevel: String): CreatedBot =
         request("POST", "v1/bots", CreatedBot.serializer(), body = mapOf("name" to name, "avatar" to avatar, "default_level" to defaultLevel))
 
-    fun updateBot(id: String, name: String? = null, avatar: String? = null, defaultLevel: String? = null): Bot {
+    fun updateBot(
+        id: String,
+        name: String? = null,
+        avatar: String? = null,
+        defaultLevel: String? = null,
+        encrypted: Boolean? = null,
+    ): Bot {
         val body = buildMap<String, Any> {
             name?.let { put("name", it) }
             avatar?.let { put("avatar", it) }
             defaultLevel?.let { put("default_level", it) }
+            encrypted?.let { put("encrypted", it) }
         }
         return request("PATCH", "v1/bots/$id", Bot.serializer(), body = body)
     }

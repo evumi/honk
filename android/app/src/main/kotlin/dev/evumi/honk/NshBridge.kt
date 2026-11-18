@@ -21,6 +21,7 @@ import dev.evumi.honk.core.HostJson
 import dev.evumi.honk.core.HttpTransport
 import dev.evumi.honk.core.LocalAvatars
 import dev.evumi.honk.core.MessageArchive
+import dev.evumi.honk.core.Seal
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -36,7 +37,7 @@ import java.util.Base64
  *
  * Calls: honk.status, honk.chats, honk.messages, honk.search, honk.markRead, honk.focus,
  * honk.refresh, honk.retention.get, honk.retention.set, honk.export, honk.import, honk.bot.create, honk.bot.update, honk.bot.token,
- * honk.bot.resetToken, honk.bot.delete, honk.bot.setMuted, honk.bot.setPinned,
+ * honk.bot.resetToken, honk.bot.delete, honk.bot.encryption.{key,enable,disable,resetKey}, honk.bot.setMuted, honk.bot.setPinned,
  * honk.message.delete, honk.chat.clear, honk.device.delete, honk.devices.list, honk.devices.remove,
  * honk.link.create, honk.link.claim, honk.notifications.open, honk.avatar.save, honk.avatar.image,
  * honk.gateway.get, honk.gateway.test, honk.gateway.set, honk.register.retry.
@@ -234,9 +235,47 @@ class NshBridge(
             service.notifier.cancel(service.store.clearMessages(id))
             service.store.deleteBot(id)
             service.botTokens.remove(id)
+            service.botKeys.remove(id)
             service.notifier.deleteChannel(id)
             service.changed()
             true
+        }
+
+        // end-to-end encryption (keys never leave the keystore except through these calls)
+
+        handle("honk.bot.encryption.key") { a -> service.botKeys.key(a.requireString("botId"))?.let(Seal::encode) }
+        handle("honk.bot.encryption.enable") { a ->
+            val id = a.requireString("botId")
+            val existing = service.botKeys.key(id)
+            val key = existing ?: Seal.generateKey()
+            service.botKeys.save(id, key)
+            try {
+                service.api.updateBot(id, encrypted = true)
+            } catch (e: Exception) {
+                if (existing == null) service.botKeys.remove(id)
+                throw e
+            }
+            Seal.encode(key)
+        }
+        handle("honk.bot.encryption.disable") { a ->
+            val id = a.requireString("botId")
+            // The gateway first: with its flag still on, plaintext sends stay refused.
+            service.api.updateBot(id, encrypted = false)
+            service.botKeys.remove(id)
+            true
+        }
+        handle("honk.bot.encryption.resetKey") { a ->
+            val id = a.requireString("botId")
+            val old = service.botKeys.key(id)
+            val key = Seal.generateKey()
+            service.botKeys.save(id, key)
+            try {
+                service.api.updateBot(id, encrypted = true)
+            } catch (e: Exception) {
+                if (old != null) service.botKeys.save(id, old) else service.botKeys.remove(id)
+                throw e
+            }
+            Seal.encode(key)
         }
         handle("honk.bot.setMuted") { a ->
             service.store.setMuted(a.requireString("botId"), a.bool("muted") ?: false)

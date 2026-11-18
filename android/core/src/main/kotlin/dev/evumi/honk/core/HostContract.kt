@@ -89,7 +89,8 @@ object HostArgs {
             "honk.retention.set" -> RetentionSet(a)
             "honk.export" -> Export(a) // no botId: every chat
             "honk.markRead", "honk.bot.token", "honk.bot.resetToken", "honk.bot.delete", "honk.chat.clear",
-            "honk.bot.setMuted", "honk.bot.setPinned" -> a.requireString("botId")
+            "honk.bot.setMuted", "honk.bot.setPinned", "honk.bot.encryption.key", "honk.bot.encryption.enable",
+            "honk.bot.encryption.disable", "honk.bot.encryption.resetKey" -> a.requireString("botId")
             "honk.focus" -> Unit // a missing botId means no chat is open
             "honk.bot.create" -> BotCreate(a)
             "honk.bot.update" -> BotUpdate(a)
