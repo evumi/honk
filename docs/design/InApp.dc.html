@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>站内通知</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+a{color:inherit;text-decoration:none}
+.phone{position:relative;width:390px;height:844px;overflow:hidden;border-radius:44px;flex:none;box-shadow:0 0 0 1px rgba(0,0,0,0.08)}
+.cap{margin:0 0 14px;font-size:15px;font-weight:600;color:#1c1c1e}
+.sub{margin:0 0 18px;font-size:13px;line-height:19px;color:#6d6d72;max-width:390px}
+.row{display:flex;align-items:center;gap:12px;padding:0 16px;height:80px}
+.av{width:56px;height:56px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center}
+.txt{flex:1;min-width:0;height:80px;display:flex;flex-direction:column;justify-content:center;gap:2px;border-bottom:0.5px solid #d1d1d6}
+.nm{font-size:16px;font-weight:600;color:#000}
+.pv{font-size:15px;line-height:20px;color:#6d6d72;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.banner{position:absolute;left:10px;right:10px;top:52px;z-index:5;border-radius:26px;padding:12px 14px 12px 12px;display:flex;gap:12px;align-items:flex-start;-webkit-backdrop-filter:blur(24px) saturate(1.6);backdrop-filter:blur(24px) saturate(1.6)}
+.light{background:rgba(255,255,255,0.72);border:0.5px solid rgba(0,0,0,0.08);box-shadow:inset 0 1px 0 rgba(255,255,255,0.9),0 10px 30px rgba(0,0,0,0.14),0 1px 3px rgba(0,0,0,0.08)}
+.dark{background:rgba(44,44,46,0.78);border:0.5px solid rgba(255,255,255,0.12);box-shadow:inset 0 1px 0 rgba(255,255,255,0.12),0 10px 30px rgba(0,0,0,0.5)}
+.bav{width:40px;height:40px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center}
+.bt{flex:1;min-width:0}
+.bh{display:flex;align-items:baseline;gap:8px}
+.bn{flex:1;font-size:15px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bw{font-size:13px}
+.bb{margin:2px 0 0;font-size:15px;line-height:20px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.grab{position:absolute;left:50%;bottom:5px;width:36px;height:4px;margin-left:-18px;border-radius:2px}
+.note{position:absolute;font-size:12px;line-height:16px;color:#0a6ed1;background:#e8f1fb;border-radius:8px;padding:6px 9px;max-width:170px}
+</style>
+</helmet>
+<div style="width:1290px;height:1080px;box-sizing:border-box;padding:40px 30px;background:#f2f2f7;font-family:-apple-system,'PingFang SC','Helvetica Neue',sans-serif;display:flex;gap:60px">
+
+  <section>
+    <p class="cap">1 · 会话列表里，别的 Bot 来消息</p>
+    <p class="sub">从顶部滑下的玻璃横幅：头像、Bot 名、标题和正文前两行。4 秒后自动收起；点按进入会话，上滑关掉。列表里对应的行同时移到顶部、未读数 +1。</p>
+    <div class="phone" style="background:#fff">
+      <div class="banner light">
+        <div class="bav" style="background:#c2410c"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l9.5 17h-19z"/><path d="M12 10v4"/><path d="M12 17.5v.01"/></svg></div>
+        <div class="bt">
+          <div class="bh"><span class="bn" style="color:#000">服务器告警</span><span class="bw" style="color:#6d6d72">现在</span></div>
+          <p class="bb" style="color:#000"><strong style="font-weight:600">hk-edge-02 CPU 92%</strong>　持续 5 分钟超过阈值 85%，负载 7.8。</p>
+        </div>
+        <span class="grab" style="background:rgba(0,0,0,0.18)"></span>
+      </div>
+      <div style="padding:150px 0 0;opacity:0.55">
+        <div class="row"><div class="av" style="background:#c2410c"></div><div class="txt"><span class="nm">服务器告警</span><span class="pv">hk-edge-02 CPU 92%：持续 5 分钟…</span></div></div>
+        <div class="row"><div class="av" style="background:#1c1c1e"></div><div class="txt"><span class="nm">Berth 部署</span><span class="pv">每日部署汇总：今天共 6 次部署…</span></div></div>
+        <div class="row"><div class="av" style="background:#2f6f3e"></div><div class="txt"><span class="nm">CI 构建</span><span class="pv">main #482 通过 · 3 分 12 秒</span></div></div>
+        <div class="row"><div class="av" style="background:#6741d9"></div><div class="txt"><span class="nm">每日账单</span><span class="pv">昨日云服务支出 ¥46.20</span></div></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <p class="cap">2 · 正在看另一个 Bot 的会话</p>
+    <p class="sub">横幅盖在顶栏上面，样式一致。当前会话自己的新消息不弹横幅，直接进列表（在底部时跟随滚动，否则“回到最新”按钮上的数字 +1）。</p>
+    <div class="phone" style="background:#d7e4c6">
+      <div class="banner light">
+        <div class="bav" style="background:#2f6f3e"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M8 12.5l2.7 2.7L16 9.8"/></svg></div>
+        <div class="bt">
+          <div class="bh"><span class="bn" style="color:#000">CI 构建</span><span class="bw" style="color:#6d6d72">现在</span></div>
+          <p class="bb" style="color:#000"><strong style="font-weight:600">main #483 失败</strong>　test/api_test.go:149 期望 200，实际 500</p>
+        </div>
+        <span class="grab" style="background:rgba(0,0,0,0.18)"></span>
+      </div>
+      <div style="position:absolute;left:12px;right:12px;top:140px;display:flex;flex-direction:column;gap:10px;opacity:0.6">
+        <div style="background:#fff;border-radius:18px;height:200px"></div>
+        <div style="background:#fff;border-radius:18px;height:120px;width:78%"></div>
+      </div>
+      <span class="note" style="left:24px;top:150px">时效性消息：横幅左侧加一条橙色细边，停留 8 秒</span>
+    </div>
+  </section>
+
+  <section>
+    <p class="cap">3 · 连续来消息 · 深色</p>
+    <p class="sub">新的替换旧的，下面露出一层表示还有；同一个 Bot 的合并为“3 条新消息”。静音的 Bot 不弹横幅，只更新列表。</p>
+    <div class="phone" style="background:#000">
+      <div style="position:absolute;left:22px;right:22px;top:66px;height:84px;border-radius:24px;background:rgba(44,44,46,0.6);z-index:4"></div>
+      <div class="banner dark">
+        <div class="bav" style="background:#1c1c1e;box-shadow:0 0 0 1px rgba(255,255,255,0.16)"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 15h16l-2.5 4h-11z"/><path d="M7 15V9h7l3 6"/></svg></div>
+        <div class="bt">
+          <div class="bh"><span class="bn" style="color:#fff">Berth 部署</span><span class="bw" style="color:#98989f">3 条新消息</span></div>
+          <p class="bb" style="color:#fff"><strong style="font-weight:600">部署成功</strong>　evumi / sluice (production) 已上线。</p>
+        </div>
+        <span class="grab" style="background:rgba(255,255,255,0.22)"></span>
+      </div>
+      <div style="padding:170px 0 0;opacity:0.5">
+        <div class="row"><div class="av" style="background:#1c1c1e;box-shadow:0 0 0 1px rgba(255,255,255,0.16)"></div><div class="txt" style="border-color:#38383a"><span class="nm" style="color:#fff">Berth 部署</span><span class="pv">部署成功：evumi / sluice…</span></div></div>
+        <div class="row"><div class="av" style="background:#c2410c"></div><div class="txt" style="border-color:#38383a"><span class="nm" style="color:#fff">服务器告警</span><span class="pv">hk-edge-02 CPU 92%…</span></div></div>
+      </div>
+    </div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1290,"height":1080}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

@@ -11,7 +11,8 @@ import UIKit
 /// honk.bot.resetToken, honk.bot.delete, honk.bot.setMuted, honk.bot.setPinned,
 /// honk.message.delete, honk.chat.clear, honk.notifications.open, honk.avatar.save, honk.avatar.image,
 /// honk.gateway.get, honk.gateway.test, honk.gateway.set, honk.register.retry.
-/// Events: honk.changed (the store changed), honk.open { botId } (open a chat).
+/// Events: honk.changed (the store changed), honk.open { botId } (open a chat),
+/// honk.incoming { botId, messageId } (a message arrived while the app is open; it shows its own banner).
 @MainActor
 final class NshBridge {
     private unowned let app: NshAppView
@@ -24,6 +25,9 @@ final class NshBridge {
 
     func install() {
         service.onChange = { [weak self] in self?.app.send("honk.changed") }
+        service.onIncoming = { [weak self] botID, messageID in
+            self?.app.send("honk.incoming", ["botId": botID, "messageId": messageID])
+        }
 
         handle("honk.status") { [service] _ in await Self.status(service) }
         handle("honk.register.retry") { [service] _ in

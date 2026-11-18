@@ -54,6 +54,8 @@ class HonkService private constructor(context: Context) {
     /** The bot whose chat is on screen while the activity is resumed; its messages show no notification. */
     @Volatile var focusedBotId: String? = null
     @Volatile var foreground = false
+    /** A message arrived while the app is open (not for the open chat): the app shows its own banner. Main thread. */
+    @Volatile var onIncoming: ((botId: String, messageId: Long) -> Unit)? = null
 
     private val listeners = CopyOnWriteArrayList<() -> Unit>()
     private val main = Handler(Looper.getMainLooper())
@@ -269,6 +271,12 @@ class HonkService private constructor(context: Context) {
             // The chat is open: the message appears there, no notification.
             notifier.cancel(store.markRead(info.botId))
             changed()
+            return
+        }
+        val incoming = onIncoming
+        if (foreground && incoming != null) {
+            // The app is open: it shows its own banner instead of a notification.
+            main.post { incoming(info.botId, info.messageId) }
             return
         }
         val bot = store.bot(info.botId)

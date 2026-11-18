@@ -306,3 +306,41 @@ test("pulling the chat list refreshes and the spinner stops", async () => {
   await app.waitUntil(() => app.host.calls().filter((c) => c.name === "honk.chats").length > 1);
 });
 
+
+test("a message while the app is open shows the in-app banner, which opens the chat", async () => {
+  const app = await open("./App.tsx", { locale: "zh-Hans-CN", host: host() });
+  await app.waitFor("id:chat-aZ3kQ9xT");
+  await app.host.send("honk.incoming", { botId: "aZ3kQ9xT", messageId: 7 });
+  await app.waitFor("id:in-app-banner");
+  expect(app.texts()).toContain("现在");
+  await app.host.send("honk.incoming", { botId: "aZ3kQ9xT", messageId: 7 });
+  await app.waitFor("text:2 条新消息");
+  await app.press("id:in-app-banner");
+  await app.waitFor("text:在 Berth 中查看");
+});
+
+test("no in-app banner for a muted bot or the chat on screen", async () => {
+  const muted = host();
+  (muted.handlers["honk.chats"] as { muted: boolean }[])[0].muted = true;
+  const a = await open("./App.tsx", { locale: "zh-Hans-CN", host: muted });
+  await a.waitFor("id:chat-aZ3kQ9xT");
+  await a.host.send("honk.incoming", { botId: "aZ3kQ9xT", messageId: 7 });
+  await a.wait(500);
+  expect(a.count("id:in-app-banner")).toBe(0);
+
+  const b = await open("./App.tsx", { locale: "zh-Hans-CN", host: host() });
+  await b.press("id:chat-aZ3kQ9xT");
+  await b.waitFor("text:在 Berth 中查看");
+  await b.host.send("honk.incoming", { botId: "aZ3kQ9xT", messageId: 7 });
+  await b.wait(500);
+  expect(b.count("id:in-app-banner")).toBe(0);
+});
+
+test("the in-app banner leaves by itself", async () => {
+  const app = await open("./App.tsx", { locale: "zh-Hans-CN", host: host(), clock: {} });
+  await app.waitFor("id:chat-aZ3kQ9xT");
+  await app.host.send("honk.incoming", { botId: "aZ3kQ9xT", messageId: 7 });
+  await app.waitFor("id:in-app-banner");
+  await app.wait(4500);
+  expect(app.count("id:in-app-banner")).toBe(0);
+});

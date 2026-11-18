@@ -41,6 +41,9 @@ final class HonkService {
 
     /// Called after the store changed: a push arrived, a sync ran, the extension wrote.
     var onChange: (() -> Void)?
+    /// A message arrived while the app is open (not for the open chat): the
+    /// app shows its own banner. Nil until the UI listens.
+    var onIncoming: ((_ botID: String, _ messageID: Int64) -> Void)?
     /// The bot whose chat is on screen; its foreground banners are not shown.
     var focusedBotID: String?
 
