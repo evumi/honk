@@ -109,6 +109,7 @@ func run(log *slog.Logger) error {
 		RelayServe: cfg.RelayServe, RelayRate: cfg.RelayRate, RelayBurst: cfg.RelayBurst, RelayTokenPerMinute: cfg.RelayTokenPerMinute,
 		RelayAPNs: direct.APNs, RelayFCM: direct.FCM,
 		WebhookAllowPrivate: cfg.WebhookAllowPrivate,
+		TrustedProxies:      cfg.TrustedProxies,
 	})
 	httpSrv := &http.Server{
 		Addr:              cfg.Addr,
@@ -153,7 +154,7 @@ func run(log *slog.Logger) error {
 	if metricsSrv != nil {
 		_ = metricsSrv.Shutdown(shutdownCtx)
 	}
-	srv.Close() // pushes in flight finish (each has its own 10 s timeout); waiting retries are dropped
+	srv.Close() // pushes in flight finish (each has its own 15 s timeout); waiting retries are dropped
 	return err
 }
 

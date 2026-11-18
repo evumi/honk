@@ -29,7 +29,7 @@ func TestLoadDefaultsAndErrors(t *testing.T) {
 	if c.PushQueue != 1024 || c.PushWorkers != 16 || c.MetricsAddr != "" || c.LogFormat != "text" || c.LogLevel != "info" || c.DeviceGC != 2160*time.Hour {
 		t.Errorf("defaults = %+v", c)
 	}
-	for k, v := range map[string]string{"HONK_PUSH_QUEUE": "0", "HONK_PUSH_WORKERS": "x", "HONK_LOG_FORMAT": "xml", "HONK_LOG_LEVEL": "loud", "HONK_DEVICE_GC": "0"} {
+	for k, v := range map[string]string{"HONK_PUSH_QUEUE": "0", "HONK_PUSH_WORKERS": "x", "HONK_LOG_FORMAT": "xml", "HONK_LOG_LEVEL": "loud", "HONK_DEVICE_GC": "-1h"} {
 		t.Run(k, func(t *testing.T) {
 			t.Setenv(k, v)
 			if _, err := Load(); err == nil {

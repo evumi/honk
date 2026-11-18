@@ -89,6 +89,30 @@ func (s *Store) ClaimLink(ctx context.Context, linkID, deviceID string, maxBots 
 				return "", ErrTooManyBots
 			}
 		}
+		// Queued messages move with the claimer's group. Devices that were
+		// already in either group have cursors past some of these ids and would
+		// never fetch them, so they are told to start again from 0 (resync), and
+		// their watermarks drop below the lowest moved id, or Cleanup would see
+		// "everyone acked" and delete messages they have not stored yet.
+		var movedMin sql.NullInt64
+		var movedN int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*), MIN(id) FROM messages WHERE owner_id = ?`, mine).Scan(&movedN, &movedMin); err != nil {
+			return "", err
+		}
+		var keptN int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM messages WHERE owner_id = ?`, owner).Scan(&keptN); err != nil {
+			return "", err
+		}
+		if movedN > 0 {
+			if _, err := tx.ExecContext(ctx, `UPDATE devices SET resync = 1, acked_up_to = MIN(acked_up_to, ?) WHERE owner_id = ?`, movedMin.Int64-1, owner); err != nil {
+				return "", err
+			}
+		}
+		if keptN > 0 { // the claimer's devices have not seen the creator's queue either
+			if _, err := tx.ExecContext(ctx, `UPDATE devices SET resync = 1 WHERE owner_id = ?`, mine); err != nil {
+				return "", err
+			}
+		}
 		// The claimer's watermark counted messages of its old group; start
 		// again so nothing of the new group is taken as stored.
 		steps := []struct {
@@ -106,6 +130,15 @@ func (s *Store) ClaimLink(ctx context.Context, linkID, deviceID string, maxBots 
 				return "", err
 			}
 		}
+	}
+	// The claiming device may be a reinstalled app whose token an older device
+	// of the group still holds: only the claimer keeps receiving pushes.
+	var platform, token string
+	if err := tx.QueryRowContext(ctx, `SELECT platform, push_token FROM devices WHERE id = ?`, deviceID).Scan(&platform, &token); err != nil {
+		return "", err
+	}
+	if err := supersedeToken(ctx, tx, deviceID, platform, token, now); err != nil {
+		return "", err
 	}
 	return bundle, tx.Commit()
 }

@@ -329,8 +329,8 @@ func TestMigrateSendOptions(t *testing.T) {
 	}
 	var v int
 	s.db.QueryRow("PRAGMA user_version").Scan(&v)
-	if v != 7 {
-		t.Errorf("user_version = %d, want 7", v)
+	if v != 8 {
+		t.Errorf("user_version = %d, want 8", v)
 	}
 }
 

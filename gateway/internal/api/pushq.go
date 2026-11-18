@@ -142,7 +142,9 @@ func (s *Server) notifyOwner(ctx context.Context, ownerID string, n push.Notific
 }
 
 func (s *Server) runPush(j pushJob) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// Longer than the relay client's wait (push.RelayClientTimeout), so a push
+	// that goes through a relay is never cut off while the relay still works on it.
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	d, n := j.dev, j.n
 	route := s.route(n.Platform)

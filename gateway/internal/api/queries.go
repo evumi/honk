@@ -32,15 +32,16 @@ import (
 // answerWidgetQuery; everything here lives in memory and is gone after
 // Options.QueryTimeout.
 const (
-	maxQueryData    = 64   // bytes, Telegram's limit for a query
-	maxAnswerData   = 1024 // bytes
-	maxLongPoll     = 50   // seconds
-	maxPendingQuery = 50   // per bot
-	maxWebhookURL   = 2048
-	maxWebhookToken = 256
-	webhookTimeout  = 5 * time.Second
-	defaultQueryTTL = 15 * time.Second
-	queryBurst      = 5 // per device and bot; refilled at one a second
+	maxQueryData     = 64   // bytes, Telegram's limit for a query
+	maxAnswerData    = 1024 // bytes
+	maxLongPoll      = 50   // seconds
+	maxPendingQuery  = 50   // per bot
+	maxWebhookURL    = 2048
+	maxWebhookToken  = 256
+	webhookTimeout   = 5 * time.Second
+	defaultQueryTTL  = 15 * time.Second
+	maxQueuedUpdates = 100 // per bot waiting for getUpdates; the oldest go first
+	queryBurst       = 5   // per device and bot; refilled at one a second
 )
 
 type queryResult struct {
@@ -121,7 +122,18 @@ func (h *queryHub) push(bot string, id int64, body json.RawMessage, ttl time.Dur
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	q := h.queue(bot)
-	q.updates = append(q.updates, queuedUpdate{id: id, body: body, expires: time.Now().Add(ttl)})
+	now := time.Now()
+	keep := q.updates[:0]
+	for _, u := range q.updates { // a bot nobody polls would otherwise collect them forever
+		if now.Before(u.expires) {
+			keep = append(keep, u)
+		}
+	}
+	q.updates = keep
+	if len(q.updates) >= maxQueuedUpdates { // drop the oldest
+		q.updates = append(q.updates[:0], q.updates[len(q.updates)-maxQueuedUpdates+1:]...)
+	}
+	q.updates = append(q.updates, queuedUpdate{id: id, body: body, expires: now.Add(ttl)})
 	close(q.wake)
 	q.wake = make(chan struct{})
 }

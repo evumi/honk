@@ -73,6 +73,7 @@ func (s *Store) migrate(ctx context.Context) error {
 		migrateSendOptions,
 		migrateWidgetQueries,
 		migrateEncryption,
+		migrateResync,
 	}
 	for ; v < len(steps); v++ {
 		if err := s.step(ctx, v+1, steps[v]); err != nil {
@@ -98,7 +99,7 @@ func (s *Store) step(ctx context.Context, version int, f func(context.Context, *
 	return tx.Commit()
 }
 
-// migrateSendOptions (v3) adds the sendMessage options open, image,
+// migrateSendOptions (v5) adds the sendMessage options open, image,
 // parse_mode and silent to the queue.
 func migrateSendOptions(ctx context.Context, tx *sql.Tx) error {
 	for _, q := range []string{
@@ -248,7 +249,7 @@ CREATE INDEX messages_owner ON messages(owner_id, id);`)
 	return err
 }
 
-// migrateWidgetQueries adds what widget queries (card request()) need: whether
+// migrateWidgetQueries (v6) adds what widget queries (card request()) need: whether
 // a message's card may query its bot, and the bot's webhook.
 func migrateWidgetQueries(ctx context.Context, tx *sql.Tx) error {
 	for _, q := range []string{
@@ -263,7 +264,7 @@ func migrateWidgetQueries(ctx context.Context, tx *sql.Tx) error {
 	return nil
 }
 
-// migrateEncryption adds end-to-end encryption: bots.encrypted (the device
+// migrateEncryption (v7) adds end-to-end encryption: bots.encrypted (the device
 // turned it on; plaintext sends are then refused), messages.ciphertext (the
 // sealed content, which the gateway stores and never reads) and
 // bots.key_wrapped (the bot's key sealed with the device group's group key,
@@ -279,6 +280,15 @@ func migrateEncryption(ctx context.Context, tx *sql.Tx) error {
 		}
 	}
 	return nil
+}
+
+// migrateResync (v8) adds devices.resync: set on a device whose group was
+// merged with another that held queued messages the device has not seen. Its
+// sync cursor is past their ids, so /v1/sync tells it to start again from 0
+// (see ClaimLink).
+func migrateResync(ctx context.Context, tx *sql.Tx) error {
+	_, err := tx.ExecContext(ctx, `ALTER TABLE devices ADD COLUMN resync INTEGER NOT NULL DEFAULT 0`)
+	return err
 }
 
 // Bot ids are botIDLen characters of base62 starting with a letter, so one can
@@ -363,13 +373,16 @@ type Device struct {
 	// AckedUpTo is the device's ack watermark: it has stored every queued item
 	// up to and including this id.
 	AckedUpTo int64 `json:"-"`
+	// Resync: the group was merged with messages this device has not seen;
+	// /v1/sync answers "reset": true until it syncs from cursor 0.
+	Resync bool `json:"-"`
 }
 
-const devCols = `id, owner_id, name, platform, push_token, push_ok, created_at, seen_at, acked_up_to`
+const devCols = `id, owner_id, name, platform, push_token, push_ok, created_at, seen_at, acked_up_to, resync`
 
 func scanDevice(row interface{ Scan(...any) error }) (Device, error) {
 	var d Device
-	err := row.Scan(&d.ID, &d.OwnerID, &d.Name, &d.Platform, &d.PushToken, &d.PushOK, &d.CreatedAt, &d.SeenAt, &d.AckedUpTo)
+	err := row.Scan(&d.ID, &d.OwnerID, &d.Name, &d.Platform, &d.PushToken, &d.PushOK, &d.CreatedAt, &d.SeenAt, &d.AckedUpTo, &d.Resync)
 	if errors.Is(err, sql.ErrNoRows) {
 		return d, ErrNotFound
 	}
@@ -403,6 +416,9 @@ func (s *Store) CreateDevice(ctx context.Context, platform, pushToken, name stri
 	if err != nil {
 		return Device{}, "", err
 	}
+	if err := supersedeToken(ctx, tx, id.String(), platform, pushToken, now); err != nil {
+		return Device{}, "", err
+	}
 	if err := tx.Commit(); err != nil {
 		return Device{}, "", err
 	}
@@ -425,9 +441,41 @@ func (s *Store) ListDevices(ctx context.Context, ownerID string) ([]Device, erro
 	return s.devices(ctx, `SELECT `+devCols+` FROM devices WHERE owner_id = ? ORDER BY created_at, id`, ownerID)
 }
 
-// PushDevices returns the devices of a group that can be pushed to.
+// supersedeToken marks every other device with the same platform and push
+// token as unusable for pushes. A push token names one phone: when an app is
+// reinstalled it registers the same token as a new device, and the old row
+// (which may sit in the group the new one then pairs into) must not get every
+// push a second time. Marked rows are collected by GCDevices once idle.
+func supersedeToken(ctx context.Context, q interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, deviceID, platform, token string, now int64) error {
+	if token == "" {
+		return nil
+	}
+	_, err := q.ExecContext(ctx,
+		`UPDATE devices SET push_ok = 0, updated_at = ? WHERE platform = ? AND push_token = ? AND id <> ? AND push_ok = 1`,
+		now, platform, token, deviceID)
+	return err
+}
+
+// PushDevices returns the devices of a group that can be pushed to, one per
+// push token (the newest device when several share one).
 func (s *Store) PushDevices(ctx context.Context, ownerID string) ([]Device, error) {
-	return s.devices(ctx, `SELECT `+devCols+` FROM devices WHERE owner_id = ? AND push_ok = 1 AND push_token <> '' ORDER BY created_at, id`, ownerID)
+	ds, err := s.devices(ctx, `SELECT `+devCols+` FROM devices WHERE owner_id = ? AND push_ok = 1 AND push_token <> '' ORDER BY created_at, id`, ownerID)
+	if err != nil {
+		return nil, err
+	}
+	last := map[string]int{}
+	for i, d := range ds {
+		last[d.Platform+"\x00"+d.PushToken] = i
+	}
+	out := ds[:0]
+	for i, d := range ds {
+		if last[d.Platform+"\x00"+d.PushToken] == i {
+			out = append(out, d)
+		}
+	}
+	return out, nil
 }
 
 func (s *Store) devices(ctx context.Context, q string, args ...any) ([]Device, error) {
@@ -450,12 +498,28 @@ func (s *Store) devices(ctx context.Context, q string, args ...any) ([]Device, e
 // UpdateDevice stores a new push token (which marks it usable again) and/or a
 // new name; an empty value leaves the field as it is.
 func (s *Store) UpdateDevice(ctx context.Context, deviceID, pushToken, name string) error {
-	_, err := s.db.ExecContext(ctx,
+	now := s.ms()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx,
 		`UPDATE devices SET push_token = CASE WHEN ? <> '' THEN ? ELSE push_token END,
 		   push_ok = CASE WHEN ? <> '' THEN 1 ELSE push_ok END,
 		   name = CASE WHEN ? <> '' THEN ? ELSE name END, updated_at = ? WHERE id = ?`,
-		pushToken, pushToken, pushToken, name, name, s.ms(), deviceID)
-	return err
+		pushToken, pushToken, pushToken, name, name, now, deviceID); err != nil {
+		return err
+	}
+	if pushToken != "" {
+		var platform string
+		if err := tx.QueryRowContext(ctx, `SELECT platform FROM devices WHERE id = ?`, deviceID).Scan(&platform); err == nil {
+			if err := supersedeToken(ctx, tx, deviceID, platform, pushToken, now); err != nil {
+				return err
+			}
+		}
+	}
+	return tx.Commit()
 }
 
 // MarkPushGone records that APNs/FCM said the token no longer exists. Only the
@@ -688,35 +752,51 @@ type BotPatch struct {
 	KeyWrapped   *string
 }
 
-// UpdateBot changes a bot's name, avatar or default level.
+// UpdateBot changes the patched fields of a bot. It writes only those columns
+// in one UPDATE, so two devices of a group patching different fields at the same
+// time cannot overwrite each other (a read-modify-write of every column lost
+// encrypted / key_wrapped that way). A wrapped key without encryption is stale
+// and is cleared by the same statement.
 func (s *Store) UpdateBot(ctx context.Context, ownerID string, botID string, p BotPatch) (Bot, error) {
-	b, err := s.GetBot(ctx, ownerID, botID)
-	if err != nil {
-		return b, err
-	}
+	sets := []string{"updated_at = ?"}
+	args := []any{s.ms()}
 	if p.Name != nil {
-		b.Name = *p.Name
+		sets, args = append(sets, "name = ?"), append(args, *p.Name)
 	}
 	if p.Avatar != nil {
-		b.Avatar = *p.Avatar
+		sets, args = append(sets, "avatar = ?"), append(args, *p.Avatar)
 	}
 	if p.DefaultLevel != nil {
-		b.DefaultLevel = *p.DefaultLevel
+		sets, args = append(sets, "default_level = ?"), append(args, *p.DefaultLevel)
 	}
 	if p.Encrypted != nil {
-		b.Encrypted = *p.Encrypted
+		sets, args = append(sets, "encrypted = ?"), append(args, *p.Encrypted)
 	}
-	if p.KeyWrapped != nil {
-		b.KeyWrapped = *p.KeyWrapped
+	// SQLite evaluates every right-hand side against the old row, so the new
+	// state of encrypted is spelled out.
+	enc := "encrypted"
+	if p.Encrypted != nil {
+		enc = "?"
 	}
-	if !b.Encrypted {
-		b.KeyWrapped = "" // a wrapped key without encryption is stale
+	switch {
+	case p.KeyWrapped != nil:
+		if p.Encrypted != nil {
+			sets, args = append(sets, "key_wrapped = CASE WHEN ? THEN ? ELSE '' END"), append(args, *p.Encrypted, *p.KeyWrapped)
+		} else {
+			sets, args = append(sets, "key_wrapped = CASE WHEN "+enc+" THEN ? ELSE '' END"), append(args, *p.KeyWrapped)
+		}
+	case p.Encrypted != nil && !*p.Encrypted:
+		sets = append(sets, "key_wrapped = ''")
 	}
-	b.UpdatedAt = s.ms()
-	_, err = s.db.ExecContext(ctx,
-		`UPDATE bots SET name = ?, avatar = ?, default_level = ?, encrypted = ?, key_wrapped = ?, updated_at = ? WHERE public_id = ? AND owner_id = ?`,
-		b.Name, b.Avatar, b.DefaultLevel, b.Encrypted, b.KeyWrapped, b.UpdatedAt, botID, ownerID)
-	return b, err
+	args = append(args, botID, ownerID)
+	res, err := s.db.ExecContext(ctx, "UPDATE bots SET "+strings.Join(sets, ", ")+" WHERE public_id = ? AND owner_id = ?", args...)
+	if err != nil {
+		return Bot{}, err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return Bot{}, ErrNotFound
+	}
+	return s.GetBot(ctx, ownerID, botID)
 }
 
 // ResetBotToken replaces a bot's token; the old one stops working at once.

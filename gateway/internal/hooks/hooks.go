@@ -70,6 +70,9 @@ func Convert(kind string, r Request) (url.Values, error) {
 			}
 		}
 	}
+	if strings.ToLower(kind) != "json" { // json is the sender's own mapping: its mistakes stay errors
+		sanitize(out)
+	}
 	if strings.TrimSpace(out.Get("body")) == "" {
 		if t := strings.TrimSpace(out.Get("title")); t != "" {
 			out.Set("body", t)
@@ -78,6 +81,36 @@ func Convert(kind string, r Request) (url.Values, error) {
 		}
 	}
 	return out, nil
+}
+
+// Limits of sendMessage (api.maxGroup, api.maxURL): a hook event that exceeds
+// them would be rejected as a whole, so the optional fields are fitted here.
+const (
+	maxGroup = 64
+	maxURL   = 2048
+)
+
+// sanitize fits the optional group and url to what sendMessage accepts: group
+// is cut to maxGroup bytes on a UTF-8 boundary, and a url that is too long or
+// not an absolute http(s) URL is dropped (the message is still worth sending).
+func sanitize(v url.Values) {
+	if g := v.Get("group"); len(g) > maxGroup {
+		g = g[:maxGroup]
+		for g != "" && !utf8.ValidString(g) {
+			g = g[:len(g)-1]
+		}
+		if g = strings.TrimSpace(g); g == "" {
+			v.Del("group")
+		} else {
+			v.Set("group", g)
+		}
+	}
+	if l := v.Get("url"); l != "" {
+		u, err := url.Parse(l)
+		if err != nil || len(l) > maxURL || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") {
+			v.Del("url")
+		}
+	}
 }
 
 // trunc shortens s to at most n runes, ending in an ellipsis.

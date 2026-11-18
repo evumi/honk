@@ -65,8 +65,9 @@ See `gateway/Dockerfile` for the container. Settings:
 | `HONK_DB` | `./data/honk.db` | SQLite file |
 | `HONK_MESSAGE_TTL` | `168h` | how long a message stays queued |
 | `HONK_ACKED_KEEP` | `24h` | how long a message that every device of the group has acked is kept (counted from its creation) |
-| `HONK_DEVICE_GC` | `2160h` | a device whose push token is gone and that made no request for this long is deleted, with the group's bots and queue if it was the last |
+| `HONK_DEVICE_GC` | `2160h` | a device whose push token is gone and that made no request for this long is deleted, with the group's bots and queue if it was the last; `0` or `off` never deletes |
 | `HONK_SEND_RATE` / `HONK_SEND_BURST` | `5` / `20` | per-bot messages per second / burst |
+| `HONK_TRUSTED_PROXIES` | loopback + private ranges | comma-separated CIDRs of reverse proxies whose `X-Forwarded-For` / `X-Real-IP` are believed for per-IP limits (the right-most address not in the list is the client; IPv6 clients are keyed by /64); `none` trusts no one, so only the TCP peer counts |
 | `HONK_REGISTER_PER_HOUR` | `10` | device registrations per client IP per hour (burst 5) |
 | `HONK_MAX_BOTS_PER_DEVICE` | `100` | bots one device group can own (the name is from before groups); a pairing that would exceed it is refused |
 | `HONK_WEBHOOK_ALLOW_PRIVATE` | `false` | let bots set a `setWebhook` url on loopback, private and link-local addresses (off: refused, so a bot cannot make the gateway call your internal network) |
@@ -330,7 +331,7 @@ Everything except device registration needs `Authorization: Bearer <device_secre
 | `POST /v1/bots/:id/token` | reset the token; the old one stops working |
 | `POST /v1/queries` | `{"message_id","data"}` (1–64 bytes): a card's `request()`; waits up to 15 s for the bot's answer → `{"data"}`. `403` when the message does not allow queries, `429` over 1 a second per device and bot (burst 5), `504` when the bot did not answer |
 | `GET /v1/messages/:id` | one queued item: `message`, `edit` or `delete` |
-| `GET /v1/sync?cursor=&limit=` | items after the cursor → `messages`, `cursor`, `has_more` |
+| `GET /v1/sync?cursor=&limit=` | items after the cursor → `messages`, `cursor`, `has_more`; plus `"reset": true` (only then) after a pairing merged queued messages this device has not seen: drop the cursor and sync again from 0 (the flag clears when the device syncs with `cursor=0`) |
 | `POST /v1/ack` | `{"up_to": <id>}`: everything up to that id is stored on this device (each device of a group has its own watermark, which never goes down) |
 
 An `edit` or `delete` names its message by `target_id` and/or `id`. The message may already be gone from the queue, so the client applies it to its local copy.

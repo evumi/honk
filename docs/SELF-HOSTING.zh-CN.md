@@ -60,7 +60,7 @@ honk.example.com {
       - caddy-data:/data
 ```
 
-（这时 Caddyfile 里写 `reverse_proxy honk:8080`，`honk` 服务去掉 `ports`，`volumes` 里加上 `caddy-data`。）用 nginx 的话，转发到 `127.0.0.1:8080`，并传 `X-Forwarded-For` 或 `X-Real-IP`：网关靠它们得到客户端地址来做注册限流，代理不传的话所有客户端看起来是同一个地址。请求体都很小，超时不用特别设置。
+（这时 Caddyfile 里写 `reverse_proxy honk:8080`，`honk` 服务去掉 `ports`，`volumes` 里加上 `caddy-data`。）用 nginx 的话，转发到 `127.0.0.1:8080`，并传 `X-Forwarded-For` 或 `X-Real-IP`：网关靠它们得到客户端地址来做按 IP 的限流（注册、配对），但只在连接来自 `HONK_TRUSTED_PROXIES` 时才信（默认是回环和私有网段，本机代理或 docker 网络都在内；可以改成你的代理地址，前面没有代理就设成 `none`）。代理不传的话所有客户端看起来是同一个地址；其他来源发来的这些头会被忽略，客户端伪造不了。请求体都很小，超时不用特别设置。
 
 然后在 App 里：设置 → 网关，填 `https://honk.example.com/`，点「测试连接」再保存。App 会在你的网关上注册这台设备（设了注册口令就带上）。切换网关会清掉手机上的 bot 和消息；它们仍留在原来的网关上。
 

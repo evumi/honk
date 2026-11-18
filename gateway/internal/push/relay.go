@@ -29,6 +29,21 @@ type MetaStore interface {
 	SetMeta(ctx context.Context, key, value string) error
 }
 
+// MaxRelayRequest is the largest body the relay accepts for POST
+// /v1/relay/push. The worst request this client builds (every text field at
+// its limit, every byte a control character that JSON writes as six) is about
+// 19 KB; the cap leaves room.
+const MaxRelayRequest = 32 << 10
+
+// RelayServerTimeout is how long a relay waits for APNs/FCM; RelayClientTimeout
+// is how long this client waits for the relay. The client must outlast the
+// server, or it gives up on a push the relay then delivers and a retry sends
+// it twice.
+const (
+	RelayServerTimeout = 8 * time.Second
+	RelayClientTimeout = 12 * time.Second
+)
+
 // reregisterEvery bounds how often a rejected relay key is replaced.
 const reregisterEvery = time.Hour
 
@@ -63,7 +78,7 @@ func NewRelay(baseURL string, meta MetaStore, version string, log *slog.Logger) 
 		url:     strings.TrimRight(baseURL, "/"),
 		meta:    meta,
 		version: version,
-		client:  &http.Client{Timeout: 8 * time.Second},
+		client:  &http.Client{Timeout: RelayClientTimeout},
 		log:     log,
 		Bare:    true,
 	}
@@ -198,10 +213,13 @@ func (e *relayStatusError) Unwrap() error { return e.err }
 
 // Push implements Pusher.
 func (r *Relay) Push(ctx context.Context, n Notification) error {
-	body, err := json.Marshal(r.request(n))
-	if err != nil {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false) // "<>&" would cost six bytes each and could push a body past the relay's cap
+	if err := enc.Encode(r.request(n)); err != nil {
 		return err
 	}
+	body := buf.Bytes()
 	for attempt := 0; ; attempt++ {
 		_, key, err := r.credentials(ctx)
 		if err != nil {
@@ -251,10 +269,10 @@ func (r *Relay) request(n Notification) relayRequest {
 		q.TTL = int(n.pushTTL() / time.Second)
 	}
 	if !r.Bare && !n.Silent() {
-		q.BotName = n.BotName
+		q.BotName = truncate(n.BotName, 256)
 		q.Title = truncate(n.Title, 200)
 		q.Body = truncate(n.Body, maxBannerBody)
-		q.Group = n.Group
+		q.Group = truncate(n.Group, 256)
 	}
 	return q
 }
