@@ -1,5 +1,5 @@
 import type { ListRef } from "nsh";
-import { Clipboard, cleanup, computed, List, openUrl, signal, Text, View, effect, safeArea } from "nsh";
+import { Clipboard, cleanup, computed, Image, List, openUrl, signal, Text, View, effect, safeArea } from "nsh";
 import { AlertDialog, NavPage } from "nsh/base";
 import { Avatar, Badge, EdgeBlur, glass, Icon, TopBar } from "../components";
 import { clock, dayLabel, sameDay } from "../format";
@@ -8,6 +8,7 @@ import { chatOf, nav, reload, version } from "../store";
 import { palette, type Palette } from "../theme";
 import { tr } from "../i18n";
 import { reuse } from "../stable";
+import { MessageBody } from "../MessageBody";
 import { Widget } from "../widget/Widget";
 import { createDissolve, Dissolve } from "../fx/Dissolve";
 
@@ -191,6 +192,19 @@ function DayChip(props: { ms: number }) {
   );
 }
 
+/** A message's image across the top of its bubble, at the image's own proportions (within reason). */
+function Picture(props: { src: string }) {
+  const ratio = signal(4 / 3);
+  return (
+    <Image
+      src={props.src}
+      accessibilityLabel={tr("图片")}
+      onLoad={(e) => ratio.set(Math.min(2.5, Math.max(0.6, e.size.width / Math.max(1, e.size.height))))}
+      style={{ width: "100%", aspectRatio: ratio(), objectFit: "cover" } as never}
+    />
+  );
+}
+
 function Bubble(props: { message: Message; p: Palette }) {
   const m = () => props.message;
   const dissolving = signal(false);
@@ -243,11 +257,14 @@ function Bubble(props: { message: Message; p: Palette }) {
           </View>
         )}
       </Each>
+      <If when={m().image && !m().html}>
+        <Picture src={m().image} />
+      </If>
       <View style={{ paddingTop: 10, paddingBottom: 8, paddingLeft: 14, paddingRight: 14, gap: 2 }}>
         <If when={m().title && !m().html}>
           <Text style={{ fontSize: 16, fontWeight: "600", color: props.p.text }}>{m().title}</Text>
         </If>
-        <Text style={{ fontSize: 16, lineHeight: 22, color: props.p.text }}>{m().body}</Text>
+        <MessageBody body={m().body} markdown={m().parseMode === "Markdown"} p={props.p} />
         <Text style={{ alignSelf: "flex-end", fontSize: 12, color: props.p.hint }}>{clock(m().date)}</Text>
       </View>
     </View>

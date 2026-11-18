@@ -33,6 +33,7 @@ export function lang(): Lang {
 }
 
 const EN: Record<string, string> = {
+  "图片": "Image",
   "上传图片": "Upload image",
   "无法使用这张图片": "Can't use this image",
   "图片太大，请换一张小一点的": "The image is too large; pick a smaller one",
