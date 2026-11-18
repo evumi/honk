@@ -54,6 +54,13 @@ type Notification struct {
 	Level     string // passive | active | timeSensitive
 	// CollapseID is the sender's id for replaceable messages, unique per bot.
 	CollapseID string
+	// CollapseKey, when set, is the collapse key to use as is (a relayed push
+	// carries it already hashed, so the relay never sees the sender's id).
+	CollapseKey string
+	// Bare asks for a push without the bot name, title and body: APNs shows a
+	// generic banner until the extension fetches the message, FCM carries only
+	// ids. A relayed push is bare when it arrived without them.
+	Bare bool
 }
 
 // Silent reports whether the push should not show anything by itself.
@@ -117,6 +124,24 @@ func collapseKey(botID, id string) string {
 	}
 	h := sha256.Sum256([]byte(id))
 	return "b" + botID + ":" + hex.EncodeToString(h[:16])
+}
+
+// CollapseKeyFor is the key a gateway sends to a relay: always hashed, so the
+// relay learns nothing about the sender's id.
+func CollapseKeyFor(botID, id string) string {
+	if id == "" {
+		return ""
+	}
+	h := sha256.Sum256([]byte(id))
+	return "b" + botID + ":" + hex.EncodeToString(h[:16])
+}
+
+// key is the collapse key to give APNs or FCM.
+func (n Notification) key() string {
+	if n.CollapseKey != "" {
+		return n.CollapseKey
+	}
+	return collapseKey(n.BotID, n.CollapseID)
 }
 
 // retryableStatus: the service is overloaded or briefly down, or asks for a

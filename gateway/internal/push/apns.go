@@ -15,6 +15,8 @@ import (
 type APNs struct {
 	client *apns2.Client
 	topic  string
+	// Bare sends no bot name, title or body (HONK_PUSH_CONTENT=none).
+	Bare bool
 }
 
 // NewAPNs loads the .p8 key and connects to the production or sandbox gateway.
@@ -40,16 +42,23 @@ func apnsPayload(n Notification) ([]byte, error) {
 	if n.TargetID > 0 {
 		custom["target_id"] = n.TargetID
 	}
-	if n.CollapseID != "" {
+	if n.CollapseID != "" && !n.Bare {
 		custom["id"] = n.CollapseID
 	}
 	if n.Silent() {
 		custom["aps"] = map[string]any{"content-available": 1}
 		return json.Marshal(custom)
 	}
-	alert := map[string]any{"title": n.BotName, "body": truncate(n.Body, maxBannerBody)}
-	if n.Title != "" {
-		alert["subtitle"] = truncate(n.Title, 200)
+	var alert map[string]any
+	if n.Bare {
+		// No content: the extension replaces this with the fetched message,
+		// and shows the localised generic text if it cannot.
+		alert = map[string]any{"loc-key": "New notification"}
+	} else {
+		alert = map[string]any{"title": n.BotName, "body": truncate(n.Body, maxBannerBody)}
+		if n.Title != "" {
+			alert["subtitle"] = truncate(n.Title, 200)
+		}
 	}
 	aps := map[string]any{
 		"alert":           alert,
@@ -71,7 +80,7 @@ func apnsPayload(n Notification) ([]byte, error) {
 }
 
 func threadID(n Notification) string {
-	if n.Group != "" {
+	if n.Group != "" && !n.Bare {
 		return "b" + n.BotID + ":" + n.Group
 	}
 	return "b" + n.BotID
@@ -79,6 +88,7 @@ func threadID(n Notification) string {
 
 // Push implements Pusher.
 func (a *APNs) Push(ctx context.Context, n Notification) error {
+	n.Bare = n.Bare || a.Bare
 	payload, err := apnsPayload(n)
 	if err != nil {
 		return err
@@ -90,7 +100,7 @@ func (a *APNs) Push(ctx context.Context, n Notification) error {
 		Expiration:  time.Now().Add(24 * time.Hour),
 		Priority:    apns2.PriorityHigh,
 		PushType:    apns2.PushTypeAlert,
-		CollapseID:  collapseKey(n.BotID, n.CollapseID),
+		CollapseID:  n.key(),
 	}
 	if n.Silent() {
 		req.Priority = apns2.PriorityLow

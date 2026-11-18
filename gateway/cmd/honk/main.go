@@ -51,24 +51,53 @@ func run(log *slog.Logger) error {
 	}
 	defer st.Close()
 
-	router := push.Router{Log: log}
+	// direct holds only the pushers with this gateway's own credentials; the
+	// relay endpoints send through it and never through a relay.
+	direct := push.Router{Log: log}
 	if cfg.APNs.KeyFile != "" {
 		a, err := push.NewAPNs(cfg.APNs.KeyFile, cfg.APNs.KeyID, cfg.APNs.TeamID, cfg.APNs.Topic, cfg.APNs.Sandbox)
 		if err != nil {
 			return err
 		}
-		router.APNs = a
-	} else {
-		log.Warn("APNs not configured: iOS devices get no pushes (set HONK_APNS_KEY_FILE)")
+		a.Bare = cfg.BareFor(config.RouteDirect)
+		direct.APNs = a
 	}
 	if cfg.FCM.CredentialsFile != "" {
 		f, err := push.NewFCM(ctx, cfg.FCM.CredentialsFile)
 		if err != nil {
 			return err
 		}
-		router.FCM = f
-	} else {
-		log.Warn("FCM not configured: Android devices get no pushes (set HONK_FCM_CREDENTIALS_FILE)")
+		f.Bare = cfg.BareFor(config.RouteDirect)
+		direct.FCM = f
+	}
+	router := direct
+	var relay *push.Relay
+	if cfg.PushRoute("ios") == config.RouteRelay || cfg.PushRoute("android") == config.RouteRelay {
+		relay = push.NewRelay(cfg.RelayURL, st, version, log)
+		relay.Bare = cfg.BareFor(config.RouteRelay)
+	}
+	for _, p := range []struct {
+		name, flag string
+		slot       *push.Pusher
+	}{{"ios", "HONK_APNS_KEY_FILE", &router.APNs}, {"android", "HONK_FCM_CREDENTIALS_FILE", &router.FCM}} {
+		switch cfg.PushRoute(p.name) {
+		case config.RouteRelay:
+			*p.slot = relay
+			text := "does"
+			if relay.Bare {
+				text = "does not"
+			}
+			log.Warn("no push credentials for "+p.name+": pushes go through the relay "+relay.URL()+
+				" (push token, message id and bot id pass through it; banner text "+text+
+				"); set "+p.flag+" to push directly or HONK_RELAY_URL=off to turn this off", "platform", p.name)
+		case config.RouteOff:
+			log.Warn("no push for "+p.name+": devices get messages only when the app is opened (set "+p.flag+
+				", or unset HONK_RELAY_URL=off)", "platform", p.name)
+		}
+	}
+	if cfg.RelayServe {
+		log.Info("serving as a push relay", "ios", direct.APNs != nil, "android", direct.FCM != nil,
+			"rate", cfg.RelayRate, "burst", cfg.RelayBurst, "token_per_minute", cfg.RelayTokenPerMinute)
 	}
 
 	srv := api.New(st, router, log, api.Options{
@@ -76,6 +105,9 @@ func run(log *slog.Logger) error {
 		RegisterPerHour: cfg.RegisterPerHour, MaxBotsPerDevice: cfg.MaxBotsPerDevice,
 		PushQueue: cfg.PushQueue, PushWorkers: cfg.PushWorkers,
 		RegisterKey: cfg.RegisterKey, AccessLog: level <= slog.LevelDebug,
+		PushIOS: cfg.PushRoute("ios"), PushAndroid: cfg.PushRoute("android"),
+		RelayServe: cfg.RelayServe, RelayRate: cfg.RelayRate, RelayBurst: cfg.RelayBurst, RelayTokenPerMinute: cfg.RelayTokenPerMinute,
+		RelayAPNs: direct.APNs, RelayFCM: direct.FCM,
 	})
 	httpSrv := &http.Server{
 		Addr:              cfg.Addr,

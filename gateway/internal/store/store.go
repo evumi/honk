@@ -68,6 +68,7 @@ func (s *Store) migrate(ctx context.Context) error {
 	steps := []func(context.Context, *sql.Tx) error{
 		func(ctx context.Context, tx *sql.Tx) error { _, err := tx.ExecContext(ctx, schemaV1); return err },
 		migrateV2,
+		migrateV3,
 	}
 	for ; v < len(steps); v++ {
 		if err := s.step(ctx, v+1, steps[v]); err != nil {
@@ -128,6 +129,25 @@ func migrateV2(ctx context.Context, tx *sql.Tx) error {
 		}
 	}
 	_, err = tx.ExecContext(ctx, `CREATE UNIQUE INDEX bots_public_id ON bots(public_id)`)
+	return err
+}
+
+// migrateV3 adds the push relay's tables: relays (the self-hosted gateways this
+// gateway relays for) and meta (small key/value settings of this gateway, such
+// as the credentials it got from a relay).
+func migrateV3(ctx context.Context, tx *sql.Tx) error {
+	_, err := tx.ExecContext(ctx, `
+CREATE TABLE relays (
+  id           TEXT PRIMARY KEY,
+  key_hash     BLOB NOT NULL UNIQUE,          -- sha256 of the relay key
+  created_at   INTEGER NOT NULL,
+  last_used_at INTEGER NOT NULL DEFAULT 0,
+  blocked      INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE meta (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);`)
 	return err
 }
 

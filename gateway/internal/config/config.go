@@ -4,6 +4,7 @@ package config
 import (
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"strconv"
 	"time"
@@ -29,8 +30,50 @@ type Config struct {
 	PushQueue   int // HONK_PUSH_QUEUE: pushes that may wait, default 1024
 	PushWorkers int // HONK_PUSH_WORKERS: concurrent pushes, default 16
 
+	RelayURL            string  // HONK_RELAY_URL: relay for a platform without direct credentials; "off" disables it
+	RelayServe          bool    // HONK_RELAY_SERVE: act as a push relay for other gateways
+	PushContent         string  // HONK_PUSH_CONTENT: full or none; empty = full for direct pushes, none for the relay
+	RelayRate           float64 // HONK_RELAY_RATE: pushes per second per relayed gateway, default 10
+	RelayBurst          int     // HONK_RELAY_BURST, default 100
+	RelayTokenPerMinute int     // HONK_RELAY_TOKEN_PER_MINUTE: pushes per push token, default 60
+
 	APNs APNs
 	FCM  FCM
+}
+
+// Push routes of a platform, as /v1/info reports them.
+const (
+	RouteDirect = "direct"
+	RouteRelay  = "relay"
+	RouteOff    = "off"
+)
+
+// PushRoute says how pushes to a platform ("ios" or "android") leave this
+// gateway: direct with its own credentials, through the relay, or not at all.
+// A gateway that serves a relay never uses one, so two relays cannot loop.
+func (c Config) PushRoute(platform string) string {
+	direct := c.APNs.KeyFile != ""
+	if platform == "android" {
+		direct = c.FCM.CredentialsFile != ""
+	}
+	switch {
+	case direct:
+		return RouteDirect
+	case c.RelayServe || c.RelayURL == "off":
+		return RouteOff
+	}
+	return RouteRelay
+}
+
+// BareFor reports whether pushes on a route leave out the banner text.
+func (c Config) BareFor(route string) bool {
+	switch c.PushContent {
+	case "full":
+		return false
+	case "none":
+		return true
+	}
+	return route == RouteRelay
 }
 
 // APNs is token-based (.p8) authentication for Apple Push Notification service.
@@ -49,21 +92,29 @@ type FCM struct {
 	CredentialsFile string // HONK_FCM_CREDENTIALS_FILE: service account JSON
 }
 
+// officialRelayURL is the relay run by the Honk project.
+const officialRelayURL = "https://honk.bunship.site/"
+
 // Load reads the configuration from the environment.
 func Load() (Config, error) {
 	c := Config{
-		Addr:             env("HONK_ADDR", ":8080"),
-		DBPath:           env("HONK_DB", "./data/honk.db"),
-		SendRate:         5,
-		SendBurst:        20,
-		RegisterPerHour:  10,
-		MaxBotsPerDevice: 100,
-		MetricsAddr:      os.Getenv("HONK_METRICS_ADDR"),
-		RegisterKey:      os.Getenv("HONK_REGISTER_KEY"),
-		LogFormat:        env("HONK_LOG_FORMAT", "text"),
-		LogLevel:         env("HONK_LOG_LEVEL", "info"),
-		PushQueue:        1024,
-		PushWorkers:      16,
+		Addr:                env("HONK_ADDR", ":8080"),
+		DBPath:              env("HONK_DB", "./data/honk.db"),
+		SendRate:            5,
+		SendBurst:           20,
+		RegisterPerHour:     10,
+		MaxBotsPerDevice:    100,
+		MetricsAddr:         os.Getenv("HONK_METRICS_ADDR"),
+		RegisterKey:         os.Getenv("HONK_REGISTER_KEY"),
+		LogFormat:           env("HONK_LOG_FORMAT", "text"),
+		LogLevel:            env("HONK_LOG_LEVEL", "info"),
+		PushQueue:           1024,
+		PushWorkers:         16,
+		RelayURL:            env("HONK_RELAY_URL", officialRelayURL),
+		PushContent:         os.Getenv("HONK_PUSH_CONTENT"),
+		RelayRate:           10,
+		RelayBurst:          100,
+		RelayTokenPerMinute: 60,
 		APNs: APNs{
 			KeyFile: os.Getenv("HONK_APNS_KEY_FILE"),
 			KeyID:   os.Getenv("HONK_APNS_KEY_ID"),
@@ -114,6 +165,35 @@ func Load() (Config, error) {
 			return c, fmt.Errorf("HONK_APNS_SANDBOX: %w", err)
 		}
 	}
+	if v := os.Getenv("HONK_RELAY_SERVE"); v != "" {
+		if c.RelayServe, err = strconv.ParseBool(v); err != nil {
+			return c, fmt.Errorf("HONK_RELAY_SERVE: %w", err)
+		}
+	}
+	if v := os.Getenv("HONK_RELAY_RATE"); v != "" {
+		if c.RelayRate, err = strconv.ParseFloat(v, 64); err != nil || c.RelayRate <= 0 {
+			return c, fmt.Errorf("HONK_RELAY_RATE: want a positive number, got %q", v)
+		}
+	}
+	if v := os.Getenv("HONK_RELAY_BURST"); v != "" {
+		if c.RelayBurst, err = strconv.Atoi(v); err != nil || c.RelayBurst <= 0 {
+			return c, fmt.Errorf("HONK_RELAY_BURST: want a positive integer, got %q", v)
+		}
+	}
+	if v := os.Getenv("HONK_RELAY_TOKEN_PER_MINUTE"); v != "" {
+		if c.RelayTokenPerMinute, err = strconv.Atoi(v); err != nil || c.RelayTokenPerMinute <= 0 {
+			return c, fmt.Errorf("HONK_RELAY_TOKEN_PER_MINUTE: want a positive integer, got %q", v)
+		}
+	}
+	if c.PushContent != "" && c.PushContent != "full" && c.PushContent != "none" {
+		return c, fmt.Errorf("HONK_PUSH_CONTENT: want full or none, got %q", c.PushContent)
+	}
+	if c.RelayURL != "off" {
+		u, err := url.Parse(c.RelayURL)
+		if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
+			return c, fmt.Errorf("HONK_RELAY_URL: want an http(s) URL or off, got %q", c.RelayURL)
+		}
+	}
 	if c.LogFormat != "text" && c.LogFormat != "json" {
 		return c, fmt.Errorf("HONK_LOG_FORMAT: want text or json, got %q", c.LogFormat)
 	}
@@ -122,6 +202,9 @@ func Load() (Config, error) {
 	}
 	if c.APNs.KeyFile != "" && (c.APNs.KeyID == "" || c.APNs.TeamID == "" || c.APNs.Topic == "") {
 		return c, fmt.Errorf("HONK_APNS_KEY_FILE is set: HONK_APNS_KEY_ID, HONK_APNS_TEAM_ID and HONK_APNS_TOPIC are required too")
+	}
+	if c.RelayServe && c.APNs.KeyFile == "" && c.FCM.CredentialsFile == "" {
+		return c, fmt.Errorf("HONK_RELAY_SERVE needs push credentials for at least one platform (HONK_APNS_KEY_FILE or HONK_FCM_CREDENTIALS_FILE): a relay with nothing to send through is useless")
 	}
 	return c, nil
 }

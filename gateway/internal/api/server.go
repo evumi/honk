@@ -45,6 +45,28 @@ type Options struct {
 	RegisterKey string
 	// AccessLog logs every request at debug level.
 	AccessLog bool
+
+	// PushIOS and PushAndroid say how pushes to each platform leave: "direct"
+	// (default), "relay" or "off". /v1/info reports them, the metrics label
+	// pushes with them, and nothing is queued for a platform that is "off".
+	PushIOS     string
+	PushAndroid string
+
+	// RelayServe turns on /v1/relay/*: this gateway pushes for others. It
+	// sends only through RelayAPNs and RelayFCM, the direct pushers (nil: no
+	// credentials, answered 503), never through the Router, which may lead to
+	// another relay.
+	RelayServe bool
+	RelayAPNs  push.Pusher
+	RelayFCM   push.Pusher
+	// RelayRate and RelayBurst limit pushes per relayed gateway (defaults 10
+	// per second, 100); RelayTokenPerMinute limits one push token (60).
+	RelayRate           float64
+	RelayBurst          int
+	RelayTokenPerMinute int
+	// RelayGoneLimit is how many dead tokens in an hour, when they are also
+	// over half of that relay's pushes, slow it down. Default 100.
+	RelayGoneLimit int
 }
 
 // limiter is a token bucket with the time it was last used, so idle ones can be dropped.
@@ -64,6 +86,7 @@ type Server struct {
 	limiters   map[string]*limiter // per bot: sends
 	registrars map[string]*limiter // per client IP: device registrations
 
+	rs relayState
 	pq pushQueue
 	m  serverMetrics
 }
@@ -88,7 +111,20 @@ func New(st *store.Store, p push.Pusher, log *slog.Logger, opts Options) *Server
 	if opts.PushBackoff == nil {
 		opts.PushBackoff = []time.Duration{2 * time.Second, 10 * time.Second, time.Minute}
 	}
+	if opts.RelayRate <= 0 {
+		opts.RelayRate = 10
+	}
+	if opts.RelayBurst <= 0 {
+		opts.RelayBurst = 100
+	}
+	if opts.RelayTokenPerMinute <= 0 {
+		opts.RelayTokenPerMinute = 60
+	}
+	if opts.RelayGoneLimit <= 0 {
+		opts.RelayGoneLimit = 100
+	}
 	s := &Server{store: st, pusher: p, log: log, opts: opts, limiters: map[string]*limiter{}, registrars: map[string]*limiter{}}
+	s.rs = relayState{relays: map[string]*relayEntry{}, tokens: map[string]*limiter{}, byIP: map[string]*limiter{}}
 	s.initMetrics()
 	s.startPushQueue()
 	return s
@@ -115,9 +151,21 @@ func (s *Server) Handler() http.Handler {
 			if s.opts.RegisterKey != "" {
 				info["register_key_required"] = true
 			}
+			// features: what this gateway can do beyond the base API, for the
+			// app to look at ("relay": it pushes for other gateways).
+			features := []string{}
+			if s.opts.RelayServe {
+				features = append(features, "relay")
+			}
+			info["features"] = features
+			info["push"] = map[string]string{"ios": s.route("ios"), "android": s.route("android")}
 			ok(w, info)
 		})
 		r.Post("/devices", s.registerDevice)
+		if s.opts.RelayServe {
+			r.Post("/relay/gateways", s.registerRelay)
+			r.Post("/relay/push", s.relayPush)
+		}
 		r.Group(func(r chi.Router) {
 			r.Use(s.deviceAuth)
 			r.Get("/devices/me", s.getDevice)
@@ -206,12 +254,31 @@ func (s *Server) allow(botID string) bool {
 	return l.Allow()
 }
 
-// allowRegistration takes a registration from the client IP's bucket.
-func (s *Server) allowRegistration(r *http.Request) bool {
-	ip := r.RemoteAddr // middleware.RealIP has put the proxy's client address here
+// route is how pushes to the platform leave: direct, relay or off.
+func (s *Server) route(platform string) string {
+	r := s.opts.PushIOS
+	if platform == "android" {
+		r = s.opts.PushAndroid
+	}
+	if r == "" {
+		return "direct"
+	}
+	return r
+}
+
+// clientIP is the client address; middleware.RealIP has put the proxy's
+// client address in RemoteAddr.
+func clientIP(r *http.Request) string {
+	ip := r.RemoteAddr
 	if host, _, err := net.SplitHostPort(ip); err == nil {
 		ip = host
 	}
+	return ip
+}
+
+// allowRegistration takes a registration from the client IP's bucket.
+func (s *Server) allowRegistration(r *http.Request) bool {
+	ip := clientIP(r)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	l, found := s.registrars[ip]
@@ -249,7 +316,7 @@ func (s *Server) PruneLimiters(idle time.Duration) int {
 			n++
 		}
 	}
-	return n
+	return n + s.pruneRelay(cutoff)
 }
 
 func bearer(r *http.Request) string {

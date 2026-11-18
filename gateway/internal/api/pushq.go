@@ -120,6 +120,10 @@ func (s *Server) notify(d store.Device, n push.Notification) {
 	if strings.HasPrefix(d.PushToken, SimulatorTokenPrefix) {
 		return
 	}
+	if s.route(d.Platform) == "off" {
+		s.m.pushDropped.Inc("no_route")
+		return
+	}
 	n.Platform, n.Token = d.Platform, d.PushToken
 	s.enqueue(pushJob{dev: d, n: n})
 }
@@ -128,6 +132,7 @@ func (s *Server) runPush(j pushJob) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	d, n := j.dev, j.n
+	route := s.route(n.Platform)
 	if j.attempt > 0 {
 		want, err := s.store.PushStillWanted(ctx, d.ID, d.PushToken, n.MessageID)
 		if err == nil && !want {
@@ -138,9 +143,9 @@ func (s *Server) runPush(j pushJob) {
 	err := s.pusher.Push(ctx, n)
 	switch {
 	case err == nil:
-		s.m.pushes.Inc(n.Platform, "direct", "ok")
+		s.m.pushes.Inc(n.Platform, route, "ok")
 	case errors.Is(err, push.ErrTokenGone):
-		s.m.pushes.Inc(n.Platform, "direct", "token_gone")
+		s.m.pushes.Inc(n.Platform, route, "token_gone")
 		s.log.Info("push token gone", "device", d.ID, "platform", d.Platform)
 		if err := s.store.MarkPushGone(ctx, d.ID, d.PushToken); err != nil {
 			s.log.Error("mark push gone", "err", err)
@@ -148,11 +153,11 @@ func (s *Server) runPush(j pushJob) {
 	default:
 		after, retry := push.Retryable(err)
 		if !retry || j.attempt >= len(s.opts.PushBackoff) {
-			s.m.pushes.Inc(n.Platform, "direct", "failed")
+			s.m.pushes.Inc(n.Platform, route, "failed")
 			s.log.Warn("push failed", "device", d.ID, "platform", d.Platform, "kind", n.Kind, "attempts", j.attempt+1, "err", err)
 			return
 		}
-		s.m.pushes.Inc(n.Platform, "direct", "retry")
+		s.m.pushes.Inc(n.Platform, route, "retry")
 		delay := s.opts.PushBackoff[j.attempt]
 		if after > delay {
 			delay = min(after, maxRetryAfter)

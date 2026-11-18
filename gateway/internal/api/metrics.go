@@ -19,6 +19,8 @@ type serverMetrics struct {
 	pushRetries *metrics.Counter
 	pushDropped *metrics.Counter // by reason
 	httpReqs    *metrics.Counter // by method class, status class
+	relayReqs   *metrics.Counter // relay requests served, by result
+	relayPushes *metrics.Counter // pushes sent for other gateways, by platform
 }
 
 func (s *Server) initMetrics() {
@@ -26,9 +28,11 @@ func (s *Server) initMetrics() {
 	s.m = serverMetrics{
 		reg:         r,
 		messages:    r.Counter("honk_messages_total", "Queued messages by kind.", "kind"),
-		pushes:      r.Counter("honk_pushes_total", "Push attempts by platform (direct) and result.", "platform", "route", "result"),
+		pushes:      r.Counter("honk_pushes_total", "Push attempts by platform, route (direct or relay) and result.", "platform", "route", "result"),
 		pushRetries: r.Counter("honk_push_retries_total", "Push retries started."),
 		pushDropped: r.Counter("honk_push_dropped_total", "Pushes given up before sending, by reason.", "reason"),
+		relayReqs:   r.Counter("honk_relay_requests_total", "Relay requests served by result.", "result"),
+		relayPushes: r.Counter("honk_relay_pushes_total", "Pushes this gateway sent for other gateways, by platform.", "platform"),
 		httpReqs:    r.Counter("honk_http_requests_total", "HTTP requests by status class.", "class"),
 	}
 	count := func(pick func(d, b int) int) func() float64 {

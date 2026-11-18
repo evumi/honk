@@ -244,3 +244,40 @@ func TestValidBotID(t *testing.T) {
 		}
 	}
 }
+
+func TestRelaysAndMeta(t *testing.T) {
+	s, _ := open(t)
+	ctx := context.Background()
+	if v, err := s.GetMeta(ctx, "k"); err != nil || v != "" {
+		t.Fatalf("empty meta = %q, %v", v, err)
+	}
+	s.SetMeta(ctx, "k", "a")
+	s.SetMeta(ctx, "k", "b")
+	if v, _ := s.GetMeta(ctx, "k"); v != "b" {
+		t.Errorf("meta = %q", v)
+	}
+	s.SetMeta(ctx, "k", "")
+	if v, _ := s.GetMeta(ctx, "k"); v != "" {
+		t.Errorf("meta after delete = %q", v)
+	}
+
+	r, key, err := s.CreateRelay(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.RelayByKey(ctx, key); err != nil || got.ID != r.ID || got.Blocked {
+		t.Fatalf("RelayByKey = %+v, %v", got, err)
+	}
+	if _, err := s.RelayByKey(ctx, "nope"); err != ErrNotFound {
+		t.Errorf("wrong key: %v", err)
+	}
+	if err := s.BlockRelay(ctx, r.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.RelayByKey(ctx, key); !got.Blocked {
+		t.Error("relay not blocked")
+	}
+	if err := s.BlockRelay(ctx, "missing", true); err != ErrNotFound {
+		t.Errorf("block missing: %v", err)
+	}
+}

@@ -23,6 +23,8 @@ const fcmScope = "https://www.googleapis.com/auth/firebase.messaging"
 type FCM struct {
 	client   *http.Client
 	endpoint string
+	// Bare sends no bot name, title, body or group (HONK_PUSH_CONTENT=none).
+	Bare bool
 }
 
 // NewFCM reads a service account JSON file.
@@ -49,22 +51,26 @@ func NewFCM(ctx context.Context, credentialsFile string) (*FCM, error) {
 
 func fcmMessage(n Notification) map[string]any {
 	data := map[string]string{
-		"kind":     n.Kind,
-		"msg_id":   strconv.FormatInt(n.MessageID, 10),
-		"bot_id":   n.BotID,
-		"bot_name": n.BotName,
+		"kind":   n.Kind,
+		"msg_id": strconv.FormatInt(n.MessageID, 10),
+		"bot_id": n.BotID,
+	}
+	if !n.Bare {
+		data["bot_name"] = n.BotName
 	}
 	if n.TargetID > 0 {
 		data["target_id"] = strconv.FormatInt(n.TargetID, 10)
 	}
-	if n.CollapseID != "" {
+	if n.CollapseID != "" && !n.Bare {
 		data["id"] = n.CollapseID
 	}
 	priority := "HIGH"
 	if !n.Silent() {
-		data["title"] = truncate(n.Title, 200)
-		data["body"] = truncate(n.Body, maxBannerBody)
-		data["group"] = n.Group
+		if !n.Bare {
+			data["title"] = truncate(n.Title, 200)
+			data["body"] = truncate(n.Body, maxBannerBody)
+			data["group"] = n.Group
+		}
 		data["level"] = n.Level
 		if n.Level == "passive" {
 			priority = "NORMAL"
@@ -73,7 +79,7 @@ func fcmMessage(n Notification) map[string]any {
 		priority = "NORMAL"
 	}
 	android := map[string]any{"priority": priority, "ttl": "86400s"}
-	if k := collapseKey(n.BotID, n.CollapseID); k != "" && !n.Silent() {
+	if k := n.key(); k != "" && !n.Silent() {
 		android["collapse_key"] = k
 	}
 	return map[string]any{"message": map[string]any{"token": n.Token, "data": data, "android": android}}
@@ -81,6 +87,7 @@ func fcmMessage(n Notification) map[string]any {
 
 // Push implements Pusher.
 func (f *FCM) Push(ctx context.Context, n Notification) error {
+	n.Bare = n.Bare || f.Bare
 	body, err := json.Marshal(fcmMessage(n))
 	if err != nil {
 		return err

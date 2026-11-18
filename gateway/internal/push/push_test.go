@@ -93,3 +93,70 @@ func TestFCMErrorRetryable(t *testing.T) {
 		}
 	}
 }
+
+func TestBarePayloadsCarryNoContent(t *testing.T) {
+	n := Notification{Kind: "message", MessageID: 7, BotID: "Kx3", BotName: "部署机器人", Title: "秘密标题", Body: "秘密正文", Group: "prod", Level: "active", CollapseID: "dep-1", Bare: true}
+	raw, err := apnsPayload(n)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range []string{"部署机器人", "秘密标题", "秘密正文", "prod", "dep-1"} {
+		if strings.Contains(string(raw), s) {
+			t.Errorf("APNs payload contains %q: %s", s, raw)
+		}
+	}
+	var p struct {
+		APS struct {
+			Alert   map[string]string
+			Mutable int `json:"mutable-content"`
+		} `json:"aps"`
+		MsgID int64 `json:"msg_id"`
+	}
+	if err := json.Unmarshal(raw, &p); err != nil {
+		t.Fatal(err)
+	}
+	if p.APS.Alert["loc-key"] != "New notification" || len(p.APS.Alert) != 1 || p.APS.Mutable != 1 || p.MsgID != 7 {
+		t.Errorf("bare payload = %s", raw)
+	}
+
+	msg := fcmMessage(n)["message"].(map[string]any)
+	data := msg["data"].(map[string]string)
+	for _, k := range []string{"bot_name", "title", "body", "group", "id"} {
+		if _, has := data[k]; has {
+			t.Errorf("bare FCM data has %s", k)
+		}
+	}
+	if data["msg_id"] != "7" || data["bot_id"] != "Kx3" {
+		t.Errorf("FCM data = %v", data)
+	}
+}
+
+func TestPrecomputedCollapseKey(t *testing.T) {
+	k := CollapseKeyFor("Kx3", "dep-1")
+	if len(k) != 5+32 || !strings.HasPrefix(k, "bKx3:") {
+		t.Errorf("key = %q", k)
+	}
+	android := fcmMessage(Notification{Kind: "message", BotID: "Kx3", CollapseKey: k, Bare: true})["message"].(map[string]any)["android"].(map[string]any)
+	if android["collapse_key"] != k {
+		t.Errorf("android = %v", android)
+	}
+}
+
+func TestBarePayloadsStayUnder4KB(t *testing.T) {
+	// The longest values the bot API accepts: name and group 64 characters,
+	// title 256, body 4096, id 128 bytes.
+	long := strings.Repeat("长", 4096)
+	n := Notification{Kind: "message", BotID: "Kx3abcde", BotName: strings.Repeat("长", 64), Title: long[:256*3], Body: long,
+		Group: strings.Repeat("长", 64), CollapseID: strings.Repeat("i", 128), Level: "timeSensitive"}
+	for _, bare := range []bool{false, true} {
+		n.Bare = bare
+		raw, _ := apnsPayload(n)
+		if len(raw) > 4096 {
+			t.Errorf("bare=%v: APNs payload %d bytes", bare, len(raw))
+		}
+		fcm, _ := json.Marshal(fcmMessage(n))
+		if len(fcm) > 4096 {
+			t.Errorf("bare=%v: FCM message %d bytes", bare, len(fcm))
+		}
+	}
+}
