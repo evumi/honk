@@ -107,5 +107,14 @@ func (s *Store) ClaimLink(ctx context.Context, linkID, deviceID string, maxBots 
 			}
 		}
 	}
+	// The claiming device may be a reinstalled app whose token an older device
+	// of the group still holds: only the claimer keeps receiving pushes.
+	var platform, token string
+	if err := tx.QueryRowContext(ctx, `SELECT platform, push_token FROM devices WHERE id = ?`, deviceID).Scan(&platform, &token); err != nil {
+		return "", err
+	}
+	if err := supersedeToken(ctx, tx, deviceID, platform, token, now); err != nil {
+		return "", err
+	}
 	return bundle, tx.Commit()
 }

@@ -403,6 +403,9 @@ func (s *Store) CreateDevice(ctx context.Context, platform, pushToken, name stri
 	if err != nil {
 		return Device{}, "", err
 	}
+	if err := supersedeToken(ctx, tx, id.String(), platform, pushToken, now); err != nil {
+		return Device{}, "", err
+	}
 	if err := tx.Commit(); err != nil {
 		return Device{}, "", err
 	}
@@ -425,9 +428,41 @@ func (s *Store) ListDevices(ctx context.Context, ownerID string) ([]Device, erro
 	return s.devices(ctx, `SELECT `+devCols+` FROM devices WHERE owner_id = ? ORDER BY created_at, id`, ownerID)
 }
 
-// PushDevices returns the devices of a group that can be pushed to.
+// supersedeToken marks every other device with the same platform and push
+// token as unusable for pushes. A push token names one phone: when an app is
+// reinstalled it registers the same token as a new device, and the old row
+// (which may sit in the group the new one then pairs into) must not get every
+// push a second time. Marked rows are collected by GCDevices once idle.
+func supersedeToken(ctx context.Context, q interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, deviceID, platform, token string, now int64) error {
+	if token == "" {
+		return nil
+	}
+	_, err := q.ExecContext(ctx,
+		`UPDATE devices SET push_ok = 0, updated_at = ? WHERE platform = ? AND push_token = ? AND id <> ? AND push_ok = 1`,
+		now, platform, token, deviceID)
+	return err
+}
+
+// PushDevices returns the devices of a group that can be pushed to, one per
+// push token (the newest device when several share one).
 func (s *Store) PushDevices(ctx context.Context, ownerID string) ([]Device, error) {
-	return s.devices(ctx, `SELECT `+devCols+` FROM devices WHERE owner_id = ? AND push_ok = 1 AND push_token <> '' ORDER BY created_at, id`, ownerID)
+	ds, err := s.devices(ctx, `SELECT `+devCols+` FROM devices WHERE owner_id = ? AND push_ok = 1 AND push_token <> '' ORDER BY created_at, id`, ownerID)
+	if err != nil {
+		return nil, err
+	}
+	last := map[string]int{}
+	for i, d := range ds {
+		last[d.Platform+"\x00"+d.PushToken] = i
+	}
+	out := ds[:0]
+	for i, d := range ds {
+		if last[d.Platform+"\x00"+d.PushToken] == i {
+			out = append(out, d)
+		}
+	}
+	return out, nil
 }
 
 func (s *Store) devices(ctx context.Context, q string, args ...any) ([]Device, error) {
@@ -450,12 +485,28 @@ func (s *Store) devices(ctx context.Context, q string, args ...any) ([]Device, e
 // UpdateDevice stores a new push token (which marks it usable again) and/or a
 // new name; an empty value leaves the field as it is.
 func (s *Store) UpdateDevice(ctx context.Context, deviceID, pushToken, name string) error {
-	_, err := s.db.ExecContext(ctx,
+	now := s.ms()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx,
 		`UPDATE devices SET push_token = CASE WHEN ? <> '' THEN ? ELSE push_token END,
 		   push_ok = CASE WHEN ? <> '' THEN 1 ELSE push_ok END,
 		   name = CASE WHEN ? <> '' THEN ? ELSE name END, updated_at = ? WHERE id = ?`,
-		pushToken, pushToken, pushToken, name, name, s.ms(), deviceID)
-	return err
+		pushToken, pushToken, pushToken, name, name, now, deviceID); err != nil {
+		return err
+	}
+	if pushToken != "" {
+		var platform string
+		if err := tx.QueryRowContext(ctx, `SELECT platform FROM devices WHERE id = ?`, deviceID).Scan(&platform); err == nil {
+			if err := supersedeToken(ctx, tx, deviceID, platform, pushToken, now); err != nil {
+				return err
+			}
+		}
+	}
+	return tx.Commit()
 }
 
 // MarkPushGone records that APNs/FCM said the token no longer exists. Only the
