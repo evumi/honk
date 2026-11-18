@@ -215,7 +215,8 @@ final class NshBridge {
             let key = existing ?? Seal.generateKey()
             service.botKeys.save(key, botID: id)
             do {
-                _ = try await service.api.updateBot(id: id, encrypted: true)
+                // The wrapped key lets the group's other devices unwrap it.
+                _ = try await service.api.updateBot(id: id, encrypted: true, keyWrapped: service.keyRing.wrapped(botID: id))
             } catch {
                 if existing == nil { service.botKeys.remove(botID: id) }
                 throw error
@@ -225,7 +226,7 @@ final class NshBridge {
         handle("honk.bot.encryption.disable") { [service] args in
             let id: String = try CallArgs(args).require("botId")
             // The gateway first: with its flag still on, plaintext sends stay refused.
-            _ = try await service.api.updateBot(id: id, encrypted: false)
+            _ = try await service.api.updateBot(id: id, encrypted: false, keyWrapped: "")
             service.botKeys.remove(botID: id)
             return true
         }
@@ -235,7 +236,7 @@ final class NshBridge {
             let key = Seal.generateKey()
             service.botKeys.save(key, botID: id)
             do {
-                _ = try await service.api.updateBot(id: id, encrypted: true)
+                _ = try await service.api.updateBot(id: id, encrypted: true, keyWrapped: service.keyRing.wrapped(botID: id))
             } catch {
                 if let old { service.botKeys.save(old, botID: id) } else { service.botKeys.remove(botID: id) }
                 throw error

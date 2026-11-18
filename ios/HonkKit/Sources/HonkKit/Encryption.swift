@@ -257,6 +257,17 @@ public struct MessageOpener: Sendable {
         return out
     }
 
+    /// Whether `open` gets the item's content: a plaintext item for a bot without
+    /// a key, or a ciphertext that opens with the key held now. The extension
+    /// checks it to know when to fetch the wrapped key first.
+    public func opens(_ m: QueuedMessage) -> Bool {
+        if m.kind == .delete { return true }
+        let key = keys.key(botID: m.botID)
+        if m.ciphertext.isEmpty { return key == nil }
+        guard let key else { return false }
+        return (try? Seal.open(m.ciphertext, key: key, aad: m.botID)) != nil
+    }
+
     private func failed(_ m: QueuedMessage) -> QueuedMessage {
         QueuedMessage(id: m.id, botID: m.botID, kind: .message, body: placeholder, level: m.level, group: m.group,
                       silent: m.silent, collapseID: m.collapseID, date: m.date)
@@ -272,6 +283,159 @@ public struct MessageOpener: Sendable {
             guard JSONSerialization.isValidJSONObject(v),
                   let d = try? JSONSerialization.data(withJSONObject: v, options: [.sortedKeys]) else { return "" }
             return String(decoding: d, as: UTF8.self)
+        }
+    }
+}
+
+// MARK: - several devices
+
+/// A bot's key sealed with the group key, as the gateway stores it in
+/// `bots.key_wrapped`: AES-256-GCM(group key, bot key), additional data
+/// `honk bot key v1|<bot id>`, the same text format as a message's ciphertext.
+/// The gateway cannot open it; any device of the group can.
+public enum KeyWrap {
+    public static func aad(botID: String) -> String { "honk bot key v1|" + botID }
+
+    public static func wrap(botKey: Data, groupKey: Data, botID: String, nonce: Data? = nil) throws -> String {
+        try Seal.seal(botKey, key: groupKey, aad: aad(botID: botID), nonce: nonce)
+    }
+
+    /// The bot key, or `nil` when `text` was not sealed with `groupKey` for this bot.
+    public static func unwrap(_ text: String, groupKey: Data, botID: String) -> Data? {
+        guard let k = try? Seal.open(text, key: groupKey, aad: aad(botID: botID)), k.count == 32 else { return nil }
+        return k
+    }
+}
+
+/// Where the group key is kept: the keychain access group in the app, memory in tests.
+public protocol GroupKeyStoring: Sendable {
+    func groupKey() -> Data?
+    func save(_ key: Data)
+    func remove()
+}
+
+/// The group key in the shared keychain group (like the bot keys), so the
+/// Notification Service Extension can unwrap a key too. It never goes to the
+/// gateway in clear: a pairing bundle (sealed with the pairing code) carries it
+/// to a new phone.
+public struct GroupKeyStore: GroupKeyStoring, Sendable {
+    let service: String
+    let accessGroup: String?
+
+    public init(service: String = "dev.evumi.honk.group-key", accessGroup: String?) {
+        self.service = service
+        self.accessGroup = accessGroup
+    }
+
+    private func query(group: String?) -> [String: Any] {
+        var q: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
+                                kSecAttrAccount as String: "group"]
+        if let group { q[kSecAttrAccessGroup as String] = group }
+        return q
+    }
+
+    public func groupKey() -> Data? {
+        for group in Keychain.groups(accessGroup) {
+            if let data = Keychain.read(query(group: group)), data.count == 32 { return data }
+        }
+        return nil
+    }
+
+    public func save(_ key: Data) { _ = Keychain.write(key, accessGroup) { query(group: $0) } }
+
+    public func remove() {
+        for group in Keychain.groups(accessGroup) { SecItemDelete(query(group: group) as CFDictionary) }
+    }
+}
+
+/// The group key in memory, for tests.
+public final class MemoryGroupKey: GroupKeyStoring, @unchecked Sendable {
+    private let lock = NSLock()
+    private var key: Data?
+
+    public init(_ key: Data? = nil) { self.key = key }
+
+    public func groupKey() -> Data? {
+        lock.lock()
+        defer { lock.unlock() }
+        return key
+    }
+
+    public func save(_ key: Data) {
+        lock.lock()
+        defer { lock.unlock() }
+        self.key = key
+    }
+
+    public func remove() {
+        lock.lock()
+        defer { lock.unlock() }
+        key = nil
+    }
+}
+
+/// The bot keys and the group key of this device, and how they agree with the
+/// wrapped keys on the gateway.
+public struct KeyRing: Sendable {
+    public let keys: BotKeyStoring
+    public let group: GroupKeyStoring
+
+    public init(keys: BotKeyStoring, group: GroupKeyStoring) {
+        self.keys = keys
+        self.group = group
+    }
+
+    /// The group key, made on first need.
+    @discardableResult
+    public func ensureGroupKey() -> Data {
+        if let k = group.groupKey() { return k }
+        let k = Seal.generateKey()
+        group.save(k)
+        return k
+    }
+
+    /// `botID`'s key wrapped with the group key, for `PATCH /v1/bots/:id`; `nil` without a local key.
+    public func wrapped(botID: String) -> String? {
+        guard let k = keys.key(botID: botID) else { return nil }
+        return try? KeyWrap.wrap(botKey: k, groupKey: ensureGroupKey(), botID: botID)
+    }
+
+    /// What a pairing bundle carries: every listed bot's key (base64url).
+    public func bundleKeys(botIDs: [String]) -> [String: String] {
+        var out: [String: String] = [:]
+        for id in botIDs { if let k = keys.key(botID: id) { out[id] = Seal.encode(k) } }
+        return out
+    }
+
+    /// A claiming device takes the creator's group key and bot keys. Its own
+    /// keys for other bots stay; `reconcile` wraps them with the adopted group key.
+    public func adopt(_ bundle: LinkBundle) {
+        if let g = bundle.groupKey.flatMap(Seal.parseKey) { group.save(g) }
+        for (id, text) in bundle.keys ?? [:] {
+            if let k = Seal.parseKey(text) { keys.save(k, botID: id) }
+        }
+    }
+
+    /// Makes this device and the gateway agree about each encrypted bot of `bots`:
+    ///
+    /// - the gateway's wrapped key opens with our group key: it is the group's
+    ///   current key (another device turned encryption on or reset it), so keep it;
+    /// - otherwise, with a local key: wrap ours and send it (`patch`), so the
+    ///   other devices can open it (this also covers a claiming device whose own
+    ///   keys were wrapped with its old group key);
+    /// - otherwise there is nothing to do: without the group key (pair this
+    ///   phone) or a wrapped key, the bot's messages show the placeholder.
+    ///
+    /// A failed `patch` is skipped; the next refresh tries again.
+    public func reconcile(bots: [Bot], patch: (_ botID: String, _ wrapped: String) async throws -> Void) async {
+        for bot in bots where bot.encrypted {
+            let local = keys.key(botID: bot.id)
+            if let g = group.groupKey(), !bot.keyWrapped.isEmpty,
+               let k = KeyWrap.unwrap(bot.keyWrapped, groupKey: g, botID: bot.id) {
+                if local != k { keys.save(k, botID: bot.id) }
+            } else if let w = wrapped(botID: bot.id) {
+                try? await patch(bot.id, w)
+            }
         }
     }
 }

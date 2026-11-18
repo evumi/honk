@@ -35,12 +35,18 @@ public struct Bot: Codable, Equatable, Sendable {
     public var defaultLevel: String
     public var createdAt: Int64
     public var updatedAt: Int64
+    /// End-to-end encryption is on for this bot (the gateway refuses its plaintext).
+    public var encrypted: Bool = false
+    /// The bot's key sealed with the group key (`KeyWrap`); empty when there is none.
+    public var keyWrapped: String = ""
 
     enum CodingKeys: String, CodingKey {
         case id, name, avatar
         case defaultLevel = "default_level"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
+        case encrypted
+        case keyWrapped = "key_wrapped"
     }
 
     public init(id: String, name: String, avatar: String = "", defaultLevel: String = "active", createdAt: Int64 = 0, updatedAt: Int64 = 0) {
@@ -60,6 +66,8 @@ public struct Bot: Codable, Equatable, Sendable {
         defaultLevel = try c.decodeIfPresent(String.self, forKey: .defaultLevel) ?? "active"
         createdAt = try c.decodeIfPresent(Int64.self, forKey: .createdAt) ?? 0
         updatedAt = try c.decodeIfPresent(Int64.self, forKey: .updatedAt) ?? 0
+        encrypted = try c.decodeIfPresent(Bool.self, forKey: .encrypted) ?? false
+        keyWrapped = try c.decodeIfPresent(String.self, forKey: .keyWrapped) ?? ""
     }
 }
 
