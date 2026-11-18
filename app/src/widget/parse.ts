@@ -17,7 +17,7 @@ export interface TextNode {
 
 export type WidgetNode = ElementNode | TextNode;
 
-const VOID = new Set(["br", "hr", "img", "col", "stop", "path", "rect", "circle", "ellipse", "line", "polyline", "polygon", "use"]);
+const VOID = new Set(["area", "base", "embed", "input", "link", "meta", "param", "source", "track", "wbr", "br", "hr", "img", "col", "stop", "path", "rect", "circle", "ellipse", "line", "polyline", "polygon", "use"]);
 const RAW = new Set(["style", "script"]);
 
 const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ", middot: "·", hellip: "…", mdash: "—", ndash: "–", copy: "©" };
@@ -96,7 +96,9 @@ export function parse(html: string): WidgetNode[] {
     if (tag === "html" || tag === "head" || tag === "body") continue;
     top().children.push(el);
     if (RAW.has(tag)) {
-      const close = html.toLowerCase().indexOf(`</${tag}`, i);
+      // Case-insensitively, on the text itself: lowercasing it could change its length.
+      const closeAt = new RegExp(`</${tag}`, "i").exec(html.slice(i));
+      const close = closeAt ? i + closeAt.index : -1;
       el.children.push({ type: "text", text: html.slice(i, close < 0 ? html.length : close) });
       i = close < 0 ? html.length : html.indexOf(">", close) + 1 || html.length;
       continue;
