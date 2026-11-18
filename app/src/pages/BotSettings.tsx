@@ -2,6 +2,7 @@ import { Clipboard, signal, Text, View } from "nsh";
 import { AlertDialog, NavPage, Switch } from "nsh/base";
 import { Avatar, FormBody, Icon, Row, Section } from "../components";
 import { LEVELS, levelLabel, maskToken } from "../format";
+import { exportMessages } from "../archive";
 import { api, type Level } from "../host";
 import { chatOf, nav, reload } from "../store";
 import { palette, type Palette } from "../theme";
@@ -93,6 +94,7 @@ export function BotSettings(props: { botId: string }) {
 
           <Section title={tr("消息")} p={p()}>
             <ToggleRow p={p()} first label={tr("置顶会话")} checked={chat()?.pinned ?? false} onChange={(v) => void api.setPinned(props.botId, v).then(reload)} />
+            <Row p={p()} label={tr("导出消息")} color={p().accent} onPress={() => void exportMessages(props.botId)} testID="export-chat" />
             <Row p={p()} label={tr("清空消息")} color={p().destructive} onPress={() => void clear()} />
           </Section>
 

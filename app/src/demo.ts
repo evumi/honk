@@ -178,6 +178,9 @@ function normalize(u: string): string | null {
   return t.endsWith("/") ? t : t + "/";
 }
 
+/** How long messages are kept, in days (0: forever); the demo prunes at once, as the hosts do. */
+let retentionDays = 0;
+
 const localAvatars = new Map<string, string>();
 const flags = new Map<string, { muted: boolean; pinned: boolean }>();
 const tokens = new Map<string, string>([["Bx7kQ2mT", "Bx7kQ2mT:bQx9fK2mT4vLr8Wz1pYs6NcHa3Ue0JdG"]]);
@@ -281,11 +284,39 @@ export async function demo<T>(name: string, args: unknown): Promise<T> {
         return true;
       case "honk.chats":
         return chats();
-      case "honk.messages":
+      case "honk.messages": {
+        const own = messages.filter((m) => m.botId === a.botId).sort((x, y) => y.id - x.id);
+        const limit = a.limit ?? 50;
+        if (a.around != null && own.some((m) => m.id === a.around)) {
+          // About half newer, the rest older, as the hosts' window.
+          const newer = own.filter((m) => m.id > a.around).slice(-Math.floor(limit / 2));
+          return [...newer, ...own.filter((m) => m.id <= a.around).slice(0, limit - newer.length)];
+        }
+        return own.filter((m) => a.around != null || a.before == null || m.id < a.before).slice(0, limit);
+      }
+      case "honk.search": {
+        const q = String(a.query ?? "").trim().toLowerCase();
+        if (!q) return [];
         return messages
-          .filter((m) => m.botId === a.botId && (a.before == null || m.id < a.before))
+          .filter((m) => (a.before == null || m.id < a.before) && `${m.title}\n${m.body}`.toLowerCase().includes(q))
           .sort((x, y) => y.id - x.id)
-          .slice(0, a.limit ?? 50);
+          .slice(0, 50);
+      }
+      case "honk.retention.get":
+        return retentionDays;
+      case "honk.retention.set": {
+        retentionDays = Number(a.days) || 0;
+        if (retentionDays > 0) {
+          const cutoff = Date.now() - retentionDays * 86_400_000;
+          for (let i = messages.length - 1; i >= 0; i--) if (messages[i].date < cutoff) messages.splice(i, 1);
+        }
+        return retentionDays;
+      }
+      // There is no share sheet or file picker without a host: exporting counts what it would write, importing is cancelled.
+      case "honk.export":
+        return { count: messages.filter((m) => a.botId == null || m.botId === a.botId).length, shared: false };
+      case "honk.import":
+        return null;
       case "honk.markRead":
         messages.forEach((m) => m.botId === a.botId && (m.read = true));
         return true;

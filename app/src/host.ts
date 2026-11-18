@@ -118,6 +118,17 @@ export interface PushRoutes {
 /** Test hook (host.contract.test.ts): sees every host call before it is made, host or not. */
 export const spy: { call?: (name: string, args: unknown) => void } = {};
 
+/** How long messages are kept on this phone, in days; 0 keeps them forever. */
+export type Retention = 0 | 365 | 90 | 30;
+
+/** What an import did: messages added, ones already there, ones of bots this phone does not have, lines it could not read. */
+export interface ImportResult {
+  imported: number;
+  existing: number;
+  unknownBot: number;
+  invalid: number;
+}
+
 export function call<T>(name: string, args?: unknown): Promise<T> {
   spy.call?.(name, args ?? null);
   if (!host.available()) return demo<T>(name, args);
@@ -173,6 +184,20 @@ export const api = {
   status: () => call<Status>("honk.status"),
   chats: () => call<Chat[]>("honk.chats"),
   messages: (botId: BotId, before?: number) => call<Message[]>("honk.messages", { botId, before, limit: 50 }),
+  /** A window of a chat around one message (a search result), newest first: about 25 newer and 25 older. */
+  messagesAround: (botId: BotId, around: number) => call<Message[]>("honk.messages", { botId, around, limit: 50 }),
+  /** Messages of every chat whose title or body contains `query`, newest first, 50 at a time (`before`: the last id of the page before). */
+  search: (query: string, before?: number) => call<Message[]>("honk.search", { query, before }),
+  retention: () => call<Retention>("honk.retention.get"),
+  /** Keeps messages that long and deletes the older ones at once; resolves with the stored value. */
+  setRetention: (days: Retention) => call<Retention>("honk.retention.set", { days }),
+  /**
+   * Offers one chat's messages (all chats' without `botId`) as a JSON Lines file in the system share sheet; resolves
+   * when it is gone. `count` 0: there was nothing to export, and no sheet.
+   */
+  exportMessages: (botId?: BotId) => call<{ count: number; shared: boolean }>("honk.export", botId ? { botId } : null),
+  /** Picks a JSON Lines file and adds its messages; `null` when the user cancels. */
+  importMessages: () => call<ImportResult | null>("honk.import"),
   markRead: (botId: BotId) => call<boolean>("honk.markRead", { botId }),
   focus: (botId: BotId | null) => call<boolean>("honk.focus", { botId }),
   refresh: () => call<boolean>("honk.refresh"),
