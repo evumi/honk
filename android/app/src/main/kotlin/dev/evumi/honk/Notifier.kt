@@ -26,6 +26,7 @@ import androidx.core.content.pm.ShortcutInfoCompat
 import androidx.core.content.pm.ShortcutManagerCompat
 import androidx.core.graphics.drawable.IconCompat
 import dev.evumi.honk.core.Avatar
+import dev.evumi.honk.core.Banner
 import dev.evumi.honk.core.Bot
 import dev.evumi.honk.core.LocalAvatars
 import java.io.File
@@ -286,8 +287,7 @@ class Notifier(private val context: Context) {
         fun channelId(botId: String) = "$CHANNEL_PREFIX$botId"
 
         /** The notification tag: `c<bot>:<collapse id>` when the message has one, else `m<message id>`. */
-        fun tag(botId: String, messageId: Long, collapseId: String) =
-            if (collapseId.isNotEmpty()) "c$botId:$collapseId" else "m$messageId"
+        fun tag(botId: String, messageId: Long, collapseId: String) = Banner.tag(botId, messageId, collapseId)
     }
 }
 

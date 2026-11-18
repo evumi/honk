@@ -4,4 +4,6 @@
     <string name="channel_group_bots">Bots</string>
     <string name="channel_other">Other</string>
     <string name="me">Me</string>
+    <!-- Banner of a push that carries no text, when the message could not be fetched. -->
+    <string name="new_notification">New notification</string>
 </resources>

@@ -10,6 +10,7 @@ import com.google.firebase.FirebaseApp
 import com.google.firebase.messaging.FirebaseMessaging
 import dev.evumi.honk.core.ApiClient
 import dev.evumi.honk.core.ApiException
+import dev.evumi.honk.core.Banner
 import dev.evumi.honk.core.BotTokenStore
 import dev.evumi.honk.core.CredentialStore
 import dev.evumi.honk.core.DeviceRegistrar
@@ -309,15 +310,25 @@ class HonkService private constructor(context: Context) {
 
     private fun handleMessage(info: PushInfo) {
         renameBeforePush()
-        val tag = Notifier.tag(info.botId, info.messageId, info.collapseId)
-        val stored = try {
-            val r = store.apply(api.message(info.messageId), tag)
-            notifier.cancel(r.staleNotificationIds)
-            r.message
+        // The message comes first: its collapse id (a push without content has
+        // none) decides the notification's tag, which store.apply records.
+        val fetched = try {
+            api.message(info.messageId)
         } catch (e: Exception) {
             // Offline, not registered, or already gone from the queue: show the push's own text.
             Log.w(TAG, "fetch message ${info.messageId} failed", e)
             null
+        }
+        val tag = Notifier.tag(info.botId, info.messageId, fetched?.collapseId ?: info.collapseId)
+        val stored = fetched?.let {
+            try {
+                val r = store.apply(it, tag)
+                notifier.cancel(r.staleNotificationIds)
+                r.message
+            } catch (e: Exception) {
+                Log.w(TAG, "store message ${info.messageId} failed", e)
+                null
+            }
         }
         changed()
         if (foreground && focusedBotId == info.botId) {
@@ -331,15 +342,16 @@ class HonkService private constructor(context: Context) {
         val incoming = onIncoming.takeIf { foreground }
         if (incoming != null) main.post { incoming(info.botId, info.messageId) }
         val bot = store.bot(info.botId)
+        val text = Banner.choose(stored, bot?.name, info, context.getString(R.string.new_notification))
         notifier.show(
             Notifier.Content(
                 botId = info.botId,
-                botName = bot?.name ?: info.botName.ifEmpty { "Honk" },
+                botName = text.botName,
                 avatar = stored?.icon?.takeIf { it.isNotEmpty() } ?: bot?.avatar.orEmpty(),
                 messageId = info.messageId,
                 tag = tag,
-                title = stored?.title ?: info.title,
-                body = stored?.body ?: info.body,
+                title = text.title,
+                body = text.body,
                 group = stored?.group ?: info.group,
                 level = stored?.level?.takeIf { it.isNotEmpty() } ?: info.level,
                 date = stored?.date?.takeIf { it > 0 } ?: System.currentTimeMillis(),

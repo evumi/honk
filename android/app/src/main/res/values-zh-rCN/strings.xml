@@ -3,4 +3,5 @@
     <string name="channel_group_bots">Bot</string>
     <string name="channel_other">其他</string>
     <string name="me">我</string>
+    <string name="new_notification">新通知</string>
 </resources>
