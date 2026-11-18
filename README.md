@@ -56,6 +56,7 @@ See `gateway/Dockerfile` for the container. Settings:
 `/bot<token>/<method>`, parameters in the query string, a form or JSON. Responses use Telegram's envelope: `{"ok":true,"result":…}` or `{"ok":false,"error_code":400,"description":"…"}`.
 
 - `sendMessage`: `body` (required, 4096 characters; the banner text and the fallback for clients without cards), `title`, `html` (card: 32 KB raw, 4 KB after zlib), `data` (1 KB, fills `{{key}}` placeholders), `level` (`passive` \| `active` \| `timeSensitive`), `group`, `id` (a later message with the same id replaces this one), `url`, `copy`, `icon` (https).
+- `sendMessage` also takes `dry_run` (`true`): validate only. Nothing is queued or pushed; the result is `{"dry_run":true,"html":<cleaned card>,"input_size","raw_size","compressed_size","removed":[…]}` with the sizes of the cleaned card (limits 32768 and 4096) and what the whitelist removed (`"onclick on <div>"`, `"<iframe>"`). It counts against the rate limit.
 - `editMessageData`: `message_id` or `id`, and `data`. Updates the card silently.
 - `deleteMessage`: `message_id` or `id`. Removes the message and its notification.
 - `getMe`: the bot.
@@ -79,6 +80,56 @@ Cards can carry inline scripts, as Telegram's HTML widgets do (card profile 2). 
   });
 </script>
 ```
+
+## Command line
+
+The gateway binary is also a sender tool. `honk` with no arguments (or `honk serve`) runs the gateway exactly as before; the other subcommands talk to a gateway as one bot:
+
+```bash
+export HONK_URL=https://honk.example.com HONK_TOKEN=aZ3kQ9xT:Gw2K7mx…
+honk send "backup finished" --title Backup --level passive
+make 2>&1 | tail -5 | honk send --title "Build log"        # stdin is the body when piped
+honk send "api v1.8.2 is live" --html @card.html --data @data.json --id deploy-api
+honk edit --id deploy-api --data '{"status":"rolled back"}'
+honk delete --id deploy-api
+honk me                                                     # the bot behind the token
+honk preview card.html --data data.json --watch             # resend on every save
+```
+
+- `HONK_URL` and `HONK_TOKEN` can also come from `--server` / `--token`, or from `~/.config/honk/config.json` (`{"url": "…", "token": "…"}`; `$XDG_CONFIG_HOME` and `$HONK_CONFIG` are honoured). Flags beat the environment, which beats the file.
+- `send` flags: `--title`, `--body` (or the arguments, or stdin), `--html`, `--data` (both accept `@file`), `--id`, `--level`, `--group`, `--link` (the `url` parameter), `--copy`, `--icon`, `--dry-run`.
+- `preview` sends with a fixed `id` (default `honk-preview`) and `level=passive`, so the message on the phone is replaced in place and stays quiet. It runs a `dry_run` first and prints the sizes and what the whitelist removed. See the [card cookbook](docs/CARDS.md).
+- Exit status is 0 on success, 1 when the gateway or the network fails (the gateway's `description` is printed to stderr) and 2 for a usage error.
+- `--key <base64 key>` (or `HONK_KEY`) encrypts the message content on the client: title, body, html, data, url, copy and icon go into one AES-256-GCM ciphertext (12-byte nonce, ciphertext, 16-byte tag, unpadded base64url; the bot id before the `:` of the token is the authenticated additional data), sent as `ciphertext`, while `level`, `group` and `id` stay plain. **The gateway does not accept `ciphertext` yet**; this is the sender side of the end-to-end encryption planned for a later release, so do not use `--key` against today's gateway.
+
+## Connect existing tools
+
+`/bot<token>/hook/<kind>` accepts the webhook payload of other tools and turns it into a message. It uses the same token, rate limit and validation as `sendMessage`. Put the URL, with the token in it, where the tool asks for a webhook URL. A payload with nothing to show (GitHub's `ping`, an Alertmanager group without alerts) answers `{"ok":true,"result":{"ignored":true}}` and sends nothing. `level`, `group`, `icon`, `copy`, `url` and `title` in the query string override what the adapter chose (`…/hook/github?level=passive`).
+
+| `kind` | Source | What you get |
+| --- | --- | --- |
+| `slack` | Slack incoming-webhook payloads (`text`, `attachments`, section `blocks`) | the text as the body; the first attachment's title and `title_link` as title and link; `<url\|label>` becomes `label` |
+| `alertmanager` | Alertmanager `webhook_configs` (version 4) | title `[FIRING:n] name`; one line per alert; `groupKey` becomes the message `id`, so "resolved" replaces "firing" in place; critical alerts are `timeSensitive`, resolved ones `passive`; a status card is attached |
+| `grafana` | Grafana webhook contact point | the same layout; a single alert's `fingerprint` is the `id`, otherwise the `groupKey` |
+| `github` | repository webhooks (JSON content type), event from `X-GitHub-Event` | `workflow_run` (one message per workflow and branch: queued, running and finished replace each other, failures are `timeSensitive`), `release`, `issues`, `pull_request`, `push`; other events get a one-line summary |
+| `bark` | what a Bark client sends | set the Bark server to `https://honk.example.com/bot<token>/hook/bark`; `/<key>/<body>`, `/<key>/<title>/<body>`, `/<key>/<title>/<subtitle>/<body>` (the key is ignored) and `POST /push` with JSON or form fields `title`, `subtitle`, `body`, `level`, `group`, `url`, `copy`, `icon`, `id`; sound, badge and the like are dropped |
+| `json` | any JSON | the query maps fields to paths: `?title=$.alert.name&body=$.message&group=ci`. Paths are `$.a.b`, `$.items[0].name` or `$.items.0.name`; a value without `$` is used as written; without `body` the JSON itself is the body |
+
+The GitHub adapter does not check `X-Hub-Signature-256`: the token in the URL is the secret, so keep it out of public logs. In a GitHub Actions workflow use the action in this repository instead:
+
+```yaml
+- uses: evumi/honk@v1
+  if: failure()
+  with:
+    url: ${{ secrets.HONK_URL }}
+    token: ${{ secrets.HONK_TOKEN }}
+    title: "${{ github.repository }}: build failed"
+    body: "${{ github.workflow }} on ${{ github.ref_name }}"
+    id: ci-${{ github.workflow }}
+    level: timeSensitive
+```
+
+Inputs: `token`, `url` (required), `title`, `body` (defaults to the title), `id`, `level`, `html`, `data`. The action is a composite action that runs `curl` and fails the step when the gateway refuses the message.
 
 ## App API
 

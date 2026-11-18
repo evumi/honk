@@ -1,0 +1,77 @@
+name: Honk notify
+description: Send a push notification through a Honk gateway
+author: evumi
+branding:
+  icon: bell
+  color: orange
+
+inputs:
+  token:
+    description: Bot token (<bot id>:<secret>). Keep it in a repository secret.
+    required: true
+  url:
+    description: Gateway base URL, e.g. https://honk.example.com
+    required: true
+  title:
+    description: Title
+    required: false
+    default: ""
+  body:
+    description: Body. Required by the gateway; defaults to the title.
+    required: false
+    default: ""
+  id:
+    description: Collapse id; a later message with the same id replaces this one
+    required: false
+    default: ""
+  level:
+    description: passive, active or timeSensitive
+    required: false
+    default: ""
+  html:
+    description: Card HTML (the text itself, not a file name)
+    required: false
+    default: ""
+  data:
+    description: Card data, a JSON object (at most 1 KB)
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Send
+      shell: bash
+      env:
+        HONK_TOKEN: ${{ inputs.token }}
+        HONK_URL: ${{ inputs.url }}
+        HONK_TITLE: ${{ inputs.title }}
+        HONK_BODY: ${{ inputs.body }}
+        HONK_ID: ${{ inputs.id }}
+        HONK_LEVEL: ${{ inputs.level }}
+        HONK_HTML: ${{ inputs.html }}
+        HONK_DATA: ${{ inputs.data }}
+      run: |
+        set -euo pipefail
+        echo "::add-mask::$HONK_TOKEN"
+        body="${HONK_BODY:-$HONK_TITLE}"
+        if [ -z "$body" ]; then
+          echo "::error::body or title is required"
+          exit 1
+        fi
+        # Build the JSON with jq so no input can break out of it. Empty inputs are left out.
+        payload=$(jq -n \
+          --arg title "$HONK_TITLE" --arg body "$body" --arg id "$HONK_ID" \
+          --arg level "$HONK_LEVEL" --arg html "$HONK_HTML" --arg data "$HONK_DATA" \
+          '{title:$title, body:$body, id:$id, level:$level, html:$html, data:$data}
+           | with_entries(select(.value != ""))')
+        status=$(curl -sS -o response.json -w '%{http_code}' \
+          -X POST "${HONK_URL%/}/bot${HONK_TOKEN}/sendMessage" \
+          -H 'Content-Type: application/json' \
+          --data "$payload" --max-time 30 || true)
+        if [ "$status" != "200" ]; then
+          echo "::error::Honk gateway answered HTTP ${status:-000}: $(jq -r '.description // empty' response.json 2>/dev/null || true)"
+          rm -f response.json
+          exit 1
+        fi
+        rm -f response.json
