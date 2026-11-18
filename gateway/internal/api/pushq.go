@@ -58,6 +58,7 @@ func (s *Server) startPushQueue() {
 // attempt; retries still waiting for their backoff are not waited for. Tests
 // use it to look at the pusher; Close is the shutdown path.
 func (s *Server) Wait() {
+	s.queries.Wait()
 	q := &s.pq
 	q.mu.Lock()
 	for q.pending > 0 {

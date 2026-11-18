@@ -48,6 +48,16 @@ func (s *Server) botAPI(w http.ResponseWriter, r *http.Request) {
 		s.changeMessage(w, r, bot, p, store.KindEdit)
 	case "deletemessage":
 		s.changeMessage(w, r, bot, p, store.KindDelete)
+	case "setwebhook":
+		s.setWebhook(w, r, bot, p)
+	case "deletewebhook":
+		s.removeWebhook(w, r, bot)
+	case "getwebhookinfo":
+		s.getWebhookInfo(w, bot)
+	case "getupdates":
+		s.getUpdates(w, r, bot, p)
+	case "answerwidgetquery":
+		s.answerWidgetQuery(w, r, bot, p)
 	default:
 		s.fail(w, r, errNotFound)
 	}
@@ -65,6 +75,12 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request, bot store.B
 		CollapseID: p.Get("id"),
 	}
 	var err error
+	if v := p.Get("allow_queries"); v != "" {
+		if m.AllowQueries, err = strconv.ParseBool(v); err != nil {
+			s.fail(w, r, badRequest("allow_queries must be true or false"))
+			return
+		}
+	}
 	if m.Level, err = level(p.Get("level"), bot.DefaultLevel); err != nil {
 		s.fail(w, r, err)
 		return

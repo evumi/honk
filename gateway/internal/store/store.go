@@ -71,6 +71,7 @@ func (s *Store) migrate(ctx context.Context) error {
 		migrateV3,
 		migrateV4,
 		migrateSendOptions,
+		migrateWidgetQueries,
 	}
 	for ; v < len(steps); v++ {
 		if err := s.step(ctx, v+1, steps[v]); err != nil {
@@ -244,6 +245,21 @@ CREATE INDEX devices_owner ON devices(owner_id);
 CREATE INDEX bots_owner ON bots(owner_id);
 CREATE INDEX messages_owner ON messages(owner_id, id);`)
 	return err
+}
+
+// migrateWidgetQueries adds what widget queries (card request()) need: whether
+// a message's card may query its bot, and the bot's webhook.
+func migrateWidgetQueries(ctx context.Context, tx *sql.Tx) error {
+	for _, q := range []string{
+		`ALTER TABLE messages ADD COLUMN allow_queries INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE bots ADD COLUMN webhook_url TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE bots ADD COLUMN webhook_secret TEXT NOT NULL DEFAULT ''`,
+	} {
+		if _, err := tx.ExecContext(ctx, q); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Bot ids are botIDLen characters of base62 starting with a letter, so one can
@@ -543,13 +559,17 @@ type Bot struct {
 	DefaultLevel string `json:"default_level"`
 	CreatedAt    int64  `json:"created_at"`
 	UpdatedAt    int64  `json:"updated_at"`
+
+	// WebhookURL and WebhookSecret are where widget queries go (setWebhook).
+	WebhookURL    string `json:"-"`
+	WebhookSecret string `json:"-"`
 }
 
-const botCols = `public_id, id, owner_id, name, avatar, default_level, created_at, updated_at`
+const botCols = `public_id, id, owner_id, name, avatar, default_level, created_at, updated_at, webhook_url, webhook_secret`
 
 func scanBot(row interface{ Scan(...any) error }) (Bot, error) {
 	var b Bot
-	err := row.Scan(&b.ID, &b.Key, &b.OwnerID, &b.Name, &b.Avatar, &b.DefaultLevel, &b.CreatedAt, &b.UpdatedAt)
+	err := row.Scan(&b.ID, &b.Key, &b.OwnerID, &b.Name, &b.Avatar, &b.DefaultLevel, &b.CreatedAt, &b.UpdatedAt, &b.WebhookURL, &b.WebhookSecret)
 	if errors.Is(err, sql.ErrNoRows) {
 		return b, ErrNotFound
 	}
@@ -699,4 +719,11 @@ func (s *Store) BotByToken(ctx context.Context, token string) (Bot, error) {
 		return Bot{}, ErrNotFound
 	}
 	return scanBot(s.db.QueryRowContext(ctx, `SELECT `+botCols+` FROM bots WHERE token_hash = ?`, hash(token)))
+}
+
+// SetWebhook sets (or with an empty url, clears) where a bot's widget queries
+// are delivered.
+func (s *Store) SetWebhook(ctx context.Context, botKey int64, url, secret string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE bots SET webhook_url = ?, webhook_secret = ? WHERE id = ?`, url, secret, botKey)
+	return err
 }
