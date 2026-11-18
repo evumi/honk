@@ -61,3 +61,69 @@ test("@media (prefers-color-scheme: dark) follows the app's appearance, also whe
   expect(app.spanStyle("text:Title").color).toBe("#ffffffff");
   expect(app.texts()).toContain("State on");
 });
+
+// A card with a script: the host (native/card in the apps) runs it and answers with trees.
+const scripted = `<p id="n">{{start}}</p><button id="b">+1</button><a href="https://example.com/static">open</a><script>/* runs in the host */</script>`;
+
+function scriptedHost(clicks: string[]) {
+  const tree = (text: string, on = true) => [
+    { type: "element", tag: "p", attrs: { id: "n" }, children: [{ type: "text", text }] },
+    // Dropped by the whitelist, but still in the card's tree: paths must skip over it, not shift.
+    { type: "element", tag: "script", attrs: {}, children: [{ type: "text", text: "x" }] },
+    { type: "element", tag: "button", attrs: { id: "b", onclick: "steal()" }, children: [{ type: "text", text: "+1" }], on },
+    { type: "element", tag: "a", attrs: { href: "https://example.com/static" }, children: [{ type: "text", text: "open" }], on },
+    { type: "element", tag: "iframe", attrs: { src: "https://evil.example" }, children: [{ type: "text", text: "evil frame" }] },
+    { type: "element", tag: "img", attrs: { src: "https://evil.example/t.png" }, children: [] },
+  ];
+  const h = host(scripted, { start: 0 });
+  return {
+    handlers: {
+      ...h.handlers,
+      "honk.card.open": (d: unknown) => {
+        const load = JSON.parse((d as { load: string }).load);
+        // The host gets the card filled with its data, scripts included.
+        if (load.tree[0].children[0].text !== "0" || load.tree[3].tag !== "script") throw new Error("bad load");
+        return JSON.stringify({ tree: tree("count 0"), prevented: false, stopped: null, logs: [] });
+      },
+      "honk.card.click": (d: unknown) => {
+        const path = (d as { path: string }).path;
+        clicks.push(path);
+        if (path === "[2]") return JSON.stringify({ tree: tree("count 1"), prevented: false, open: "https://example.com/one", copy: "copied", stopped: null, logs: [] });
+        // The link's handler prevents its default the first time only.
+        return JSON.stringify({ tree: null, prevented: clicks.filter((c) => c === "[3]").length === 1, stopped: null, logs: [] });
+      },
+      "honk.card.set": JSON.stringify({ tree: null, prevented: false, stopped: null, logs: [] }),
+      "honk.card.close": true,
+    },
+  };
+}
+
+test("a scripted card draws what the host's runtime returns, through the whitelist", async () => {
+  const clicks: string[] = [];
+  const app = await open("../../App.tsx", { locale: "zh-Hans-CN", host: scriptedHost(clicks) });
+  await app.press("id:chat-aZ3kQ9xT");
+  await app.waitFor("text:count 0");
+  const texts = app.texts().join("|");
+  expect(texts).not.toContain("evil frame");
+  await app.press("text:+1");
+  await app.waitFor("text:count 1");
+  expect(clicks).toEqual(["[2]"]);
+  expect(app.openedUrls()).toEqual(["https://example.com/one"]);
+  expect(app.clipboard()).toBe("copied");
+  // A handler that prevents the default keeps the link closed; the next tap opens it.
+  await app.press("text:open");
+  expect(app.openedUrls()).toEqual(["https://example.com/one"]);
+  await app.press("text:open");
+  expect(app.openedUrls()).toEqual(["https://example.com/one", "https://example.com/static"]);
+  // Timer changes come as an event.
+  await app.host.send("honk.card.changed", { key: "card-1", result: JSON.stringify({ tree: [{ type: "text", text: "from a timer" }], prevented: false, stopped: null, logs: [] }) });
+  await app.waitFor("text:from a timer");
+});
+
+test("without a host that runs scripts, a scripted card stays static", async () => {
+  const app = await open("../../App.tsx", { locale: "zh-Hans-CN", host: host(scripted, { start: 7 }) });
+  await app.press("id:chat-aZ3kQ9xT");
+  await app.waitFor("text:7");
+  await app.press("text:open");
+  expect(app.openedUrls()).toEqual(["https://example.com/static"]);
+});

@@ -78,9 +78,25 @@ export function call<T>(name: string, args?: unknown): Promise<T> {
 }
 
 /**
+ * Card scripts (profile 2), run by the host in a QuickJS runtime per card
+ * (native/card). Strings are JSON: `load` is honk_card_open's argument, and
+ * every call answers with a result {tree, prevented, open?, copy?, stopped,
+ * logs}. A card's later changes (timers, promises) come as the event
+ * honk.card.changed {key, result}. Without a host there are none: the demo
+ * rejects, and the card stays static.
+ */
+export const cards = {
+  open: (key: string, load: string) => (host.available() ? host.call<string>("honk.card.open", { key, load }) : Promise.reject(new Error("no host"))),
+  click: (key: string, path: string) => host.call<string>("honk.card.click", { key, path }),
+  set: (key: string, state: string) => host.call<string>("honk.card.set", { key, state }),
+  close: (key: string) => (host.available() ? host.call<boolean>("honk.card.close", { key }) : Promise.resolve(true)),
+};
+
+/**
  * Listens to a host event; a no-op without a host. Events: `honk.changed`,
  * `honk.open { botId }`, `honk.incoming { botId, messageId }` (a message
- * arrived while the app is open; the app shows its own banner).
+ * arrived while the app is open; the app shows its own banner),
+ * `honk.card.changed { key, result }` (see `cards`).
  */
 export function on(event: string, listener: (payload: unknown) => void): () => void {
   if (!host.available()) return () => {};

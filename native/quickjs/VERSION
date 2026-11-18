@@ -1,0 +1,3 @@
+quickjs-ng v0.18.0 (d7215b0ad3fc2c562e8317fd9bca058fd4863804), https://github.com/quickjs-ng/quickjs
+Only the engine core is vendored: no quickjs-libc, so cards get no std/os, files or network.
+Update: copy the files listed in this directory from a new tag and run `make -C native test`.

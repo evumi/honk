@@ -104,7 +104,7 @@ curl https://honk.example.com/bot$TOKEN/sendMessage \
 
 短 bot id 之前的网关（数据库 schema v1）用自增整数做 bot id，token 形如 `4:Gw2K7mx…`。升级后每个 bot 都会分到一个短 id；旧 token 在重置之前照常可用，重置后的新 token 以短 id 开头。App 第一次同步时会用本机存的 token 调 `getMe` 查出对应的短 id（没有 token 就按创建时间和名称匹配），把这个 bot 的本地消息和设置迁移过去；连不上网关时保留这个 bot，下次再试。先更新 App 再升级网关：旧版 App 读不了短 id（`/v1/info` 的 `api` 是 2），新版 App 连旧网关也能用。
 
-### 卡片 HTML（profile v1）
+### 卡片 HTML
 
 网关只保留白名单里的元素，其他元素连同子元素一起删掉：
 
@@ -113,10 +113,11 @@ curl https://honk.example.com/bot$TOKEN/sendMessage \
 - 样式：`style`
 - 图片：`img`（只接受 `data:` 图片）
 - 内联 SVG
+- 内联 `<script>`（profile 2，见下面「卡片脚本」）
 
 以下内容会被删除：
 
-- 脚本、`on*` 事件属性、表单控件
+- 带 `src` 或 `type` 不是 JavaScript 的脚本（包括 module）、`on*` 事件属性、表单控件
 - 外部链接；`a` 只允许 `https://`、`#id` 或 `{{key}}`
 - CSS 里引用外部资源的写法：`@import`、`expression()`、非 data: 的 `url()`
 
@@ -132,7 +133,27 @@ curl https://honk.example.com/bot$TOKEN/sendMessage \
 - 深色模式：`@media (prefers-color-scheme: dark)` 和 `light-dark()` 跟随 App 的外观
 - `display: none` 隐藏元素；`<style>` 和 `class` 里也可以用 `{{key}}`
 
-只生效前 400 条规则；其他媒体查询、`@keyframes`、伪元素和 `:hover` 会被忽略。脚本仍然会被删掉，App 目前不执行 JavaScript。
+只生效前 400 条规则；其他媒体查询、`@keyframes`、伪元素和 `:hover` 会被忽略。
+
+### 卡片脚本（profile 2）
+
+卡片可以像 Telegram HTML widget 那样带内联脚本。iOS 和 Android App 给每张卡片开一个独立的 QuickJS 运行时（[quickjs-ng](https://github.com/quickjs-ng/quickjs)，代码在 `native/`），在后台线程上跑，不能联网、不能读写文件，内存 8 MB，每个任务 200 毫秒；超出就停止，卡片保留最后画出的样子。
+
+- `window.TelegramWidget`：`chatData`（消息的 `data`）、`themeParams`、`colorScheme`；`onEvent('themeChanged' | 'activated' | 'deactivated', …)`；在点击处理函数里调用 `openLink(url)`、`copyText(text)`
+- 精简 DOM：`getElementById`、`querySelector`、`textContent`、`innerHTML`、`classList`、`style`、`dataset`、`createElement`、`addEventListener('click', …)`
+- 定时器，以及 4 KB 的 `localStorage`
+
+脚本画出来的内容，App 同样按白名单过滤后再显示。`request()` 一律返回 `NOT_ALLOWED`：Honk 还没有 bot 回调。旧版 App 和桌面演示（没有宿主）显示填好 `{{key}}` 的静态卡片，所以关键信息要写在 HTML 里。例子：
+
+```html
+<p id="n">{{count}}</p><button id="b">+1</button>
+<script>
+  let n = Number(JSON.parse(TelegramWidget.chatData).count);
+  document.getElementById("b").addEventListener("click", () => {
+    document.getElementById("n").textContent = String(++n);
+  });
+</script>
+```
 
 ## App API
 

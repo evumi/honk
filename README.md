@@ -62,9 +62,21 @@ See `gateway/Dockerfile` for the container. Settings:
 
 Gateways before short bot ids (database schema v1) gave bots integer ids, so their tokens look like `4:Gw2K7mx…`. Upgrading gives every bot a short id; the old tokens keep working until they are reset, and a reset token starts with the short id. The app moves each bot's local messages and settings to its new id the first time it syncs, using the stored token to ask `getMe` which bot it is, or matching its creation time and name when it has no token; if the gateway can't be reached, it keeps the bot and tries again later. Update the apps before the gateway: older app builds cannot read short ids (`/v1/info` reports `api` 2), while new builds also work with an old gateway.
 
-Card HTML (profile v1) keeps whitelisted elements: text and structure, tables, `details`, `button`, `a`, `style`, `img` with `data:` images, and inline SVG. It removes scripts, `on*` handlers, form controls, external resources (links other than `https://`, `#id` or `{{key}}`) and CSS that loads anything (`@import`, `expression()`, `url()` other than `data:` images). The client applies its own CSS whitelist when rendering.
+Card HTML keeps whitelisted elements: text and structure, tables, `details`, `button`, `a`, `style`, `img` with `data:` images, inline SVG, and inline `<script>` (profile 2, below). It removes external and module scripts, `on*` handlers, form controls, external resources (links other than `https://`, `#id` or `{{key}}`) and CSS that loads anything (`@import`, `expression()`, `url()` other than `data:` images). The client applies its own CSS whitelist when rendering.
 
-Cards can be styled as Telegram widgets are, with `<style>` blocks as well as `style=""`: type, `.class`, `#id` and attribute selectors, compounds (`div.card`), descendant, child (`>`) and sibling (`+`, `~`) combinators, `:first-child` / `:last-child` / `:nth-child()`, `:root` (also `html` and `body`), and several selectors per rule, with the usual specificity and order; inline style wins unless a rule is `!important`. Custom properties (`--x` on `:root` or any element, read with `var()`), the theme's `--tg-theme-*` variables, `light-dark()` and `@media (prefers-color-scheme: dark)` follow the app's appearance; `display: none` hides an element. `{{key}}` works inside `<style>` and in `class`. The first 400 rules apply; other media queries, `@keyframes`, pseudo-elements and `:hover` are ignored. Scripts are removed; the app does not run JavaScript yet.
+Cards can be styled as Telegram widgets are, with `<style>` blocks as well as `style=""`: type, `.class`, `#id` and attribute selectors, compounds (`div.card`), descendant, child (`>`) and sibling (`+`, `~`) combinators, `:first-child` / `:last-child` / `:nth-child()`, `:root` (also `html` and `body`), and several selectors per rule, with the usual specificity and order; inline style wins unless a rule is `!important`. Custom properties (`--x` on `:root` or any element, read with `var()`), the theme's `--tg-theme-*` variables, `light-dark()` and `@media (prefers-color-scheme: dark)` follow the app's appearance; `display: none` hides an element. `{{key}}` works inside `<style>` and in `class`. The first 400 rules apply; other media queries, `@keyframes`, pseudo-elements and `:hover` are ignored.
+
+Cards can carry inline scripts, as Telegram's HTML widgets do (card profile 2). The iOS and Android apps run each card's scripts in a QuickJS runtime of its own ([quickjs-ng](https://github.com/quickjs-ng/quickjs), `native/`) on a background thread, with no network or files, 8 MB of memory and 200 ms per task; past that the card stops and keeps what it last drew. `window.TelegramWidget` gives `chatData` (the message's `data`), `themeParams`, `colorScheme`, `onEvent('themeChanged' | 'activated' | 'deactivated', …)`, and `openLink(url)` / `copyText(text)` from a tap handler. Scripts change the card through a small DOM (`getElementById`, `querySelector`, `textContent`, `innerHTML`, `classList`, `style`, `dataset`, `createElement`, `addEventListener('click', …)`) and have timers and a 4 KB `localStorage`; the app draws what they produce through the same whitelist. `request()` is always refused (`NOT_ALLOWED`): Honk has no bot callbacks yet. Older apps, and the desktop demo, show the static card with `{{key}}` filled in. The gateway keeps inline scripts and removes external and module scripts. Example:
+
+```html
+<p id="n">{{count}}</p><button id="b">+1</button>
+<script>
+  let n = Number(JSON.parse(TelegramWidget.chatData).count);
+  document.getElementById("b").addEventListener("click", () => {
+    document.getElementById("n").textContent = String(++n);
+  });
+</script>
+```
 
 ## App API
 

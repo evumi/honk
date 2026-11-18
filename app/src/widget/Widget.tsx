@@ -2,12 +2,17 @@ import type { JSX } from "nsh";
 // Renders a message card with nsh views. Block elements become Views, runs of
 // inline content one Text with nested spans. `{{key}}` placeholders come from
 // the message's data. Styles come from the card's <style> rules (css.ts)
-// and its style attributes. Scripts are not run.
-import { Image, openUrl, Text, View } from "nsh";
+// and its style attributes. A card with scripts (profile 2) runs them in the
+// host's QuickJS sandbox (native/card) and is drawn from the trees it hands
+// back, checked against the whitelist; until then, and when the host cannot
+// run it, it is the static card.
+import { cleanup, Clipboard, effect, Image, lifecycle, locale, openUrl, signal, Text, untracked, View } from "nsh";
+import { cards, on } from "../host";
 import type { Palette } from "../theme";
 import { widgetVars } from "../theme";
 import { countNodes, fill, parse, parseData, type ElementNode, type WidgetNode } from "./parse";
 import { cascade, parseDecls, parseSheet, styleText, type Scheme, type Sheet } from "./css";
+import { cleanTree } from "./sanitize";
 import type { TreeEnv } from "./selector";
 
 const MAX_NODES = 2000;
@@ -32,6 +37,10 @@ interface Ctx {
   scheme: Scheme;
   /** Styles worked out in this render, by element. */
   computed: Map<ElementNode, Computed>;
+  /** A tree from a card's script: already filled, never filled again. */
+  raw?: boolean;
+  /** What a tap on a pressable element of a scripted card does. */
+  press?: (el: ElementNode, href: string | null) => (() => void) | undefined;
 }
 
 interface Computed {
@@ -58,7 +67,7 @@ function computed(el: ElementNode, ctx: Ctx): Computed {
 
 /** `{{key}}` from the data. */
 function f(s: string, ctx: Ctx): string {
-  return fill(s, ctx.data);
+  return ctx.raw ? s : fill(s, ctx.data);
 }
 
 // MARK: CSS values
@@ -242,7 +251,8 @@ function open(url: string) {
   openUrl(url).catch(() => {});
 }
 
-function pressHandler(href: string | null): (() => void) | undefined {
+function pressHandler(el: ElementNode, ctx: Ctx, href: string | null): (() => void) | undefined {
+  if (ctx.press) return ctx.press(el, href);
   return href ? () => open(href) : undefined;
 }
 
@@ -260,7 +270,7 @@ function renderInline(node: WidgetNode, ctx: Ctx, inherited: Style): JSX.Element
   const style = { ...own.text, ...css.text };
   const href = node.tag === "a" ? link(node, ctx) : null;
   return (
-    <Text style={style as never} onPress={pressHandler(href)}>
+    <Text style={style as never} onPress={pressHandler(node, ctx, href)}>
       {node.children.map((c) => renderInline(c, inner, { ...inherited, ...style }))}
     </Text>
   );
@@ -322,7 +332,7 @@ function renderBlock(el: ElementNode, ctx: Ctx, inherited: Style, listTag?: stri
   }
   if (el.tag === "hr") return <View style={box as never} />;
   const href = el.tag === "a" || el.tag === "button" ? link(el, ctx) : null;
-  const press = pressHandler(href);
+  const press = pressHandler(el, ctx, href);
   const isFlex = css.display === "flex" || css.display === "inline-flex";
   if (isFlex && box.alignItems === undefined) box.alignItems = "stretch";
   const children = renderChildren(el.children, inner, text, el.tag === "ul" || el.tag === "ol" ? el.tag : undefined, isFlex);
@@ -394,8 +404,8 @@ function schemeOf(vars: Record<string, string>): Scheme {
   return vars["--tg-color-scheme"] === "dark" ? "dark" : "light";
 }
 
-/** A card's context: `{{key}}` filled as it renders. */
-function staticCtx(nodes: WidgetNode[], data: Record<string, unknown>, palette: Palette): { ctx: Ctx; root: ElementNode } {
+/** A card's context: `{{key}}` filled as it renders (`raw`: a tree that is already filled). */
+function staticCtx(nodes: WidgetNode[], data: Record<string, unknown>, palette: Palette, raw = false): { ctx: Ctx; root: ElementNode } {
   const { root, parents } = treeOf(nodes);
   const vars = widgetVars(palette);
   // Matching reads id and class many times per element: fill each once per draw.
@@ -403,15 +413,15 @@ function staticCtx(nodes: WidgetNode[], data: Record<string, unknown>, palette: 
   const env: TreeEnv = {
     parentOf: (n) => parents.get(n),
     attr: (el, name) => {
-      const raw = el.attrs[name];
-      if (raw === undefined || !raw.includes("{{")) return raw;
+      const value = el.attrs[name];
+      if (value === undefined || raw || !value.includes("{{")) return value;
       let byName = filled.get(el);
       if (!byName) filled.set(el, (byName = {}));
-      return (byName[name] ??= fill(raw, data));
+      return (byName[name] ??= fill(value, data));
     },
   };
-  const sheet = parseSheet(styleText(nodes, (s) => fill(s, data)));
-  return { ctx: { data, vars, p: palette, sheet, env, scheme: schemeOf(vars), computed: new Map() }, root };
+  const sheet = parseSheet(raw ? styleText(nodes) : styleText(nodes, (s) => fill(s, data)));
+  return { ctx: { data, vars, p: palette, sheet, env, scheme: schemeOf(vars), computed: new Map(), raw }, root };
 }
 
 export function Widget(props: { html: string; data: string; palette: Palette }): JSX.Element {
@@ -419,10 +429,135 @@ export function Widget(props: { html: string; data: string; palette: Palette }):
   if (nodes.length === 0 || countNodes(nodes) > MAX_NODES) return <View />;
   const data = parseData(props.data);
   const base: Style = { color: props.palette.text, fontSize: 15, lineHeight: 21 };
+  if (scriptsOf(nodes)) return <ScriptedWidget nodes={nodes} data={data} rawData={props.data} base={base} palette={props.palette} />;
   // Read the palette inside the view, so the card is drawn again when the appearance changes.
   const draw = () => {
     const { ctx, root } = staticCtx(nodes, data, props.palette);
     return renderCard(root, ctx, { ...base, color: props.palette.text });
+  };
+  return <View>{draw()}</View>;
+}
+
+/** Whether the card has a script to run. */
+function scriptsOf(nodes: WidgetNode[]): boolean {
+  return nodes.some((n) => n.type === "element" && (n.tag === "script" || scriptsOf(n.children)));
+}
+
+/** The card's nodes with `{{key}}` filled in text, attributes and <style>, as its script gets them. */
+function fillTree(nodes: WidgetNode[], data: Record<string, unknown>): WidgetNode[] {
+  return nodes.map((n) => {
+    if (n.type === "text") return { type: "text", text: fill(n.text, data) };
+    if (n.tag === "script") return n;
+    if (n.tag === "style") return { type: "element", tag: "style", attrs: {}, children: [{ type: "text", text: fill(styleText([n]), data) }] };
+    const attrs: Record<string, string> = {};
+    for (const [k, v] of Object.entries(n.attrs)) attrs[k] = fill(v, data);
+    return { type: "element", tag: n.tag, attrs, children: fillTree(n.children, data) };
+  });
+}
+
+interface CardResult {
+  tree: WidgetNode[] | null;
+  /** The tree as the card sent it, to skip a redraw when nothing changed. */
+  raw: string | null;
+  paths: Map<ElementNode, number[]>;
+  prevented: boolean;
+  open: string | null;
+  copy: string | null;
+}
+
+/** A host's answer (JSON), with the tree checked against the whitelist. */
+function readResult(json: unknown): CardResult {
+  let r: Record<string, unknown> = {};
+  try {
+    const v = typeof json === "string" ? JSON.parse(json) : null;
+    if (v && typeof v === "object") r = v;
+  } catch {}
+  const str = (v: unknown) => (typeof v === "string" ? v : null);
+  for (const line of Array.isArray(r.logs) ? r.logs.slice(0, 20) : []) console.log(`[card] ${String(line)}`);
+  const paths = new Map<ElementNode, number[]>();
+  const raw = r.tree == null ? null : JSON.stringify(r.tree);
+  return { tree: r.tree == null ? null : cleanTree(r.tree, paths), raw, paths, prevented: r.prevented === true, open: str(r.open), copy: str(r.copy) };
+}
+
+let cardSeq = 0;
+
+/** A card with scripts: the static card until the host's runtime answers, then the trees its script draws. */
+function ScriptedWidget(props: { nodes: WidgetNode[]; data: Record<string, unknown>; rawData: string; base: Style; palette: Palette }): JSX.Element {
+  const key = `card-${++cardSeq}`;
+  const tree = signal<WidgetNode[] | null>(null);
+  let paths = new Map<ElementNode, number[]>();
+  let closed = false;
+  let lastRaw: string | null = null;
+
+  const apply = (json: unknown): CardResult => {
+    const r = readResult(json);
+    // A tree equal to the one on screen (a timer wrote the same text again) is not drawn again.
+    if (r.tree && !closed && r.raw !== lastRaw) {
+      lastRaw = r.raw;
+      paths = r.paths;
+      tree.set(r.tree);
+    }
+    return r;
+  };
+
+  const initialVars = untracked(() => widgetVars(props.palette));
+  const load = {
+    tree: fillTree(props.nodes, props.data),
+    data: props.rawData,
+    theme: initialVars,
+    language: untracked(locale),
+    active: untracked(lifecycle) === "active",
+  };
+  cards.open(key, JSON.stringify(load)).then(apply).catch(() => {});
+  const off = on("honk.card.changed", (p) => {
+    const e = p as { key?: unknown; result?: unknown };
+    if (e && e.key === key) apply(e.result);
+  });
+  cleanup(() => {
+    closed = true;
+    off();
+    cards.close(key).catch(() => {});
+  });
+  let lastVars = JSON.stringify(initialVars);
+  effect(() => {
+    const vars = JSON.stringify(widgetVars(props.palette));
+    if (vars !== lastVars) {
+      lastVars = vars;
+      cards.set(key, JSON.stringify({ theme: JSON.parse(vars) })).then(apply).catch(() => {});
+    }
+  });
+  let lastActive = load.active;
+  effect(() => {
+    const active = lifecycle() === "active";
+    if (active !== lastActive) {
+      lastActive = active;
+      cards.set(key, JSON.stringify({ active })).then(apply).catch(() => {});
+    }
+  });
+
+  const press = (el: ElementNode, href: string | null): (() => void) | undefined => {
+    if (!el.on) return href ? () => open(href) : undefined;
+    return () => {
+      const path = paths.get(el);
+      if (!path) return;
+      cards.click(key, JSON.stringify(path)).then((json) => {
+        const r = apply(json);
+        if (r.open && r.open.startsWith("https://")) open(r.open);
+        if (r.copy) Clipboard.writeText(r.copy).catch(() => {});
+        // One link per tap: the script's, else the element's own.
+        if (!r.prevented && !r.open && href) open(href);
+      }).catch(() => {});
+    };
+  };
+
+  const draw = () => {
+    const t = tree();
+    if (!t) {
+      const { ctx, root } = staticCtx(props.nodes, props.data, props.palette);
+      return renderCard(root, ctx, { ...props.base, color: props.palette.text });
+    }
+    const { ctx, root } = staticCtx(t, props.data, props.palette, true);
+    return renderCard(root, { ...ctx, press }, { ...props.base, color: props.palette.text });
   };
   return <View>{draw()}</View>;
 }

@@ -6,3 +6,8 @@
     kotlinx.serialization.KSerializer serializer(...);
 }
 -keep,includedescriptorclasses class dev.evumi.honk.core.**$$serializer { *; }
+
+# Card scripts: libhonkcard finds CardNative's methods by their JNI names.
+-keepclasseswithmembernames,includedescriptorclasses class dev.evumi.honk.core.CardNative {
+    native <methods>;
+}

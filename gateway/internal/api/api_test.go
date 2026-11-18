@@ -144,12 +144,13 @@ func TestSendFetchSyncAck(t *testing.T) {
 	e := setup(t)
 	secret, token := e.register("ios")
 
-	card := `<div><span>{{status}}</span><script>x()</script><a href="{{url}}">查看</a></div>`
+	// Inline scripts stay (card profile 2); handlers and external scripts go.
+	card := `<div><span onclick="y()">{{status}}</span><script>x()</script><script src="https://evil/a.js"></script><a href="{{url}}">查看</a></div>`
 	sent := must[store.Message](t, e.do("POST", "/bot"+token+"/sendMessage", "", map[string]any{
 		"title": "部署成功", "body": "sub2api / sluice 已上线", "html": card,
 		"data": map[string]string{"status": "已上线"}, "level": "time-sensitive", "id": "dep-1",
 	}))
-	if sent.ID == 0 || strings.Contains(sent.HTML, "script") || sent.Data != `{"status":"已上线"}` || sent.Level != "timeSensitive" {
+	if sent.ID == 0 || !strings.Contains(sent.HTML, "<script>x()</script>") || strings.Contains(sent.HTML, "evil") || strings.Contains(sent.HTML, "onclick") || sent.Data != `{"status":"已上线"}` || sent.Level != "timeSensitive" {
 		t.Fatalf("sent = %+v", sent)
 	}
 	n := e.pusher.last(t)
