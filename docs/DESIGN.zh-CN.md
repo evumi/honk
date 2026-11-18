@@ -331,7 +331,7 @@ Telegram 的 widget 一般用 class 加 `<style>` 写，所以 Honk 也按样式
 | 位置 | 作用 |
 | --- | --- |
 | `native/quickjs/` | quickjs-ng 的引擎核心（只有 `quickjs.c`、`libregexp.c`、`libunicode.c`、`dtoa.c` 和头文件），不带 `quickjs-libc`，所以卡片没有文件、网络、进程和 `std` / `os` 模块。版本见 `VERSION` |
-| `native/card/honk_card.c` | 沙箱：每张卡片一个 `JSRuntime`，自己的分配器计内存（超过 8MB 拒绝分配并中断，脚本抓不到），中断回调按截止时间停任务，栈上限 256KB；每秒脚本时间超过 300ms 时，下一次 tick 推到下一秒。读脚本返回的东西时只读自有数据属性和自己解析的 JSON，不会触发卡片的 getter；链接只放行 https、≤ 256 字符、每次点击一次，复制 1–256 字符、每次点击一次；树超过 512KB 就停止卡片 |
+| `native/card/honk_card.c` | 沙箱（`honk_card_answer` 把宿主取回的答案交给卡片，答案 ≤ 1024 字节且须是 UTF-8）：每张卡片一个 `JSRuntime`，自己的分配器计内存（超过 8MB 拒绝分配并中断，脚本抓不到），中断回调按截止时间停任务，栈上限 256KB；每秒脚本时间超过 300ms 时，下一次 tick 推到下一秒。读脚本返回的东西时只读自有数据属性和自己解析的 JSON，不会触发卡片的 getter；链接只放行 https、≤ 256 字符、每次点击一次，复制 1–256 字符、每次点击一次；树超过 512KB 就停止卡片 |
 | `native/card/runtime.js` | 卡片里的页面：精简 DOM（节点、属性、`classList`、`style`、`dataset`、`innerHTML`、选择器、事件冒泡、`onclick`）、定时器（由宿主的 tick 驱动）、4KB 的 `localStorage` / `sessionStorage`、`console`、`TelegramWidget`。`gen_runtime.py` 把它生成 `runtime_js.h` 编进 C 里 |
 | `native/Package.swift`、`native/swift/HonkCard/CardHost.swift` | iOS：本地 Swift 包。`CardHost` 把所有卡片放在一个串行队列上，按 `honk_card_next` 安排 tick；最多同时保留 8 张卡片，所有卡片的堆加起来超过 32MB 时也关掉最久没用的（`honk_card_memory`） |
 | `native/jni/`、`android/core/.../CardHost.kt` | Android：JNI（字符串用 UTF-8 字节数组传，JNI 自己的字符串是修改过的 UTF-8）和与 Swift 相同的 `CardHost`，在一个 4MB 栈的后台线程上；`libhonkcard.so` 由 `android/app` 的 CMake 构建 |
@@ -341,13 +341,16 @@ Telegram 的 widget 一般用 class 加 `<style>` 写，所以 Honk 也按样式
 
 | 调用 | 参数 | 返回 |
 | --- | --- | --- |
-| `honk.card.open` | `{key, load}`：`load` 是 `{tree, data, theme, language, active}` | 结果 |
+| `honk.card.open` | `{key, load}`：`load` 是 `{tree, data, theme, language, active, allowQueries}` | 结果 |
 | `honk.card.click` | `{key, path}`：从根开始的子节点下标，如 `[0,2]` | 结果 |
 | `honk.card.set` | `{key, state}`：`{theme}` 或 `{active}` | 结果 |
+| `honk.card.answer` | `{key, seq, ok, data}`：对结果里 `request` 的回答；`ok` 为真时 `data` 是 bot 的答案（≤ 1024 字节，超出或不是 UTF-8 则请求以 `BAD_ANSWER` 失败），否则 `data` 是错误码（`A–Z` 和 `_`，≤ 32 字符，如 `NETWORK`，其他值变成 `REQUEST_FAILED`） | 结果 |
 | `honk.card.close` | `{key}` | `true` |
 | 事件 `honk.card.changed` | `{key, result}` | 定时器或 Promise 改了卡片 |
 
-结果是 `{tree, prevented, open?, copy?, stopped, logs}`：`tree` 只在变化时给（写入相同的文字、属性或 `innerHTML` 不算变化），App 收到和屏幕上相同的树也不重画；`open` / `copy` 由 App 用已有的 `openUrl` 和剪贴板执行；`prevented` 为假时，再执行被点元素自己的链接。有点击处理函数的元素在树里带 `on: true`，App 只让这些元素可点。
+结果是 `{tree, prevented, open?, copy?, request?, stopped, logs}`：`tree` 只在变化时给（写入相同的文字、属性或 `innerHTML` 不算变化），App 收到和屏幕上相同的树也不重画；`open` / `copy` 由 App 用已有的 `openUrl` 和剪贴板执行；`prevented` 为假时，再执行被点元素自己的链接。有点击处理函数的元素在树里带 `on: true`，App 只让这些元素可点。
+
+`request`（`{seq, data}`，只出现在 click 的结果里）表示卡片在这次点击里调了 `TelegramWidget.request(data)`：`data` 是 1–64 字节的 UTF-8，`seq` 是卡片内递增的正整数（C 一侧像对待所有返回值一样校验）。宿主把它发给 bot，拿到答案后调 `honk.card.answer`（C：`honk_card_answer(card, seq, ok, data, len)`），卡片的 Promise 随之兑现或拒绝，返回的结果和 tick 一样（树的变化、日志，没有 `open` / `copy` / `request`）。只有 load 里带 `allowQueries: true`（消息的 `allow_queries`）时才会发出请求，否则 `request()` 以 `NOT_ALLOWED` 拒绝。`WidgetRequestError.code`：`NOT_ALLOWED`（没开 `allowQueries`、不是在点击处理函数里同步调用、同一次点击里的第二次）、`INVALID_DATA`（不是 1–64 字节的字符串）、`TOO_MANY_REQUESTS`（已有 4 个未答的）、`TIMEOUT`（15 秒没人回答，由 tick 驱动，所以宿主要照常按 `honk_card_next` 安排 tick）、宿主给的错误码（`BAD_ANSWER`、`REQUEST_FAILED` 等）。未知或已答过的 `seq` 被忽略。
 
 限制，和 Telegram 对比：
 
@@ -365,7 +368,7 @@ Telegram 的 widget 一般用 class 加 `<style>` 写，所以 Honk 也按样式
 
 脚本在宿主的后台线程上跑，卡死也不会卡住界面。“停止”：卡片保留最后一次画出的样子，不再响应；因为超时停止的卡片还会把最后的树交出来。没被捕获的异常只写日志（`logs`，App 打到控制台），卡片继续运行。
 
-和 Telegram 不同的地方：`request()` 一律以 `WidgetRequestError`（`NOT_ALLOWED`）拒绝，Honk 还没有 bot 回调；只有 click 事件；`getBoundingClientRect` 返回全 0；没有 canvas；`HapticFeedback` 什么也不做；`publicData`、`viewer`、`wallet` 都是 null。`editMessageData` 改了数据时，会话里这张卡片按新数据重建，脚本重新运行；滚出屏幕再回来时也会重建。
+和 Telegram 不同的地方：`request()` 只在消息允许查询（`allow_queries`）时发出，错误码见上；只有 click 事件；`getBoundingClientRect` 返回全 0；没有 canvas；`HapticFeedback` 什么也不做；`publicData`、`viewer`、`wallet` 都是 null。`editMessageData` 改了数据时，会话里这张卡片按新数据重建，脚本重新运行；滚出屏幕再回来时也会重建。
 
 兼容：网关保留内联的普通 `<script>`（去掉属性），删掉带 `src`、`type` 不是 JavaScript、在 SVG 里，或文本里有 `<!--`、`<script`、`</script` 的脚本（后几种在 HTML 规范和 App 的解析器里切分不同，可能把脚本后面的内容当成没清理过的标记）。旧版 App 的渲染器本来就跳过 `<script>`；没有宿主（`nsh run` 演示）或宿主调用失败时，新版 App 也显示静态卡片。所以卡片在不跑脚本时也要能看：关键信息写在 HTML 里，脚本只做增强。
 
@@ -406,7 +409,7 @@ cd android && make setup && ./gradlew assembleDebug   # 下载 nsh AAR 并编译
 - [ ] 后台刷新（iOS `BGAppRefreshTask`、Android WorkManager 每 6 小时）和「删除这台设备的数据」的原生代码只在 CI 里编译，没在真机上跑过；Android 的后台同步还不补发通知
 - [ ] Android 预设头像现在画的是 bot 名称首字，和 App 内的图标不一致；可以给 Android 加一套对应的矢量图标
 - [x] 卡片 profile 2：JS（宿主里的 quickjs-ng）、`TelegramWidget` 兼容接口
-- [ ] 卡片按钮回调：`TelegramWidget.request()` 和 `answerWidgetQuery`（需要 bot webhook 或长轮询）；`publicData` / 共享卡片
+- [ ] 卡片按钮回调：沙箱一侧已就绪（`request()`、`honk_card_answer`），网关的 `answerWidgetQuery`、webhook / 长轮询和宿主接线随同一个版本；`publicData` / 共享卡片
 - [ ] 卡片脚本在真机上的耗时和内存还没测过；pointer 事件、canvas 没有
 - [ ] 推送内容端到端加密（参考 Bark 的 ciphertext），消息在网关上只存密文
 - **nsh 还是 0.5.x**：推送和扩展全部用原生写，nsh 只负责 App 内界面，把升级的影响面控制在 UI 层。

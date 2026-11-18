@@ -55,6 +55,20 @@ public final class CardHost: @unchecked Sendable {
         await call(key) { honk_card_click($0, path) }
     }
 
+    /// Delivers the answer to a card's `request` (the result's `{"seq", "data"}`): `ok` resolves its
+    /// promise with `data` (at most 1024 bytes), otherwise it rejects with `data` as the error code
+    /// ("TIMEOUT", "NETWORK", ...). Returns a normal result; an unknown seq changes nothing.
+    public func answer(key: String, seq: Int, ok: Bool, data: String) async -> String {
+        await call(key) { card in
+            var text = data
+            return text.withUTF8 { p in
+                p.baseAddress.map { base in
+                    base.withMemoryRebound(to: CChar.self, capacity: p.count) { honk_card_answer(card, Int32(seq), ok ? 1 : 0, $0, p.count) }
+                } ?? honk_card_answer(card, Int32(seq), ok ? 1 : 0, nil, 0)
+            }
+        }
+    }
+
     public func set(key: String, state: String) async -> String {
         await call(key) { honk_card_set($0, state) }
     }

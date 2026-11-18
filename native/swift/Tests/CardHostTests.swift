@@ -2,12 +2,12 @@ import Foundation
 import HonkCard
 import Testing
 
-private func load(_ script: String) -> String {
+private func load(_ script: String, allowQueries: Bool = false) -> String {
     let tree: [[String: Any]] = [
         ["type": "element", "tag": "p", "attrs": ["id": "out"], "children": [["type": "text", "text": "static"]]],
         ["type": "element", "tag": "script", "attrs": [:], "children": [["type": "text", "text": script]]],
     ]
-    let load: [String: Any] = ["tree": tree, "data": "{}", "theme": ["--tg-color-scheme": "light"], "language": "en", "active": true]
+    let load: [String: Any] = ["tree": tree, "data": "{}", "theme": ["--tg-color-scheme": "light"], "language": "en", "active": true, "allowQueries": allowQueries]
     return String(data: try! JSONSerialization.data(withJSONObject: load), encoding: .utf8)!
 }
 
@@ -55,6 +55,43 @@ private final class Changes: @unchecked Sendable {
     #expect(Date().timeIntervalSince(start) < 1)
     let ok = await host.open(key: "ok", load: load("document.getElementById('out').textContent = 'fine'"))
     #expect(ok.contains("fine"))
+}
+
+@Test func requestsGoOutAndAnswersComeBack() async throws {
+    let host = CardHost { _, _ in }
+    _ = await host.open(key: "q", load: load("""
+        var p = document.getElementById('out');
+        var b = document.createElement('button'); document.body.appendChild(b);
+        b.addEventListener('click', function () {
+          TelegramWidget.request('ping').then(function (v) { p.textContent = 'got ' + v }, function (e) { p.textContent = 'err ' + e.code });
+        });
+        """, allowQueries: true))
+    let c = await host.click(key: "q", path: "[2]")
+    #expect(c.contains("\"request\":{\"seq\":1,\"data\":\"ping\"}"))
+    let a = await host.answer(key: "q", seq: 1, ok: true, data: "pong \u{1F600}")
+    #expect(a.contains("got pong \u{1F600}"))
+    let again = await host.answer(key: "q", seq: 1, ok: true, data: "x")
+    #expect(again.contains("\"tree\":null"))
+    let c2 = await host.click(key: "q", path: "[2]")
+    #expect(c2.contains("\"seq\":2"))
+    let f = await host.answer(key: "q", seq: 2, ok: false, data: "NETWORK")
+    #expect(f.contains("err NETWORK"))
+    let gone = await host.answer(key: "nope", seq: 1, ok: true, data: "x")
+    #expect(gone.contains("\"stopped\":\"closed\""))
+}
+
+@Test func requestsAreRefusedWithoutAllowQueries() async throws {
+    let host = CardHost { _, _ in }
+    _ = await host.open(key: "n", load: load("""
+        var p = document.getElementById('out');
+        var b = document.createElement('button'); document.body.appendChild(b);
+        b.addEventListener('click', function () {
+          TelegramWidget.request('ping').then(function (v) { p.textContent = 'got ' + v }, function (e) { p.textContent = 'err ' + e.code });
+        });
+        """))
+    let c = await host.click(key: "n", path: "[2]")
+    #expect(c.contains("err NOT_ALLOWED"))
+    #expect(!c.contains("\"request\""))
 }
 
 @Test func anOpenAfterItsCloseIsRefused() async throws {

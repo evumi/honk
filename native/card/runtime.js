@@ -10,7 +10,7 @@
 (() => {
   "use strict";
 
-  const LIMITS = { nodes: 2000, timers: 64, handlers: 16, storage: 4096, logs: 20, mutations: 10000, link: 256 };
+  const LIMITS = { nodes: 2000, timers: 64, handlers: 16, storage: 4096, logs: 20, mutations: 10000, link: 256, requests: 4, requestMs: 15000, requestBytes: 64 };
   const stringify = JSON.stringify;
   const parseJSON = JSON.parse;
   const globalEval = eval;
@@ -20,7 +20,11 @@
 
   let dirty = true; // the tree was not sent yet
   let inTap = false;
-  let effects = { open: null, copy: null, logs: [] };
+  let effects = { open: null, copy: null, request: null, logs: [] };
+  let allowQueries = false; // the message allows request() (bot callbacks)
+  let tapRequested = false; // request() was used in the current tap
+  const pending = new Map(); // seq -> { resolve, reject, due }
+  let nextSeq = 1;
   let mutations = 0;
   let active = true;
   let theme = {};
@@ -851,6 +855,7 @@
   }
 
   function runTimers() {
+    expireRequests();
     const t = now();
     const due = [...timers].filter(([, x]) => x.due <= t).sort((a, b) => a[1].due - b[1].due).slice(0, 32);
     for (const [id, x] of due) {
@@ -865,8 +870,19 @@
     }
   }
 
+  function expireRequests() {
+    const t = now();
+    for (const [seq, x] of [...pending]) {
+      if (x.due <= t) {
+        pending.delete(seq);
+        x.reject(requestError("TIMEOUT", "The bot did not answer in time"));
+      }
+    }
+  }
+
   function nextDue() {
     let min = Infinity;
+    for (const x of pending.values()) min = Math.min(min, x.due);
     for (const x of timers.values()) min = Math.min(min, x.due);
     if (min === Infinity) return -1;
     // Off screen or in the background a card's timers fire at most once a second.
@@ -932,6 +948,20 @@
     return e;
   }
 
+  function utf8Length(s) {
+    let n = 0;
+    for (let i = 0; i < s.length; i++) {
+      const c = s.charCodeAt(i);
+      if (c < 0x80) n += 1;
+      else if (c < 0x800) n += 2;
+      else if (c >= 0xd800 && c < 0xdc00 && i + 1 < s.length && (s.charCodeAt(i + 1) & 0xfc00) === 0xdc00) {
+        n += 4;
+        i++;
+      } else n += 3;
+    }
+    return n;
+  }
+
   const noop = () => {};
   const TelegramWidget = Object.freeze({
     // Telegram's API level (its "widget profile").
@@ -985,8 +1015,24 @@
       if (!inTap || effects.copy !== null) { log("warn", "copyText works once per tap, from its handler"); return; }
       effects.copy = text;
     },
-    // Honk has no bot callbacks yet: every request is refused, as Telegram does without allow_queries.
-    request: () => Promise.reject(requestError("NOT_ALLOWED", "This card cannot send requests to its bot")),
+    // Bot callbacks. Errors (WidgetRequestError, .code): NOT_ALLOWED (the message does not allow
+    // queries, or not called synchronously from a tap handler, or a second request in one tap),
+    // INVALID_DATA (not a string of 1-64 bytes), TOO_MANY_REQUESTS (4 in flight), TIMEOUT (15 s),
+    // and whatever code the host answers a failed request with (default REQUEST_FAILED).
+    request(data) {
+      if (!allowQueries) return Promise.reject(requestError("NOT_ALLOWED", "This card cannot send requests to its bot"));
+      const len = typeof data === "string" ? utf8Length(data) : 0;
+      if (len < 1 || len > LIMITS.requestBytes) return Promise.reject(requestError("INVALID_DATA", "request() takes a string of 1 to 64 bytes"));
+      if (!inTap) return Promise.reject(requestError("NOT_ALLOWED", "request() works from a tap handler"));
+      if (tapRequested) return Promise.reject(requestError("NOT_ALLOWED", "request() works once per tap"));
+      if (pending.size >= LIMITS.requests) return Promise.reject(requestError("TOO_MANY_REQUESTS", "Too many requests in flight"));
+      tapRequested = true;
+      const seq = nextSeq++;
+      effects.request = { seq, data };
+      return new Promise((resolve, reject) => {
+        pending.set(seq, { resolve, reject, due: now() + LIMITS.requestMs });
+      });
+    },
   });
 
   // MARK: globals
@@ -1062,6 +1108,7 @@
   function begin(tap) {
     mutations = 0;
     inTap = tap;
+    tapRequested = false;
   }
 
   return {
@@ -1070,6 +1117,7 @@
       const a = parseJSON(json);
       setTheme(a.theme);
       active = a.active !== false;
+      allowQueries = a.allowQueries === true;
       chatData = typeof a.data === "string" && a.data ? a.data : null;
       define("navigator", Object.freeze({ userAgent: "Honk", language: String(a.language || "en"), onLine: false, sendBeacon: networkDisabled("sendBeacon") }));
       build(a.tree, root);
@@ -1119,6 +1167,16 @@
       begin(false);
       runTimers();
     },
+    // The host's answer to a request: {"seq", "ok", "data"} (ok false: data is the error code).
+    answer(json) {
+      begin(false);
+      const a = parseJSON(json);
+      const x = pending.get(a.seq);
+      if (!x) return;
+      pending.delete(a.seq);
+      if (a.ok === true) x.resolve(String(a.data));
+      else x.reject(requestError(/^[A-Z_]{1,32}$/.test(a.data) ? a.data : "REQUEST_FAILED", "The request failed"));
+    },
     set(json) {
       begin(false);
       const a = parseJSON(json);
@@ -1141,8 +1199,8 @@
       return stringify(root._children.map(out));
     },
     effects() {
-      const e = { next: nextDue(), open: effects.open, copy: effects.copy, logs: effects.logs };
-      effects = { open: null, copy: null, logs: [] };
+      const e = { next: nextDue(), open: effects.open, copy: effects.copy, request: effects.request, logs: effects.logs };
+      effects = { open: null, copy: null, request: null, logs: [] };
       inTap = false;
       return stringify(e);
     },

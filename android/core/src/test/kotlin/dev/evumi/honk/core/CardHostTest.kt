@@ -18,7 +18,7 @@ class CardHostTest {
 
     @After fun shutdown() = host.shutdown()
 
-    private fun load(script: String): String = buildJsonObject {
+    private fun load(script: String, allowQueries: Boolean = false): String = buildJsonObject {
         put("tree", buildJsonArray {
             add(buildJsonObject {
                 put("type", "element"); put("tag", "p")
@@ -34,6 +34,7 @@ class CardHostTest {
         put("theme", buildJsonObject { put("--tg-color-scheme", "light") })
         put("language", "en")
         put("active", true)
+        put("allowQueries", allowQueries)
     }.toString()
 
     @Test fun opensClicksAndCloses() {
@@ -68,6 +69,38 @@ class CardHostTest {
         assertTrue(r, r.contains("\"stopped\":\"time\""))
         assertTrue((System.nanoTime() - start) / 1_000_000 < 1000)
         assertTrue(host.open("ok", load("document.getElementById('out').textContent = 'fine'")).contains("fine"))
+    }
+
+    @Test fun requestsGoOutAndAnswersComeBack() {
+        host.open("q", load("""
+            var p = document.getElementById('out');
+            var b = document.createElement('button'); document.body.appendChild(b);
+            b.addEventListener('click', function () {
+              TelegramWidget.request('ping').then(function (v) { p.textContent = 'got ' + v }, function (e) { p.textContent = 'err ' + e.code });
+            });
+        """, allowQueries = true))
+        val c = host.click("q", "[2]")
+        assertTrue(c, c.contains("\"request\":{\"seq\":1,\"data\":\"ping\"}"))
+        val a = host.answer("q", 1, true, "pong 😀")
+        assertTrue(a, a.contains("got pong 😀"))
+        Json.parseToJsonElement(a)
+        assertTrue(host.answer("q", 1, true, "x").contains("\"tree\":null"))
+        assertTrue(host.click("q", "[2]").contains("\"seq\":2"))
+        val f = host.answer("q", 2, false, "NETWORK")
+        assertTrue(f, f.contains("err NETWORK"))
+        assertTrue(host.answer("nope", 1, true, "x").contains("\"stopped\":\"closed\""))
+    }
+
+    @Test fun requestsAreRefusedWithoutAllowQueries() {
+        host.open("n", load("""
+            var p = document.getElementById('out');
+            var b = document.createElement('button'); document.body.appendChild(b);
+            b.addEventListener('click', function () {
+              TelegramWidget.request('ping').then(function (v) { p.textContent = 'got ' + v }, function (e) { p.textContent = 'err ' + e.code });
+            });
+        """))
+        val c = host.click("n", "[2]")
+        assertTrue(c, c.contains("err NOT_ALLOWED") && !c.contains("\"request\""))
     }
 
     @Test fun anOpenAfterItsCloseIsRefused() {
