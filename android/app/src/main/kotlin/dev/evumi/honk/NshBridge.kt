@@ -48,7 +48,11 @@ class NshBridge(
 
     fun install() {
         removeListener = service.addChangeListener { nsh.send("honk.changed", null) }
-        service.onIncoming = { botId, messageId -> nsh.send("honk.incoming", mapOf("botId" to botId, "messageId" to messageId)) }
+        // Only once the app listens: until then pushes get a system notification.
+        handle("honk.incoming.listen") {
+            service.onIncoming = { botId, messageId -> nsh.send("honk.incoming", mapOf("botId" to botId, "messageId" to messageId)) }
+            true
+        }
 
         handle("honk.status") { status() }
         handle("honk.register.retry") {

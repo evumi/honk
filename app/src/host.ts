@@ -87,6 +87,12 @@ export function on(event: string, listener: (payload: unknown) => void): () => v
   return host.on(event, listener);
 }
 
+/** Tells the host the app shows its own banner for `honk.incoming` (until then it shows the system's). */
+export function listenIncoming(): Promise<boolean> {
+  if (!host.available()) return Promise.resolve(false);
+  return host.call<boolean>("honk.incoming.listen", null).catch(() => false);
+}
+
 export const api = {
   status: () => call<Status>("honk.status"),
   chats: () => call<Chat[]>("honk.chats"),

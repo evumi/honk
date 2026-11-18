@@ -25,8 +25,12 @@ final class NshBridge {
 
     func install() {
         service.onChange = { [weak self] in self?.app.send("honk.changed") }
-        service.onIncoming = { [weak self] botID, messageID in
-            self?.app.send("honk.incoming", ["botId": botID, "messageId": messageID])
+        // Only once the app listens: until then pushes get the system banner.
+        handle("honk.incoming.listen") { [weak self, service] _ in
+            service.onIncoming = { botID, messageID in
+                self?.app.send("honk.incoming", ["botId": botID, "messageId": messageID])
+            }
+            return true
         }
 
         handle("honk.status") { [service] _ in await Self.status(service) }

@@ -273,12 +273,10 @@ class HonkService private constructor(context: Context) {
             changed()
             return
         }
-        val incoming = onIncoming
-        if (foreground && incoming != null) {
-            // The app is open: it shows its own banner instead of a notification.
-            main.post { incoming(info.botId, info.messageId) }
-            return
-        }
+        // The app is open: it shows its own banner, and the notification goes
+        // to the shade quietly (no sound or heads-up).
+        val incoming = onIncoming.takeIf { foreground }
+        if (incoming != null) main.post { incoming(info.botId, info.messageId) }
         val bot = store.bot(info.botId)
         notifier.show(
             Notifier.Content(
@@ -292,7 +290,7 @@ class HonkService private constructor(context: Context) {
                 group = stored?.group ?: info.group,
                 level = stored?.level?.takeIf { it.isNotEmpty() } ?: info.level,
                 date = stored?.date?.takeIf { it > 0 } ?: System.currentTimeMillis(),
-                muted = store.isMuted(info.botId),
+                muted = store.isMuted(info.botId) || incoming != null,
             ),
         )
     }

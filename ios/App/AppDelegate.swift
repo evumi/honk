@@ -78,8 +78,9 @@ final class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationC
                 completionHandler([])
                 service.markRead(botID: info.botID)
             } else if let info, let incoming = service.onIncoming {
-                // The app is open: it shows its own banner instead of the system's.
-                completionHandler([])
+                // The app is open: it shows its own banner; the notification
+                // still goes to Notification Center, quietly.
+                completionHandler([.list, .badge])
                 incoming(info.botID, info.messageID)
             } else {
                 completionHandler([.banner, .list, .sound, .badge])

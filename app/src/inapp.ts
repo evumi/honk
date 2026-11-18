@@ -23,6 +23,8 @@ export interface Banner {
 export const banner = signal<Banner | null>(null);
 let key = 0;
 let timer: ReturnType<typeof setTimeout> | undefined;
+/** The messages the banner shown counts. */
+const counted = new Set<number>();
 
 /** How long a banner stays, in ms. */
 export const SHOW_MS = 4000;
@@ -30,8 +32,15 @@ export const SHOW_TIME_SENSITIVE_MS = 8000;
 
 /** A message arrived while the app is open. */
 export async function incoming(botId: BotId, messageId: number): Promise<void> {
-  await reload();
-  const chat = chatOf(botId);
+  // A message already counted (re-presented, or updated in place) changes nothing.
+  if (counted.has(messageId)) return;
+  // The host announced the change too, which reloads the chats; only wait for
+  // a reload when this message isn't in them yet.
+  let chat = chatOf(botId);
+  if (chat?.last?.id !== messageId) {
+    await reload();
+    chat = chatOf(botId);
+  }
   // Muted bots only update the list; the open chat shows the message itself.
   if (!chat || chat.muted) return;
   const top = nav.routes()[nav.routes().length - 1];
@@ -40,6 +49,8 @@ export async function incoming(botId: BotId, messageId: number): Promise<void> {
   if (!m) m = (await api.messages(botId).catch(() => [])).find((x) => x.id === messageId);
   if (!m) return;
   const prev = banner();
+  if (!prev || prev.botId !== botId) counted.clear();
+  counted.add(messageId);
   const timeSensitive = m.level === "timeSensitive";
   banner.set({
     key: ++key,
@@ -59,6 +70,7 @@ export async function incoming(botId: BotId, messageId: number): Promise<void> {
 /** Hides the banner (timeout, swipe up, or opened). */
 export function dismissBanner(): void {
   clearTimeout(timer);
+  counted.clear();
   banner.set(null);
 }
 

@@ -18,15 +18,25 @@ export function InAppBanner() {
   // Follows the finger upwards freely, downwards only a little.
   const pull = drag.interpolate({ inputRange: [-300, 0, 200], outputRange: [-300, 0, 24], extrapolate: "clamp" });
 
+  // Sliding out: a banner that arrives meanwhile slides back in instead of
+  // being cleared when the exit finishes.
+  let exiting = false;
   effect(() => {
     const b = banner();
     if (b) {
-      const fresh = !shown();
+      const enter = !shown() || exiting;
+      exiting = false;
       shown.set(b);
       void drag.timing(0, { duration: 0 });
-      if (fresh) void y.timing(HIDDEN, { duration: 0 }).then(() => y.spring(0, { damping: 20, stiffness: 220 }));
+      if (enter) void y.spring(0, { damping: 20, stiffness: 220 });
     } else if (shown()) {
-      void y.timing(HIDDEN, { duration: 220, easing: "easeIn" }).then(() => shown.set(null));
+      exiting = true;
+      void y.timing(HIDDEN, { duration: 220, easing: "easeIn" }).then(() => {
+        if (exiting) {
+          exiting = false;
+          shown.set(null);
+        }
+      });
     }
   });
 
