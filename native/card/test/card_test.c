@@ -185,9 +185,20 @@ static void test_cpu_per_second(void) {
     honk_card_close(c);
 }
 
+/** Like open_card, with a time budget that also holds under sanitizers (about 10x slower). */
+static HonkCard *open_card_slow(const char *script, char **result) {
+    HonkCardLimits l = honk_card_default_limits();
+    l.task_ms = 3000;
+    l.cpu_per_second_ms = 3000;
+    char *ld = load(P, script);
+    HonkCard *c = honk_card_open(ld, &l, result);
+    free(ld);
+    return c;
+}
+
 static void test_dom_and_output_limits(void) {
     char *r;
-    HonkCard *c = open_card(
+    HonkCard *c = open_card_slow(
         "\"var d = document.createElement('div'); document.body.appendChild(d); var n = 0;"
         "try { for (;;) { d.appendChild(document.createElement('span')); n++ } } catch (e) { d.dataset.n = n; d.dataset.err = e.name }"
         "d.innerHTML = '<p class=\\\"x\\\">a</p><b>b</b>'; var p = d.querySelector('div > p.x');"
@@ -198,7 +209,7 @@ static void test_dom_and_output_limits(void) {
     honk_card_free_string(r);
     honk_card_close(c);
 
-    c = open_card("\"document.body.textContent = 'x'.repeat(600000)\"", &r);
+    c = open_card_slow("\"document.body.textContent = 'x'.repeat(600000)\"", &r);
     CHECK(has(r, "\"stopped\":\"output\""), "oversized page not stopped: %.200s", r);
     honk_card_free_string(r);
     honk_card_close(c);
