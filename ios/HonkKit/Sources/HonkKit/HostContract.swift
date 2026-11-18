@@ -7,7 +7,7 @@ import Foundation
 // here, in android/core's HostContract.kt and in app/src/host.contract.test.ts.
 
 /// Reads the JSON object a host call passes.
-public struct Args {
+public struct CallArgs {
     public let dict: [String: Any]
 
     public init(_ data: Any?) { dict = data as? [String: Any] ?? [:] }
@@ -31,17 +31,17 @@ public struct Args {
     }
 
     public func require(_ k: String) throws -> Int64 {
-        guard let v = int(k) else { throw BridgeError.missing(k) }
+        guard let v = int(k) else { throw HostError.missing(k) }
         return v
     }
 
     public func require(_ k: String) throws -> String {
-        guard let v = string(k), !v.isEmpty else { throw BridgeError.missing(k) }
+        guard let v = string(k), !v.isEmpty else { throw HostError.missing(k) }
         return v
     }
 }
 
-public enum BridgeError: Error, LocalizedError, Equatable {
+public enum HostError: Error, LocalizedError, Equatable {
     case missing(String)
     case unknownCall(String)
 
@@ -60,7 +60,7 @@ public enum HostArgs {
         public let before: Int64?
         public let limit: Int
 
-        public init(_ a: Args) throws {
+        public init(_ a: CallArgs) throws {
             botID = try a.require("botId")
             before = a.int("before")
             limit = a.int("limit").map { Int($0) } ?? 50
@@ -72,7 +72,7 @@ public enum HostArgs {
         public let avatar: String
         public let defaultLevel: String
 
-        public init(_ a: Args) throws {
+        public init(_ a: CallArgs) throws {
             name = try a.require("name")
             avatar = a.string("avatar") ?? ""
             defaultLevel = a.string("defaultLevel") ?? "active"
@@ -85,7 +85,7 @@ public enum HostArgs {
         public let avatar: String?
         public let defaultLevel: String?
 
-        public init(_ a: Args) throws {
+        public init(_ a: CallArgs) throws {
             botID = try a.require("botId")
             name = a.string("name")
             avatar = a.string("avatar")
@@ -99,7 +99,7 @@ public enum HostArgs {
         /// The gateway's register key; `nil` (or empty) when it has none.
         public let registerKey: String?
 
-        public init(_ a: Args) throws {
+        public init(_ a: CallArgs) throws {
             url = a.string("url")
             registerKey = a.string("registerKey").flatMap { $0.isEmpty ? nil : $0 }
         }
@@ -110,7 +110,7 @@ public enum HostArgs {
         /// `load` (open), `path` (click) or `state` (set); empty for close.
         public let payload: String
 
-        public init(_ a: Args, payload: String?) throws {
+        public init(_ a: CallArgs, payload: String?) throws {
             key = try a.require("key")
             self.payload = try payload.map { try a.require($0) } ?? ""
         }
@@ -119,7 +119,7 @@ public enum HostArgs {
     /// Checks that `args` has what the named call needs; throws like the
     /// bridge would. The contract test runs it over every sample.
     public static func validate(_ name: String, _ args: Any?) throws {
-        let a = Args(args)
+        let a = CallArgs(args)
         switch name {
         case "honk.status", "honk.chats", "honk.refresh", "honk.register.retry", "honk.notifications.open",
              "honk.incoming.listen", "honk.gateway.get", "honk.device.delete":
@@ -145,7 +145,7 @@ public enum HostArgs {
         case "honk.card.click": _ = try CardCall(a, payload: "path")
         case "honk.card.set": _ = try CardCall(a, payload: "state")
         case "honk.card.close": _ = try CardCall(a, payload: nil)
-        default: throw BridgeError.unknownCall(name)
+        default: throw HostError.unknownCall(name)
         }
     }
 }

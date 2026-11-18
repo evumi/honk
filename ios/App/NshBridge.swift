@@ -44,19 +44,19 @@ final class NshBridge {
         }
         self.cards = cards
         handle("honk.card.open") { args in
-            let c = try HostArgs.CardCall(Args(args), payload: "load")
+            let c = try HostArgs.CardCall(CallArgs(args), payload: "load")
             return await cards.open(key: c.key, load: c.payload)
         }
         handle("honk.card.click") { args in
-            let c = try HostArgs.CardCall(Args(args), payload: "path")
+            let c = try HostArgs.CardCall(CallArgs(args), payload: "path")
             return await cards.click(key: c.key, path: c.payload)
         }
         handle("honk.card.set") { args in
-            let c = try HostArgs.CardCall(Args(args), payload: "state")
+            let c = try HostArgs.CardCall(CallArgs(args), payload: "state")
             return await cards.set(key: c.key, state: c.payload)
         }
         handle("honk.card.close") { args in
-            await cards.close(key: try HostArgs.CardCall(Args(args), payload: nil).key)
+            await cards.close(key: try HostArgs.CardCall(CallArgs(args), payload: nil).key)
             return true
         }
 
@@ -69,15 +69,15 @@ final class NshBridge {
             try service.store.chats().map(HostJSON.chat)
         }
         handle("honk.messages") { [service] args in
-            let m = try HostArgs.Messages(Args(args))
+            let m = try HostArgs.Messages(CallArgs(args))
             return try service.store.messages(botID: m.botID, before: m.before, limit: m.limit).map(HostJSON.message)
         }
         handle("honk.markRead") { [service] args in
-            service.markRead(botID: try Args(args).require("botId"))
+            service.markRead(botID: try CallArgs(args).require("botId"))
             return true
         }
         handle("honk.focus") { [service] args in
-            service.focusedBotID = Args(args).string("botId")
+            service.focusedBotID = CallArgs(args).string("botId")
             return true
         }
         handle("honk.refresh") { [service] _ in
@@ -95,7 +95,7 @@ final class NshBridge {
         }
         handle("honk.gateway.test") { [service] args in
             do {
-                let (url, info) = try await service.testGateway(try Args(args).require("url"))
+                let (url, info) = try await service.testGateway(try CallArgs(args).require("url"))
                 return HostJSON.gatewayTest(url: url.absoluteString, version: info.version, registerKeyRequired: info.registerKeyRequired)
             } catch {
                 return HostJSON.gatewayTest(error: error.localizedDescription)
@@ -103,7 +103,7 @@ final class NshBridge {
         }
         handle("honk.gateway.set") { [service] args in
             // `url` null or missing: back to the default gateway. `registerKey` missing or empty: none.
-            let g = try HostArgs.GatewaySet(Args(args))
+            let g = try HostArgs.GatewaySet(CallArgs(args))
             try await service.switchGateway(to: g.url, registerKey: g.registerKey)
             return HostJSON.gatewaySet(url: service.config.gatewayURL.absoluteString, registered: service.isRegistered)
         }
@@ -111,7 +111,7 @@ final class NshBridge {
         // MARK: bots
 
         handle("honk.bot.create") { [service] args in
-            let a = try HostArgs.BotCreate(Args(args))
+            let a = try HostArgs.BotCreate(CallArgs(args))
             // After the device's data was deleted, the first bot registers it again.
             if !service.isRegistered { await service.retryRegistration() }
             let created = try await service.api.createBot(name: a.name, avatar: a.avatar, defaultLevel: a.defaultLevel)
@@ -121,24 +121,24 @@ final class NshBridge {
             return HostJSON.botCreated(created.bot, token: created.token)
         }
         handle("honk.bot.update") { [service] args in
-            let a = try HostArgs.BotUpdate(Args(args))
+            let a = try HostArgs.BotUpdate(CallArgs(args))
             let bot = try await service.api.updateBot(id: a.botID, name: a.name, avatar: a.avatar, defaultLevel: a.defaultLevel)
             try service.store.saveBot(bot)
             service.changed()
             return HostJSON.bot(bot)
         }
         handle("honk.bot.token") { [service] args in
-            if let token = service.botTokens.token(botID: try Args(args).require("botId")) { return token }
+            if let token = service.botTokens.token(botID: try CallArgs(args).require("botId")) { return token }
             return NSNull()
         }
         handle("honk.bot.resetToken") { [service] args in
-            let id: String = try Args(args).require("botId")
+            let id: String = try CallArgs(args).require("botId")
             let token = try await service.api.resetToken(botID: id)
             service.botTokens.save(token, botID: id)
             return token
         }
         handle("honk.bot.delete") { [service] args in
-            let id: String = try Args(args).require("botId")
+            let id: String = try CallArgs(args).require("botId")
             try await service.api.deleteBot(id: id)
             service.removeNotifications((try? service.store.clearMessages(botID: id)) ?? [])
             try service.store.deleteBot(id: id)
@@ -147,13 +147,13 @@ final class NshBridge {
             return true
         }
         handle("honk.bot.setMuted") { [service] args in
-            let a = Args(args)
+            let a = CallArgs(args)
             try service.store.setMuted(botID: try a.require("botId"), a.bool("muted") ?? false)
             service.changed()
             return true
         }
         handle("honk.bot.setPinned") { [service] args in
-            let a = Args(args)
+            let a = CallArgs(args)
             try service.store.setPinned(botID: try a.require("botId"), a.bool("pinned") ?? false)
             service.changed()
             return true
@@ -162,12 +162,12 @@ final class NshBridge {
         // MARK: avatars (kept on this phone only)
 
         handle("honk.avatar.save") { [service] args in
-            let base64: String = try Args(args).require("data")
+            let base64: String = try CallArgs(args).require("data")
             guard let data = Data(base64Encoded: base64) else { throw LocalAvatars.SaveError.notAnImage }
             return try LocalAvatars(appGroup: service.config.appGroup).save(data)
         }
         handle("honk.avatar.image") { [service] args in
-            let avatar: String = try Args(args).require("avatar")
+            let avatar: String = try CallArgs(args).require("avatar")
             if let url = LocalAvatars(appGroup: service.config.appGroup).dataURL(for: avatar) { return url }
             return NSNull()
         }
@@ -175,14 +175,14 @@ final class NshBridge {
         // MARK: messages
 
         handle("honk.message.delete") { [service] args in
-            if let n = try service.store.deleteMessage(id: try Args(args).require("messageId")) {
+            if let n = try service.store.deleteMessage(id: try CallArgs(args).require("messageId")) {
                 service.removeNotifications([n])
             }
             service.changed()
             return true
         }
         handle("honk.chat.clear") { [service] args in
-            service.removeNotifications(try service.store.clearMessages(botID: try Args(args).require("botId")))
+            service.removeNotifications(try service.store.clearMessages(botID: try CallArgs(args).require("botId")))
             service.changed()
             return true
         }

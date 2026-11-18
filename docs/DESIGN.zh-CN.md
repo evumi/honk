@@ -238,7 +238,7 @@ App 用 TSX 写，跑在 QuickJS 上。页面：
 
 宿主协议定义在 `app/src/host.ts`、`ios/App/NshBridge.swift` 和 `android/app/src/main/kotlin/dev/evumi/honk/NshBridge.kt`，三处要同步修改。
 
-**契约文件** `app/src/host.contract.json` 给每个 `honk.*` 调用和事件列出样例参数与返回值（`optional` 是可缺省的键，`demo: false` 是演示后端不实现的调用）。三端测试都读它：`app/src/host.contract.test.ts` 检查 `host.ts` 发出的调用名和参数形状、`demo.ts` 的返回形状；HonkKit 的 `HostContractTests` 和 `:core` 的 `HostContractTest` 检查原生侧。为此参数解码和结果、事件编码从 NshBridge 下沉到 HonkKit（`HostContract.swift`：`Args`、`HostArgs`、`HostJSON`）和 `:core`（`HostContract.kt`：`Args`、`HostArgs`、`HostJson`），桥只剩平台胶水（把调用接到 `HonkService` 上）；Android 的桥在回答前把 Map 里的 null 换成 `JSONObject.NULL`（org.json 会丢掉 null 值）。已覆盖：每个调用的样例参数都能被解码、缺必填参数会报错；bot、message、chat、status、gateway 和 bot 创建的结果、全部四个事件，编码后与样例逐字段相同。没覆盖：真正的 nsh 传输、`HonkService` 里的业务逻辑、卡片调用的返回内容（只是字符串）。改协议时先改契约文件，再改 `host.ts`、`demo.ts`、两个 HonkKit / `:core` 文件和两个桥。`botId` 和 `Bot.id` 都是字符串（短 id），消息 id 是数字。
+**契约文件** `app/src/host.contract.json` 给每个 `honk.*` 调用和事件列出样例参数与返回值（`optional` 是可缺省的键，`demo: false` 是演示后端不实现的调用）。三端测试都读它：`app/src/host.contract.test.ts` 检查 `host.ts` 发出的调用名和参数形状、`demo.ts` 的返回形状；HonkKit 的 `HostContractTests` 和 `:core` 的 `HostContractTest` 检查原生侧。为此参数解码和结果、事件编码从 NshBridge 下沉到 HonkKit（`HostContract.swift`：`CallArgs`、`HostArgs`、`HostJSON`）和 `:core`（`HostContract.kt`：`Args`、`HostArgs`、`HostJson`），桥只剩平台胶水（把调用接到 `HonkService` 上）；Android 的桥在回答前把 Map 里的 null 换成 `JSONObject.NULL`（org.json 会丢掉 null 值）。已覆盖：每个调用的样例参数都能被解码、缺必填参数会报错；bot、message、chat、status、gateway 和 bot 创建的结果、全部四个事件，编码后与样例逐字段相同。没覆盖：真正的 nsh 传输、`HonkService` 里的业务逻辑、卡片调用的返回内容（只是字符串）。改协议时先改契约文件，再改 `host.ts`、`demo.ts`、两个 HonkKit / `:core` 文件和两个桥。`botId` 和 `Bot.id` 都是字符串（短 id），消息 id 是数字。
 
 | 调用 | 参数 | 返回 |
 | --- | --- | --- |

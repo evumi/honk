@@ -62,32 +62,32 @@ private func chat(_ j: JSON) -> ChatSummary {
         let lenient: Set = ["honk.focus", "honk.gateway.set"]
         for (name, spec) in try calls() {
             guard let first = samples(spec).first, let args = first["args"] as? JSON, !args.isEmpty, !lenient.contains(name) else { continue }
-            #expect(throws: BridgeError.self, "\(name) with no arguments") { try HostArgs.validate(name, [String: Any]()) }
+            #expect(throws: HostError.self, "\(name) with no arguments") { try HostArgs.validate(name, [String: Any]()) }
         }
     }
 
     @Test func unknownCallsAreRejected() {
-        #expect(throws: BridgeError.unknownCall("honk.nope")) { try HostArgs.validate("honk.nope", nil) }
+        #expect(throws: HostError.unknownCall("honk.nope")) { try HostArgs.validate("honk.nope", nil) }
     }
 
     @Test func argumentsAreRead() throws {
-        let a = Args(["botId": "aZ3kQ9xT", "before": 8, "limit": 20])
-        #expect(try HostArgs.Messages(a) == HostArgs.Messages(Args(["botId": "aZ3kQ9xT", "before": "8", "limit": 20])))
+        let a = CallArgs(["botId": "aZ3kQ9xT", "before": 8, "limit": 20])
+        #expect(try HostArgs.Messages(a) == HostArgs.Messages(CallArgs(["botId": "aZ3kQ9xT", "before": "8", "limit": 20])))
         let m = try HostArgs.Messages(a)
         #expect(m.botID == "aZ3kQ9xT" && m.before == 8 && m.limit == 20)
-        let d = try HostArgs.Messages(Args(["botId": "b"]))
+        let d = try HostArgs.Messages(CallArgs(["botId": "b"]))
         #expect(d.before == nil && d.limit == 50)
-        let c = try HostArgs.BotCreate(Args(["name": "n"]))
+        let c = try HostArgs.BotCreate(CallArgs(["name": "n"]))
         #expect(c.avatar == "" && c.defaultLevel == "active")
-        let g = try HostArgs.GatewaySet(Args(["url": "https://gw.test/", "registerKey": "s3cret"]))
+        let g = try HostArgs.GatewaySet(CallArgs(["url": "https://gw.test/", "registerKey": "s3cret"]))
         #expect(g.url == "https://gw.test/" && g.registerKey == "s3cret")
-        let none = try HostArgs.GatewaySet(Args(["url": NSNull(), "registerKey": ""]))
+        let none = try HostArgs.GatewaySet(CallArgs(["url": NSNull(), "registerKey": ""]))
         #expect(none.url == nil && none.registerKey == nil, "null url: the default gateway; empty key: none")
-        let u = try HostArgs.BotUpdate(Args(["botId": "b", "name": "x"]))
+        let u = try HostArgs.BotUpdate(CallArgs(["botId": "b", "name": "x"]))
         #expect(u.name == "x" && u.avatar == nil && u.defaultLevel == nil)
-        #expect(Args(["muted": true]).bool("muted") == true)
-        #expect(Args(["n": true]).string("n") == nil, "a boolean is not a string")
-        #expect(Args(["n": 5]).string("n") == "5")
+        #expect(CallArgs(["muted": true]).bool("muted") == true)
+        #expect(CallArgs(["n": true]).string("n") == nil, "a boolean is not a string")
+        #expect(CallArgs(["n": 5]).string("n") == "5")
     }
 
     @Test func modelsEncodeAsTheSamples() throws {
