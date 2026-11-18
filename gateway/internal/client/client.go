@@ -197,6 +197,25 @@ func ParseKey(s string) ([]byte, error) {
 	return k, nil
 }
 
+// KeyWrapAAD is the additional authenticated data of a bot key wrapped with
+// the group key (design, multi-device end-to-end encryption).
+func KeyWrapAAD(botID string) string { return "honk bot key v1|" + botID }
+
+// WrapBotKey seals a bot's key with the group key; the gateway stores the
+// result as bots.key_wrapped and cannot open it.
+func WrapBotKey(groupKey, botKey []byte, botID string) (string, error) {
+	return Encrypt(groupKey, KeyWrapAAD(botID), botKey)
+}
+
+// UnwrapBotKey reverses WrapBotKey.
+func UnwrapBotKey(groupKey []byte, wrapped, botID string) ([]byte, error) {
+	k, err := Decrypt(groupKey, KeyWrapAAD(botID), wrapped)
+	if err == nil && len(k) != 32 {
+		return nil, errors.New("wrapped key is not 32 bytes")
+	}
+	return k, err
+}
+
 // BotID is the short id in front of the colon of a bot token; the
 // encryption uses it as AAD.
 func BotID(token string) string {

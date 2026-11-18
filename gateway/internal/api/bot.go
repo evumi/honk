@@ -64,6 +64,24 @@ func checkCiphertext(p url.Values) (string, error) {
 // minSealed is nonce (12) plus tag (16): AES-256-GCM of an empty plaintext.
 const minSealed = 12 + 16
 
+// wrappedKeySize is nonce (12) + a 32-byte bot key + tag (16).
+const wrappedKeySize = 12 + 32 + 16
+
+// checkKeyWrapped validates a bot key sealed with the group key: base64url of
+// exactly nonce, 32 bytes and tag. The gateway cannot open it; the shape is all it can check.
+// An empty value clears it.
+func checkKeyWrapped(v string) (string, error) {
+	v = strings.TrimRight(strings.TrimSpace(v), "=")
+	if v == "" {
+		return "", nil
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(v)
+	if err != nil || len(raw) != wrappedKeySize {
+		return "", badRequest(fmt.Sprintf("key_wrapped must be base64url of %d bytes", wrappedKeySize))
+	}
+	return v, nil
+}
+
 // errEncryptedBot is the answer to a plaintext send to an encrypted bot.
 var errEncryptedBot = badRequest("this bot is end-to-end encrypted: send the content as ciphertext (honk send --key); plaintext is refused")
 
@@ -88,6 +106,7 @@ func (s *Server) botAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	switch strings.ToLower(chi.URLParam(r, "method")) {
 	case "getme":
+		bot.KeyWrapped = "" // senders have no business with it
 		ok(w, bot)
 	case "sendmessage":
 		s.sendMessage(w, r, bot, p)
