@@ -99,7 +99,7 @@ v4 迁移：建 `owners`、`links`；给 `devices`、`bots`、`messages` 加 `ow
 | `POST /v1/links`、`POST /v1/links/claim` | App | 配对，见下面「设备组」 |
 | `GET` / `POST /v1/bots`，`GET` / `PATCH` / `DELETE /v1/bots/:id`，`POST /v1/bots/:id/token` | App | bot 管理；token 只在创建和重置时返回；`PATCH` 的 `encrypted` 打开 / 关闭端到端加密 |
 | `GET /v1/messages/:id` | NSE / FCM Service | 拉一条 |
-| `GET /v1/sync?cursor=&limit=`、`POST /v1/ack` | App | 补拉和确认 |
+| `GET /v1/sync?cursor=&limit=`、`POST /v1/ack` | App | 补拉和确认；配对并入消息后 sync 响应可带 `"reset": true`（见「设备组」5b） |
 
 ### 校验与限制
 
@@ -132,7 +132,8 @@ webhook 和 `getUpdates` 互斥（同 Telegram）：设了 webhook 后 `getUpdat
 - 时机：立即、2 秒后、10 秒后、60 秒后，共 4 次（`Options.PushBackoff`）。
 - 重试的失败：网络错误、超时、5xx、429；服务给了 `retry_after`（FCM 的 `Retry-After` 头）就取较大的等待，上限 2 分钟。APNs 和 FCM 把这些失败包成 `push.RetryableError{After}`，`push.Retryable(err)` 判断。token 失效（`ErrTokenGone`，照旧 `MarkPushGone`）和其他 4xx 不重试。
 - 重试前检查（`store.PushStillWanted`）：设备已不存在、push token 换了或已失效、这条消息已被**这台设备**的水位覆盖（`id <= devices.acked_up_to`），或已不在设备组的队列里（过期、被清理），就放弃。设备组里别的设备是否 ack 不影响这台的重试。
-- 扇出：`notifyOwner` 对设备组里每台 `push_ok` 且有 token 的设备各发一次（消息、修改、删除都一样），每台各自重试。
+- 扇出：`notifyOwner` 对设备组里每台 `push_ok` 且有 token 的设备各发一次（消息、修改、删除都一样），每台各自重试。一个 push token 只对应一部手机：`PushDevices` 按（平台，token）去重（留最新的设备）；注册、更新 token 和配对 claim 时，同一（平台，token）的其他设备记为 `push_ok = 0`（`store.supersedeToken`），所以重装 App 后旧行不会让每条推送发两遍，也会被设备回收清掉。
+- 每次推送的超时是 15 秒，比中继客户端的等待（12 秒）长；中继服务端等 APNs/FCM 8 秒，客户端等中继 12 秒，所以客户端不会在中继还在发送时放弃而重试出重复推送。中继请求体用不转义 HTML 的 JSON 编码，上限 32 KB（`push.MaxRelayRequest`；每个文本字段取上限、每个字节都是要写成 `\u00XX` 的控制字符的最坏情况约 19 KB）。中继的限流顺序：鉴权和封禁检查、解析并校验请求、按 push token 限流，最后才扣这个自建网关的令牌桶，所以格式错误或被 token 限流的请求不花它的额度。
 - 状态只在内存里。`Server.Wait()` 等排队和正在发的这一轮发完（测试用）；`Server.Close()` 是关闭路径：停止接收、丢弃还在等退避的重试、等当前这一轮发完。
 
 ### 设备组（多设备与换机）
@@ -148,13 +149,14 @@ webhook 和 `getUpdates` 互斥（同 Telegram）：设了 webhook 后 `getUpdat
 3. `bundle` = base64url(`nonce(12)` ‖ AES-256-GCM(wrap_key, nonce, 明文, AAD `"honk link v1"`) 的密文 ‖ `tag(16)`)，明文是 JSON `{"v":1,"tokens":{botId:token},"keys":{botId:base64url},"group_key":base64url}`。`keys`（第 7 期每个 bot 的端到端密钥）和 `group_key`（设备组的加密密钥）预留，没有时不出现；`keys` 只在本机存有时才放。旧设备只放自己存着 token 的 bot；整段密文不超过 16 KB（约百来个 bot）。
 4. 旧设备 `POST /v1/links {link_id, bundle}`：网关只存 `link_id` 的 sha256，10 分钟有效，一个设备组同时只有一个有效配对（新建会顶掉旧的）。
 5. 新设备先照常注册（这时它自成一组），再 `POST /v1/links/claim {link_id}`：网关在一个事务里把新设备**所在的整个组**（设备、bot、排队的消息）并入创建配对的组，删掉旧组，返回 `bundle` 并删除这条配对（只能用一次，过期的认领也会把它删掉）。并入后超过 bot 上限则整个事务回滚、配对保留，返回 400。认领按客户端 IP 限流（突发 5 次，之后每小时 10 次，`Options.ClaimBurst` / `ClaimPerHour`），猜不出 128 位的码。
+5b. **并入后的重新同步**：被移动的消息 id 可能比创建方组里老设备的游标小，这些设备永远拉不到它们。所以 claim 时，若被并入的组有排队消息，创建方组原有的每台设备置 `devices.resync = 1`（v8 迁移加的列），其水位 `acked_up_to` 降到 `min(acked_up_to, 被移动的最小 id - 1)`（否则清理会因为「所有设备都 ack 过」而删掉它们还没存的消息；设备重新同步并 ack 后水位自然升回）；创建方组有排队消息时，被并入的设备同样置位。`GET /v1/sync` 对 `resync` 置位的设备，在响应里多一个 `"reset": true`（否则不带这个字段，响应形状不变），客户端收到后丢弃游标、从 `cursor=0` 重新同步（`apply` 幂等）；网关在该设备以 `cursor=0` 调用 `/v1/sync` 时清掉标志（那次响应不带 `reset`）。`reset` 一直返回到那一刻，不会因为 `POST /v1/ack` 清除（防止一个在途的旧 ack 把信号吃掉）。
 6. 新设备解开 `bundle`，把 token（以后还有 `keys`、`group_key`）存好，把同步游标归零（队列里的消息是整个组的，id 比它旧游标小的也要拿），然后刷新。并入的设备水位清零，免得旧组里的 ack 盖住新组的消息。新设备拿不到：更早的本地历史、静音/置顶/已读、`local:` 头像。并入的另一侧（原来就在新设备所在组里的 bot）的 token 不在 bundle 里，别的设备上看得到这些 bot、能收消息，但没有 token 就不能发送。
 
 代码：HonkKit 的 `DeviceLink.swift`（`PairingCode`、`LinkCrypto`、`LinkBundle`、`DeviceLinking`）和 `:core` 的 `DeviceLink.kt` 是同一套，`docs/link-vectors.json` 是两边测试共用的向量（用 Go 标准库独立生成）。网关不解 bundle，所以 Go 里没有这套代码。二维码：nsh 0.5 没有二维码或相机接口，第一版只有文字、复制和粘贴。
 
 **设备管理**：注册时带 `name`（iOS `UIDevice.current.name`，Android `Build.MODEL`，最长 64 字）；`seen_at` 在设备认证通过的请求里写，距上次超过 1 小时才写。`GET /v1/devices` 列出本组设备（`current` 标出自己），`DELETE /v1/devices/:id` 移除组内一台（不在组内 404）。移除最后一台时连组、bot、队列、配对一起删；移除非最后一台时，它创建的 bot 的 `device_id` 先改给留下的设备。`DELETE /v1/devices/me` 等于移除自己，加 `?all=true` 删整个设备组。被别的设备移除或整组删除的设备，下次请求得到 401：iOS 和 Android 的 `refresh` 都会清掉凭据，用上次的推送 token 重新注册成一个新组。丢手机的恢复密钥不做。
 
-**回收**：每小时随清理跑一次 `GCDevices`：`push_ok = 0` 且 `seen_at` 早于 `HONK_DEVICE_GC`（默认 `2160h`，90 天）的设备按「移除」处理，所以它是组里最后一台时，只属于它的 bot 和队列一起删。
+**回收**：每小时随清理跑一次 `GCDevices`：`push_ok = 0` 且 `seen_at` 早于 `HONK_DEVICE_GC`（默认 `2160h`，90 天）的设备按「移除」处理，所以它是组里最后一台时，只属于它的 bot 和队列一起删。`HONK_DEVICE_GC=0`（或 `off`）关闭回收。
 
 ### 推送中继（`internal/push/relay.go`、`internal/api/relay.go`）
 

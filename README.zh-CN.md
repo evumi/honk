@@ -77,7 +77,7 @@ docker run -p 8080:8080 -v honk-data:/data \
 | `HONK_DB` | `./data/honk.db` | SQLite 文件路径 |
 | `HONK_MESSAGE_TTL` | `168h` | 消息在队列里保存多久 |
 | `HONK_ACKED_KEEP` | `24h` | 设备组里每台设备都已 ack 的消息再保留多久（从创建时算起） |
-| `HONK_DEVICE_GC` | `2160h` | push token 已失效、且这么久没有任何请求的设备会被删除；它是组里最后一台时，bot 和队列一并删除 |
+| `HONK_DEVICE_GC` | `2160h` | push token 已失效、且这么久没有任何请求的设备会被删除；它是组里最后一台时，bot 和队列一并删除；`0` 或 `off` 表示不回收 |
 | `HONK_SEND_RATE` / `HONK_SEND_BURST` | `5` / `20` | 每个 bot 每秒最多发几条 / 突发上限 |
 | `HONK_TRUSTED_PROXIES` | 回环 + 私有网段 | 逗号分隔的 CIDR：来自这些反向代理的 `X-Forwarded-For` / `X-Real-IP` 才会用来做按 IP 的限流（取不在列表里的最右一个地址；IPv6 客户端按 /64 计）；`none` 表示不信任任何代理，只看 TCP 对端 |
 | `HONK_REGISTER_PER_HOUR` | `10` | 每个 IP 每小时最多注册几台设备（突发 5） |
@@ -411,7 +411,7 @@ GitHub 适配不校验 `X-Hub-Signature-256`：URL 里的 token 就是密钥，�
 | `GET` / `PATCH` / `DELETE /v1/bots/:id` | 读取、修改、删除一个 bot（`:id` 是 bot 的短 id）。`PATCH` 接受 `name`、`avatar`、`default_level`、`encrypted`（`true`：拒绝这个 bot 的明文发送）和 `key_wrapped`（用组密钥封装的 bot 密钥，80 个 base64url 字符，空串表示清除；密钥本身不会明文到网关） |
 | `POST /v1/bots/:id/token` | 重置 token，旧 token 立即失效 |
 | `GET /v1/messages/:id` | 拉一条消息；条目可能是 `message`、`edit` 或 `delete` |
-| `GET /v1/sync?cursor=&limit=` | 拉 cursor 之后的消息，返回 `messages`、`cursor`、`has_more` |
+| `GET /v1/sync?cursor=&limit=` | 拉 cursor 之后的消息，返回 `messages`、`cursor`、`has_more`；配对并入了这台设备没见过的排队消息后，额外带 `"reset": true`（只在这时才有）：丢掉游标、从 0 重新同步（设备以 `cursor=0` 同步后标志清除） |
 | `POST /v1/ack` | `{"up_to": <id>}`：告诉网关这台设备已存好这个 id 及之前的消息（设备组里每台设备各有一个水位，只升不降） |
 
 `edit` 和 `delete` 条目用 `target_id` 或 `id` 指向原消息。原消息可能已经从队列删掉了，客户端要对自己本地存的那份执行。
