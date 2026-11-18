@@ -10,6 +10,9 @@
 | `BotCreated.dc.html` | 创建成功：token 和 curl 示例 |
 | `BotSettings.dc.html` | Bot 设置 |
 | `LockScreen.dc.html` | 锁屏通知：bot 头像横幅 |
+| `Settings.dc.html` | 设置：推送、网关、语言 |
+| `InApp.dc.html` | 站内通知：App 打开时的玻璃横幅（三种情形） |
+| `Logo.dc.html` | Logo 方案 |
 | `canvas.json` | 画布布局 |
 
 `.dc.html` 依赖 Design 画布的运行时，不能直接在浏览器里打开。

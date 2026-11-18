@@ -32,7 +32,8 @@ import java.util.Base64
  * honk.bot.resetToken, honk.bot.delete, honk.bot.setMuted, honk.bot.setPinned,
  * honk.message.delete, honk.chat.clear, honk.notifications.open, honk.avatar.save, honk.avatar.image,
  * honk.gateway.get, honk.gateway.test, honk.gateway.set, honk.register.retry.
- * Events: honk.changed (the store changed), honk.open { botId } (open a chat).
+ * Events: honk.changed (the store changed), honk.open { botId } (open a chat),
+ * honk.incoming { botId, messageId } (a message arrived while the app is open; it shows its own banner).
  *
  * nsh calls the handlers on the UI thread with the JSON arguments as Map,
  * List, String, Number and Boolean; each handler does its work on the IO
@@ -47,6 +48,11 @@ class NshBridge(
 
     fun install() {
         removeListener = service.addChangeListener { nsh.send("honk.changed", null) }
+        // Only once the app listens: until then pushes get a system notification.
+        handle("honk.incoming.listen") {
+            service.onIncoming = { botId, messageId -> nsh.send("honk.incoming", mapOf("botId" to botId, "messageId" to messageId)) }
+            true
+        }
 
         handle("honk.status") { status() }
         handle("honk.register.retry") {
@@ -170,6 +176,7 @@ class NshBridge(
     fun uninstall() {
         removeListener?.invoke()
         removeListener = null
+        service.onIncoming = null
     }
 
     fun openChat(botId: String) {

@@ -77,6 +77,11 @@ final class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationC
                 // The chat is open: the message appears there, no banner.
                 completionHandler([])
                 service.markRead(botID: info.botID)
+            } else if let info, let incoming = service.onIncoming {
+                // The app is open: it shows its own banner; the notification
+                // still goes to Notification Center, quietly.
+                completionHandler([.list, .badge])
+                incoming(info.botID, info.messageID)
             } else {
                 completionHandler([.banner, .list, .sound, .badge])
             }

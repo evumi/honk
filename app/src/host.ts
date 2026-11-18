@@ -77,10 +77,20 @@ export function call<T>(name: string, args?: unknown): Promise<T> {
   return host.call<T>(name, args ?? null);
 }
 
-/** Listens to a host event; a no-op without a host. */
+/**
+ * Listens to a host event; a no-op without a host. Events: `honk.changed`,
+ * `honk.open { botId }`, `honk.incoming { botId, messageId }` (a message
+ * arrived while the app is open; the app shows its own banner).
+ */
 export function on(event: string, listener: (payload: unknown) => void): () => void {
   if (!host.available()) return () => {};
   return host.on(event, listener);
+}
+
+/** Tells the host the app shows its own banner for `honk.incoming` (until then it shows the system's). */
+export function listenIncoming(): Promise<boolean> {
+  if (!host.available()) return Promise.resolve(false);
+  return host.call<boolean>("honk.incoming.listen", null).catch(() => false);
 }
 
 export const api = {

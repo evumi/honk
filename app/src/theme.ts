@@ -17,6 +17,8 @@ export interface Palette {
   pill: string;
   glass: string;
   glassRim: string;
+  /** The in-app banner: glass that reads over any page. */
+  banner: string;
   /** The selected segment of a segmented control. */
   segment: string;
   /** The track behind a segmented control. */
@@ -42,6 +44,7 @@ const light: Palette = {
   pill: "#f2f2f7",
   glass: "rgba(255,255,255,0.55)",
   glassRim: "rgba(255,255,255,0.9)",
+  banner: "rgba(255,255,255,0.78)",
   segment: "#ffffff",
   segmentTrack: "#e3e3e8",
   hairline: "rgba(0,0,0,0.08)",
@@ -64,6 +67,7 @@ const dark: Palette = {
   pill: "#2c2c2e",
   glass: "rgba(44,44,46,0.55)",
   glassRim: "rgba(255,255,255,0.14)",
+  banner: "rgba(44,44,46,0.82)",
   segment: "#636366",
   segmentTrack: "#2c2c2e",
   hairline: "rgba(255,255,255,0.16)",
