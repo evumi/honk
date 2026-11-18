@@ -32,7 +32,8 @@ class AndroidSql(file: File) : Sql {
             bind(query, args)
             SQLiteCursor(driver, editTable, query)
         }
-        return db.rawQueryWithFactory(factory, sql, null, null).use { c ->
+        // editTable is non-null from API 35; it only matters for cursor updates, which this never makes.
+        return db.rawQueryWithFactory(factory, sql, null, "").use { c ->
             val row = object : Sql.Row {
                 override fun long(i: Int) = c.getLong(i)
                 override fun text(i: Int): String? = if (c.isNull(i)) null else c.getString(i)
