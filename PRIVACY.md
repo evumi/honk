@@ -31,12 +31,12 @@ Opening a link in a notification or loading a configured remote avatar may conta
 
 The gateway's default configuration expires queued messages after seven days and removes acknowledged messages after about one day, during periodic cleanup. Self-hosted operators can change these intervals. Device records and bot settings remain until deleted. Local history is separate from the temporary gateway queue.
 
-You can delete a bot from the app to remove that bot and its queued messages. The authenticated gateway API also supports deleting the device registration and all associated bots and queued messages through DELETE /v1/devices/me. Deleting a local message or uninstalling the app does not by itself necessarily remove the gateway registration. Notification permissions can be changed in iOS Settings.
+You can delete a bot from the app to remove that bot and its queued messages. You can also delete everything the gateway holds for this device from the app: Settings, "Delete this device's data". The app asks the gateway to delete the device registration, all its bots (their tokens stop working immediately) and the queued messages (DELETE /v1/devices/me), and only when the gateway confirms does it clear the messages, avatars, bot tokens, device credentials and notifications stored on the phone. If the gateway cannot be reached, nothing is deleted and the app says so; try again later. The device registers again only when you next create a bot or reopen the app. Deleting a local message or uninstalling the app does not by itself necessarily remove the gateway registration. Notification permissions can be changed in iOS Settings.
 
 Operational logs and hosting backups, where present, are separate from the live message queue and follow the infrastructure operator's retention practices.
 
 ## Your choices and contact
 
-You may choose a self-hosted gateway in the app, revoke a bot token, delete a bot, or disable notifications. For privacy questions or assistance with deletion on the default gateway, contact the maintainer through https://github.com/evumi/honk/issues. Do not post device secrets, bot tokens, notification contents, or other private information in a public issue; ask for a private follow-up channel.
+You may choose a self-hosted gateway in the app, revoke a bot token, delete a bot, delete this device's data, or disable notifications. For privacy questions or assistance with deletion on the default gateway, contact the maintainer through https://github.com/evumi/honk/issues. Do not post device secrets, bot tokens, notification contents, or other private information in a public issue; ask for a private follow-up channel.
 
 This policy may be updated when the service changes. The date above identifies the current version.

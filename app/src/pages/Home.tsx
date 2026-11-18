@@ -341,6 +341,7 @@ function SettingsTab(props: { p: Palette }) {
       case "registering": return tr("注册中…");
       case "waitingForPushToken": return tr("等待推送授权");
       case "failed": return tr("注册失败");
+      case "notRegistered": return tr("未注册");
       default: return status()?.registered ? tr("已注册") : tr("未注册");
     }
   };
@@ -352,6 +353,30 @@ function SettingsTab(props: { p: Palette }) {
       retrying.set(false);
       await loadStatus();
       await reload();
+    }
+  };
+  const deleting = signal(false);
+  const deleteData = async () => {
+    if (deleting()) return;
+    const { action } = await AlertDialog.show({
+      title: tr("删除这台设备的数据？"),
+      description: tr("将删除：这台设备在网关上的注册；所有 Bot，它们的 token 立即失效；网关上排队的消息；本机的消息和头像。无法恢复。"),
+      actions: [{ id: "cancel", label: tr("取消"), role: "cancel" }, { id: "delete", label: tr("删除"), role: "destructive" }],
+    });
+    if (action !== "delete") return;
+    deleting.set(true);
+    try {
+      await api.deleteDevice();
+      await Promise.all([reload(), loadStatus()]);
+    } catch (e) {
+      // The gateway did not confirm, so the phone keeps its data.
+      await AlertDialog.show({
+        title: tr("删除失败"),
+        description: tr("{error}。这台设备的数据没有改动，请稍后重试。", { error: String((e as Error)?.message ?? e) }),
+        actions: [{ id: "ok", label: tr("好") }],
+      });
+    } finally {
+      deleting.set(false);
     }
   };
   const host = () => {
@@ -384,6 +409,16 @@ function SettingsTab(props: { p: Palette }) {
       </Section>
       <Section title={tr("通用")} p={p()}>
         <Row p={p()} first label={tr("语言")} value={languageLabel(langChoice())} onPress={() => void pickLanguage()} testID="language-row" chevron />
+      </Section>
+      <Section title={tr("数据")} p={p()} footer={tr("删除这台设备在网关上的注册、所有 Bot 和排队的消息，并清空本机数据。之后创建 Bot 或重新打开 App 时，这台设备会重新注册。")}>
+        <Row
+          p={p()}
+          first
+          label={deleting() ? tr("正在删除…") : tr("删除这台设备的数据")}
+          color={p().destructive}
+          onPress={() => void deleteData()}
+          testID="delete-device-data"
+        />
       </Section>
       <View style={{ flex: 1 }} />
       <If when={status()?.appVersion}>

@@ -56,7 +56,7 @@ object HostArgs {
         val a = Args(args)
         when (name) {
             "honk.status", "honk.chats", "honk.refresh", "honk.register.retry", "honk.notifications.open",
-            "honk.incoming.listen", "honk.gateway.get" -> Unit
+            "honk.incoming.listen", "honk.gateway.get", "honk.device.delete" -> Unit
             "honk.messages" -> Messages(a)
             "honk.markRead", "honk.bot.token", "honk.bot.resetToken", "honk.bot.delete", "honk.chat.clear",
             "honk.bot.setMuted", "honk.bot.setPinned" -> a.requireString("botId")

@@ -15,6 +15,8 @@ final class HonkService {
 
     /// Where registration with the gateway stands; the settings page shows it.
     enum Registration: Equatable {
+        /// The device's data was deleted; it registers again when a bot is created or the app starts.
+        case notRegistered
         case waitingForPushToken
         case registering
         case registered
@@ -22,6 +24,7 @@ final class HonkService {
 
         var name: String {
             switch self {
+            case .notRegistered: return "notRegistered"
             case .waitingForPushToken: return "waitingForPushToken"
             case .registering: return "registering"
             case .registered: return "registered"
@@ -240,9 +243,7 @@ final class HonkService {
         let pushToken = credentials.load()?.pushToken
         HonkConfig.setGatewayOverride(target == config.defaultGatewayURL ? nil : target, appGroup: config.appGroup)
         config = HonkConfig.fromBundle()
-        credentials.clear()
-        botTokens.removeAll()
-        removeNotifications((try? store.reset()) ?? [])
+        clearAccountData()
         changed()
         setRegistration(.waitingForPushToken)
         if let pushToken {
@@ -250,6 +251,48 @@ final class HonkService {
         } else {
             await retryRegistration()
         }
+    }
+
+    /// Forgets everything this phone keeps for the account: the device
+    /// credentials, the bot tokens, the messages, and the notifications shown for them.
+    private func clearAccountData() {
+        credentials.clear()
+        botTokens.removeAll()
+        removeNotifications((try? store.reset()) ?? [])
+    }
+
+    // MARK: deleting this device's data
+
+    enum DeleteError: Error, LocalizedError {
+        case failed(String)
+        var errorDescription: String? {
+            switch self {
+            case let .failed(reason): return reason
+            }
+        }
+    }
+
+    /// Deletes the device on the gateway (its bots and queued messages go with
+    /// it), then clears the phone: account data as when switching gateway, plus
+    /// the avatars and every delivered notification. When the gateway cannot be
+    /// reached nothing local is touched and this throws. It does not register
+    /// again: that happens when a bot is created next (`honk.bot.create`) or
+    /// the app starts again (the push token arrives).
+    func deleteDeviceData() async throws {
+        if credentials.load() != nil {
+            do {
+                try await api.deleteDevice()
+            } catch let e as APIError where e.isUnauthorized {
+                // The gateway had forgotten this device already.
+            } catch {
+                throw DeleteError.failed(Self.describe(error))
+            }
+        }
+        clearAccountData()
+        LocalAvatars(appGroup: config.appGroup).removeAll()
+        images.removeAll()
+        UNUserNotificationCenter.current().removeAllDeliveredNotifications()
+        setRegistration(.notRegistered)
     }
 
     // MARK: sync

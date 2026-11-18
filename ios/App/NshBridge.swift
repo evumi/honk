@@ -10,7 +10,7 @@ import UIKit
 /// Calls: honk.status, honk.chats, honk.messages, honk.markRead, honk.focus,
 /// honk.refresh, honk.bot.create, honk.bot.update, honk.bot.token,
 /// honk.bot.resetToken, honk.bot.delete, honk.bot.setMuted, honk.bot.setPinned,
-/// honk.message.delete, honk.chat.clear, honk.notifications.open, honk.avatar.save, honk.avatar.image,
+/// honk.message.delete, honk.chat.clear, honk.device.delete, honk.notifications.open, honk.avatar.save, honk.avatar.image,
 /// honk.gateway.get, honk.gateway.test, honk.gateway.set, honk.register.retry,
 /// honk.card.open, honk.card.click, honk.card.set, honk.card.close.
 /// Events: honk.changed (the store changed), honk.open { botId } (open a chat),
@@ -110,6 +110,8 @@ final class NshBridge {
 
         handle("honk.bot.create") { [service] args in
             let a = try HostArgs.BotCreate(Args(args))
+            // After the device's data was deleted, the first bot registers it again.
+            if !service.isRegistered { await service.retryRegistration() }
             let created = try await service.api.createBot(name: a.name, avatar: a.avatar, defaultLevel: a.defaultLevel)
             try service.store.saveBot(created.bot)
             service.botTokens.save(created.token, botID: created.bot.id)
@@ -180,6 +182,10 @@ final class NshBridge {
         handle("honk.chat.clear") { [service] args in
             service.removeNotifications(try service.store.clearMessages(botID: try Args(args).require("botId")))
             service.changed()
+            return true
+        }
+        handle("honk.device.delete") { [service] _ in
+            try await service.deleteDeviceData()
             return true
         }
         handle("honk.notifications.open") { _ in

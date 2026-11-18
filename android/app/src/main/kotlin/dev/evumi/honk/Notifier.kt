@@ -177,6 +177,11 @@ class Notifier(private val context: Context) {
         tags.forEach { manager.cancel(it, NOTIFICATION_ID) }
     }
 
+    /** Removes every notification of the app. */
+    fun cancelAll() {
+        manager.cancelAll()
+    }
+
     private fun openIntent(botId: String, messageId: Long): PendingIntent {
         val intent = Intent(context, MainActivity::class.java)
             .setAction(MainActivity.ACTION_OPEN)

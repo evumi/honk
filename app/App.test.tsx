@@ -181,6 +181,35 @@ test("the gateway page tests an address before switching", async () => {
   expect(app.host.calls().find((c) => c.name === "honk.gateway.set")?.data).toEqual({ url: "https://mine.example/" });
 });
 
+test("settings deletes this device's data after a confirmation", async () => {
+  let deleted = 0;
+  const app = await open("./App.tsx", {
+    locale: "zh-Hans-CN",
+    host: host({ "honk.device.delete": () => { deleted++; return true; } }),
+  });
+  await app.press("id:tab-settings");
+  app.onDialog(() => "取消");
+  await app.press("id:delete-device-data");
+  expect(deleted).toBe(0);
+  expect(app.dialogs()[0]).toMatchObject({ title: "删除这台设备的数据？" });
+  app.onDialog(() => "删除");
+  await app.press("id:delete-device-data");
+  await app.waitUntil(() => deleted === 1);
+});
+
+test("a failed deletion keeps the data and says so", async () => {
+  const app = await open("./App.tsx", {
+    locale: "zh-Hans-CN",
+    host: host({ "honk.device.delete": () => { throw new Error("连不上网关"); } }),
+  });
+  await app.press("id:tab-settings");
+  app.onDialog((d) => (d.title === "删除失败" ? "好" : "删除"));
+  await app.press("id:delete-device-data");
+  await app.waitUntil(() => app.dialogs().some((d) => d.title === "删除失败"));
+  expect(app.dialogs().find((d) => d.title === "删除失败")?.message).toContain("连不上网关");
+  expect(app.host.calls().filter((c) => c.name === "honk.chats").length > 0).toBe(true);
+});
+
 test("settings shows a failed registration and retries it", async () => {
   let registered = false;
   const status = () => registered

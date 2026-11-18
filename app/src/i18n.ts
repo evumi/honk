@@ -155,6 +155,17 @@ const EN: Record<string, string> = {
   "删除后 token 立即失效。": "Deleting a bot revokes its token at once.",
   "清空消息": "Clear messages",
   "删除 Bot": "Delete Bot",
+  // delete this device's data
+  "数据": "Data",
+  "删除这台设备的数据": "Delete this device's data",
+  "删除这台设备的数据？": "Delete this device's data?",
+  "将删除：这台设备在网关上的注册；所有 Bot，它们的 token 立即失效；网关上排队的消息；本机的消息和头像。无法恢复。":
+    "This deletes this device's registration on the gateway; all bots, whose tokens stop working at once; the messages queued on the gateway; and the messages and avatars on this phone. It can't be undone.",
+  "删除这台设备在网关上的注册、所有 Bot 和排队的消息，并清空本机数据。之后创建 Bot 或重新打开 App 时，这台设备会重新注册。":
+    "Deletes this device's registration, all bots and queued messages on the gateway, and clears this phone's data. The device registers again when you create a bot or reopen the app.",
+  "正在删除…": "Deleting…",
+  "删除失败": "Couldn't delete",
+  "{error}。这台设备的数据没有改动，请稍后重试。": "{error}. This device's data is unchanged; try again later.",
   // gateway
   "切换网关？": "Switch gateway?",
   "改用 {url}。这台设备会在新网关上重新注册，当前的 Bot 和消息会从这台设备上清除；它们在原网关上仍然保留。":

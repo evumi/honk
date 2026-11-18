@@ -106,6 +106,7 @@
     "honk.message.delete": { "samples": [{ "args": { "messageId": 7 }, "result": true }] },
     "honk.chat.clear": { "samples": [{ "args": { "botId": "aZ3kQ9xT" }, "result": true }] },
     "honk.notifications.open": { "samples": [{ "args": null, "result": true }] },
+    "honk.device.delete": { "samples": [{ "args": null, "result": true }] },
     "honk.gateway.get": {
       "samples": [{ "args": null, "result": { "url": "https://gw.test/", "defaultURL": "https://honk.example.com/", "custom": true } }]
     },

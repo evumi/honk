@@ -130,6 +130,11 @@ public struct LocalAvatars: Sendable {
         return "data:" + (Self.types[ext] ?? "image/jpeg") + ";base64," + d.base64EncodedString()
     }
 
+    /// Deletes every kept image (the device's data was deleted).
+    public func removeAll() {
+        try? FileManager.default.removeItem(at: dir)
+    }
+
     /// Deletes images no bot uses any more. Ones younger than `grace` stay: a
     /// picked image is saved before the bot that will use it is created.
     public func prune(keeping avatars: Set<String>, grace: TimeInterval = 3600, now: Date = Date()) {
@@ -165,6 +170,11 @@ public struct ImageCache: Sendable {
         var h: UInt64 = 1469598103934665603
         for b in url.absoluteString.utf8 { h = (h ^ UInt64(b)) &* 1099511628211 }
         return dir.appendingPathComponent(String(h, radix: 16))
+    }
+
+    /// Forgets every downloaded image.
+    public func removeAll() {
+        try? FileManager.default.removeItem(at: dir)
     }
 
     /// The image's bytes, from the cache or the network (2 MB at most).

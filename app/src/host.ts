@@ -51,7 +51,7 @@ export interface Chat {
 export interface Status {
   registered: boolean;
   /** Where registration with the gateway stands. */
-  registration?: "registered" | "registering" | "waitingForPushToken" | "failed";
+  registration?: "registered" | "registering" | "waitingForPushToken" | "failed" | "notRegistered";
   registrationError?: string;
   /** `apns`: real pushes; `simulator`: a Debug simulator build without APNs, which polls instead. */
   pushMode?: "apns" | "simulator";
@@ -147,6 +147,14 @@ export const api = {
   setPinned: (botId: BotId, pinned: boolean) => call<boolean>("honk.bot.setPinned", { botId, pinned }),
   deleteMessage: (messageId: number) => call<boolean>("honk.message.delete", { messageId }),
   clearChat: (botId: BotId) => call<boolean>("honk.chat.clear", { botId }),
+  /**
+   * Deletes this device's registration on the gateway, with its bots (their
+   * tokens stop working at once) and queued messages, then clears everything
+   * on this phone. Rejects, leaving the phone as it was, when the gateway
+   * cannot be reached. The device registers again when a bot is created next
+   * or the app starts again.
+   */
+  deleteDevice: () => call<boolean>("honk.device.delete"),
   openNotificationSettings: () => call<boolean>("honk.notifications.open"),
   /** Asks for a push token again and registers; resolves with the new status. */
   retryRegistration: () => call<Status>("honk.register.retry"),

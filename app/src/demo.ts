@@ -211,6 +211,13 @@ export async function demo<T>(name: string, args: unknown): Promise<T> {
         messages.splice(0, messages.length);
         return { url: gateway, registered: true };
       }
+      case "honk.device.delete":
+        bots.splice(0, bots.length);
+        messages.splice(0, messages.length);
+        tokens.clear();
+        flags.clear();
+        localAvatars.clear();
+        return true;
       case "honk.chats":
         return chats();
       case "honk.messages":

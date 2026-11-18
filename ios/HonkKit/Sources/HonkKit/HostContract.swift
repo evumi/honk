@@ -110,7 +110,7 @@ public enum HostArgs {
         let a = Args(args)
         switch name {
         case "honk.status", "honk.chats", "honk.refresh", "honk.register.retry", "honk.notifications.open",
-             "honk.incoming.listen", "honk.gateway.get":
+             "honk.incoming.listen", "honk.gateway.get", "honk.device.delete":
             break
         case "honk.messages": _ = try Messages(a)
         case "honk.markRead", "honk.bot.token", "honk.bot.resetToken", "honk.bot.delete", "honk.chat.clear":

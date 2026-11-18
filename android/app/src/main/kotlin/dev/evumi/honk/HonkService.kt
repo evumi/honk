@@ -42,6 +42,8 @@ class HonkService private constructor(context: Context) {
 
     /** Where registration with the gateway stands; the settings page shows it. */
     sealed class Registration(val name: String) {
+        /** The device's data was deleted; it registers again when a bot is created or the app starts. */
+        object NotRegistered : Registration("notRegistered")
         object WaitingForPushToken : Registration("waitingForPushToken")
         object Registering : Registration("registering")
         object Registered : Registration("registered")
@@ -187,13 +189,49 @@ class HonkService private constructor(context: Context) {
         prefs.edit().apply {
             if (target == defaultGatewayUrl) remove(KEY_GATEWAY) else putString(KEY_GATEWAY, target)
         }.commit()
+        clearAccountData()
+        changed()
+        setRegistration(Registration.WaitingForPushToken)
+        if (pushToken != null) register(pushToken) else retryRegistration()
+    }
+
+    /**
+     * Forgets everything this phone keeps for the account: the device
+     * credentials, the bot tokens, the messages, the notifications shown for
+     * them, and the bots' channels and shortcuts.
+     */
+    private fun clearAccountData() {
         credentials.clear()
         botTokens.removeAll()
         notifier.cancel(store.reset())
         notifier.syncChannels(emptyList())
-        changed()
-        setRegistration(Registration.WaitingForPushToken)
-        if (pushToken != null) register(pushToken) else retryRegistration()
+    }
+
+    // deleting this device's data
+
+    /**
+     * Deletes the device on the gateway (its bots and queued messages go with
+     * it), then clears the phone: account data as when switching gateway, plus
+     * the avatars and every notification. When the gateway cannot be reached
+     * nothing local is touched and this throws. It does not register again:
+     * that happens when a bot is created next (`honk.bot.create`) or the app
+     * starts again (HonkApp). Blocking.
+     */
+    fun deleteDeviceData() {
+        if (credentials.load() != null) {
+            try {
+                api.deleteDevice()
+            } catch (e: ApiException) {
+                // A 401: the gateway had forgotten this device already.
+                if (!e.isUnauthorized) throw IllegalStateException(Gateway.describe(e), e)
+            } catch (e: Exception) {
+                throw IllegalStateException(Gateway.describe(e), e)
+            }
+        }
+        clearAccountData()
+        Notifier.localAvatars(context).removeAll()
+        notifier.cancelAll()
+        setRegistration(Registration.NotRegistered)
     }
 
     // sync

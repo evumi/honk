@@ -31,7 +31,7 @@ import java.util.Base64
  * Calls: honk.status, honk.chats, honk.messages, honk.markRead, honk.focus,
  * honk.refresh, honk.bot.create, honk.bot.update, honk.bot.token,
  * honk.bot.resetToken, honk.bot.delete, honk.bot.setMuted, honk.bot.setPinned,
- * honk.message.delete, honk.chat.clear, honk.notifications.open, honk.avatar.save, honk.avatar.image,
+ * honk.message.delete, honk.chat.clear, honk.device.delete, honk.notifications.open, honk.avatar.save, honk.avatar.image,
  * honk.gateway.get, honk.gateway.test, honk.gateway.set, honk.register.retry.
  * Card scripts: honk.card.open, honk.card.click, honk.card.set, honk.card.close.
  * Events: honk.changed (the store changed), honk.open { botId } (open a chat),
@@ -120,6 +120,8 @@ class NshBridge(
 
         handle("honk.bot.create") { a ->
             val c = HostArgs.BotCreate(a)
+            // After the device's data was deleted, the first bot registers it again.
+            if (!service.isRegistered) service.retryRegistration()
             val created = service.api.createBot(c.name, c.avatar, c.defaultLevel)
             service.store.saveBot(created.bot)
             service.botTokens.save(created.bot.id, created.token)
@@ -182,6 +184,10 @@ class NshBridge(
         handle("honk.chat.clear") { a ->
             service.notifier.cancel(service.store.clearMessages(a.requireString("botId")))
             service.changed()
+            true
+        }
+        handle("honk.device.delete") {
+            service.deleteDeviceData()
             true
         }
         handle("honk.notifications.open", io = false) {

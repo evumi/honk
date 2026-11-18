@@ -14,6 +14,16 @@ import java.util.Base64
 class LocalAvatarsTest {
     private fun temp() = LocalAvatars(Files.createTempDirectory("avatars").toFile())
 
+    @Test fun removeAllForgetsEveryImage() {
+        val avatars = temp()
+        val a = avatars.save(byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte(), 0xD9.toByte()))
+        assertNotNull(avatars.data(a))
+        avatars.removeAll()
+        assertNull(avatars.data(a))
+        avatars.removeAll() // nothing left: no harm
+        assertNotNull(avatars.data(avatars.save(byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte(), 0xD9.toByte()))))
+    }
+
     @Test fun savesReadsAndPrunes() {
         val avatars = temp()
         val png = byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3)

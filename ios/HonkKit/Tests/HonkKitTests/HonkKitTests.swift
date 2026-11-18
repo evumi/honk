@@ -380,6 +380,17 @@ final class MockGateway: URLProtocol {
         #expect(Avatar("preset:ship:#c2410c") == .preset(icon: "bell", color: "#c2410c"), "the ship is gone; its colour stays")
     }
 
+    @Test func removeAllForgetsEveryImage() throws {
+        let avatars = temp()
+        let a = try avatars.save(Data([0xFF, 0xD8, 0xFF, 0xD9]))
+        #expect(avatars.data(for: a) != nil)
+        avatars.removeAll()
+        #expect(avatars.data(for: a) == nil)
+        avatars.removeAll() // nothing left: no harm
+        let b = try avatars.save(Data([0xFF, 0xD8, 0xFF, 0xD9]))
+        #expect(avatars.data(for: b) != nil, "saving works again")
+    }
+
     @Test func savesReadsAndPrunes() throws {
         let avatars = temp()
         let png = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3])
