@@ -104,7 +104,8 @@ class NshBridge(
         handle("honk.messages") { a ->
             HostArgs.Messages(a).let {
                 // `around`: a window around that message (a search result opened in its chat).
-                if (it.around != null) service.store.messagesAround(it.botId, it.around, it.limit)
+                val around = it.around
+                if (around != null) service.store.messagesAround(it.botId, around, it.limit)
                 else service.store.messages(it.botId, it.before, it.limit)
             }.map(HostJson::message)
         }
