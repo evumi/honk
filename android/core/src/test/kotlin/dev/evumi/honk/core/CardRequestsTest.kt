@@ -140,6 +140,7 @@ class CardRequestsTest {
         DriverManager.getConnection("jdbc:sqlite:$path").use { c ->
             c.createStatement().use {
                 it.execute("ALTER TABLE messages DROP COLUMN allow_queries")
+                it.execute("ALTER TABLE messages DROP COLUMN placeholder")
                 it.execute("PRAGMA user_version = 3")
             }
         }

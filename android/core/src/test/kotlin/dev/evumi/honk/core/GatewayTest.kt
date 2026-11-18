@@ -33,6 +33,7 @@ class MemoryTokens(val map: MutableMap<String, String> = mutableMapOf()) : BotTo
     override fun save(botId: String, token: String) { map[botId] = token }
     override fun remove(botId: String) { map.remove(botId) }
     override fun removeAll() = map.clear()
+    override fun ids() = map.keys.toList()
 }
 
 class MemoryCredentials(var value: Credentials? = null) : CredentialStore {

@@ -45,6 +45,13 @@ class LocalStore(private val sql: Sql) {
                 sql.exec("PRAGMA user_version = 4")
             }
         }
+        // v5: whether a message is the stand-in for one that could not be decrypted, so real content can replace it.
+        if ((scalar("PRAGMA user_version") ?: 0) < 5) {
+            transaction {
+                sql.exec("ALTER TABLE messages ADD COLUMN placeholder INTEGER NOT NULL DEFAULT 0")
+                sql.exec("PRAGMA user_version = 5")
+            }
+        }
     }
 
     // applying queued items
@@ -75,13 +82,26 @@ class LocalStore(private val sql: Sql) {
         }
         sql.run(
             """
-            INSERT INTO messages (id, bot_id, title, body, html, data, level, group_key, url, copy_text, icon, open_mode, image, parse_mode, silent, collapse_id, allow_queries, date, notif_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET data = excluded.data, allow_queries = excluded.allow_queries, notif_id = COALESCE(messages.notif_id, excluded.notif_id)
+            INSERT INTO messages (id, bot_id, title, body, html, data, level, group_key, url, copy_text, icon, open_mode, image, parse_mode, silent, collapse_id, allow_queries, date, notif_id, placeholder)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+              title = CASE WHEN messages.placeholder = 1 AND excluded.placeholder = 0 THEN excluded.title ELSE messages.title END,
+              body = CASE WHEN messages.placeholder = 1 AND excluded.placeholder = 0 THEN excluded.body ELSE messages.body END,
+              html = CASE WHEN messages.placeholder = 1 AND excluded.placeholder = 0 THEN excluded.html ELSE messages.html END,
+              copy_text = CASE WHEN messages.placeholder = 1 AND excluded.placeholder = 0 THEN excluded.copy_text ELSE messages.copy_text END,
+              url = CASE WHEN messages.placeholder = 1 AND excluded.placeholder = 0 THEN excluded.url ELSE messages.url END,
+              icon = CASE WHEN messages.placeholder = 1 AND excluded.placeholder = 0 THEN excluded.icon ELSE messages.icon END,
+              open_mode = CASE WHEN messages.placeholder = 1 AND excluded.placeholder = 0 THEN excluded.open_mode ELSE messages.open_mode END,
+              image = CASE WHEN messages.placeholder = 1 AND excluded.placeholder = 0 THEN excluded.image ELSE messages.image END,
+              parse_mode = CASE WHEN messages.placeholder = 1 AND excluded.placeholder = 0 THEN excluded.parse_mode ELSE messages.parse_mode END,
+              data = CASE WHEN messages.placeholder = 0 AND excluded.placeholder = 1 THEN messages.data ELSE excluded.data END,
+              allow_queries = CASE WHEN messages.placeholder = 0 AND excluded.placeholder = 1 THEN messages.allow_queries ELSE excluded.allow_queries END,
+              placeholder = CASE WHEN messages.placeholder = 1 THEN excluded.placeholder ELSE 0 END,
+              notif_id = COALESCE(messages.notif_id, excluded.notif_id)
             """.trimIndent(),
             listOf(
                 m.id, m.botId, m.title, m.body, m.html, m.data, m.level, m.group, m.url, m.copy, m.icon,
-                m.open, m.image, m.parseMode, m.silent, m.collapseId, m.allowQueries, m.date, notificationId,
+                m.open, m.image, m.parseMode, m.silent, m.collapseId, m.allowQueries, m.date, notificationId, m.placeholder,
             ),
         )
         return ApplyResult(message = messageUnlocked(m.id), staleNotificationIds = stale)
@@ -331,13 +351,16 @@ class LocalStore(private val sql: Sql) {
             var imported = 0
             var existing = 0
             var unknownBot = 0
-            for (m in items) {
-                if (m.kind != QueuedMessage.Kind.MESSAGE) continue
+            for (raw in items) {
+                if (raw.kind != QueuedMessage.Kind.MESSAGE) continue
+                val m = ContentLimits.sanitize(raw)
                 if (scalar("SELECT COUNT(*) FROM bots WHERE id = ?", listOf(m.botId)) != 1L) {
                     unknownBot++
                     continue
                 }
-                val stored = scalar("SELECT id FROM messages WHERE id = ?", listOf(m.id)) != null
+                val stored = scalar("SELECT id FROM messages WHERE id = ? AND placeholder = 0", listOf(m.id)) != null
+                // A stored stand-in for an undecryptable message is repaired by the archived content.
+                val repair = !m.placeholder && scalar("SELECT id FROM messages WHERE id = ? AND placeholder = 1", listOf(m.id)) != null
                 val newer = m.collapseId.isNotEmpty() &&
                     scalar("SELECT id FROM messages WHERE bot_id = ? AND collapse_id = ? AND id > ? LIMIT 1", listOf(m.botId, m.collapseId, m.id)) != null
                 if (stored || newer) {
@@ -345,7 +368,7 @@ class LocalStore(private val sql: Sql) {
                     continue
                 }
                 insert(m, null)
-                sql.run("UPDATE messages SET read = 1 WHERE id = ?", listOf(m.id))
+                if (!repair) sql.run("UPDATE messages SET read = 1 WHERE id = ?", listOf(m.id))
                 imported++
             }
             ImportSummary(imported, existing, unknownBot)

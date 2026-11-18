@@ -13,6 +13,9 @@ interface BotTokenStore {
     fun save(botId: String, token: String)
     fun remove(botId: String)
 
+    /** The ids of the bots that have a token here; used to drop the tokens of bots the gateway no longer lists. */
+    fun ids(): List<String> = emptyList()
+
     /** Removes every bot's token (the device moved to another gateway). */
     fun removeAll()
 }

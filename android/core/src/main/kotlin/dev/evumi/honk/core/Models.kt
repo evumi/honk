@@ -4,6 +4,7 @@ import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 import kotlinx.serialization.descriptors.PrimitiveKind
 import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
 import kotlinx.serialization.encoding.Decoder
@@ -80,6 +81,11 @@ data class QueuedMessage(
     @SerialName("allow_queries") val allowQueries: Boolean = false,
     /** The end-to-end sealed content ([Seal]); [MessageOpener] replaces it with the fields above. */
     val ciphertext: String = "",
+    /**
+     * Set by [MessageOpener] on the stand-in it makes for a message it could not open; never on the wire.
+     * [LocalStore] marks the stored row so real content can replace it later.
+     */
+    @Transient val placeholder: Boolean = false,
 ) {
     @Serializable
     enum class Kind {

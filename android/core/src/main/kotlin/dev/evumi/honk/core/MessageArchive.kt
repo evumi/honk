@@ -53,7 +53,8 @@ object MessageArchive {
             val line = raw.trim()
             if (line.isEmpty()) continue
             val m = runCatching { ApiClient.JSON.decodeFromString(QueuedMessage.serializer(), line) }.getOrNull()
-            if (m != null && m.id > 0 && m.botId.isNotEmpty()) out += m else invalid++
+            // An archive is as untrusted as a sealed message: apply the limits the gateway checks for plaintext.
+            if (m != null && m.id > 0 && m.botId.isNotEmpty()) out += ContentLimits.sanitize(m) else invalid++
         }
         return Decoded(out, invalid)
     }

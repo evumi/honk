@@ -75,14 +75,14 @@ class PrefsBotTokenStore(private val prefs: SharedPreferences) : BotTokenStore {
  * decrypted while the app is closed.
  */
 class PrefsBotKeyStore(private val prefs: SharedPreferences) : BotKeyStore {
-    override fun key(botId: String): ByteArray? = prefs.getString(key(botId), null)?.let(Seal::parseKey)
+    override fun key(botId: String): ByteArray? = prefs.getString(prefKey(botId), null)?.let(Seal::parseKey)
 
     override fun save(botId: String, key: ByteArray) {
-        prefs.edit().putString(key(botId), Seal.encode(key)).commit()
+        prefs.edit().putString(prefKey(botId), Seal.encode(key)).commit()
     }
 
     override fun remove(botId: String) {
-        prefs.edit().remove(key(botId)).commit()
+        prefs.edit().remove(prefKey(botId)).commit()
     }
 
     override fun removeAll() {
@@ -91,7 +91,7 @@ class PrefsBotKeyStore(private val prefs: SharedPreferences) : BotKeyStore {
         edit.commit()
     }
 
-    private fun key(botId: String) = "$PREFIX$botId"
+    private fun prefKey(botId: String) = "$PREFIX$botId"
 
     private companion object {
         const val PREFIX = "bot-key."

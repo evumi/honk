@@ -12,8 +12,17 @@ class SyncEngine(private val api: ApiClient, private val store: LocalStore, priv
         var applied = 0
         val stale = mutableListOf<String>()
         var cursor = store.syncCursor
+        var restarted = false
         while (true) {
             val page = api.sync(cursor, pageSize)
+            if (page.reset && !restarted && cursor != 0L) {
+                restarted = true
+                // The gateway merged groups or otherwise needs this device to start over: apply is idempotent,
+                // so replay everything from 0. A page that answers `reset` again from 0 is the replay itself.
+                cursor = 0
+                store.syncCursor = 0
+                continue
+            }
             for (item in page.messages) {
                 val m = opener.open(item) ?: continue
                 stale += store.apply(m).staleNotificationIds
@@ -122,5 +131,22 @@ object LegacyBotIds {
         val out = rename(store, tokens, bots) { api.getMe(it) }
         store.replaceBots(bots, keeping = out.pending)
         return out
+    }
+}
+
+/** Drops what this phone keeps for bots the gateway no longer lists. */
+object SecretPruning {
+    /**
+     * Removes the tokens and end-to-end keys of bots that are not stored any more. Call it after
+     * [LocalStore.replaceBots], whose list already holds the legacy-id bots still pending a rename ([LegacyBotIds]),
+     * so those keep their token. The secrets are listed before the store is, so a bot added meanwhile (its row is
+     * stored before its token) is never mistaken for an orphan.
+     */
+    fun prune(store: LocalStore, tokens: BotTokenStore, keys: BotKeyStore) {
+        val tokenIds = tokens.ids()
+        val keyIds = keys.ids()
+        val keep = store.botIds().toSet()
+        tokenIds.filter { it !in keep }.forEach(tokens::remove)
+        keyIds.filter { it !in keep }.forEach(keys::remove)
     }
 }
