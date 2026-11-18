@@ -9,6 +9,7 @@ import dev.evumi.honk.core.BotKeyStore
 import dev.evumi.honk.core.BotTokenStore
 import dev.evumi.honk.core.CredentialStore
 import dev.evumi.honk.core.Credentials
+import dev.evumi.honk.core.GroupKeyStore
 import dev.evumi.honk.core.Seal
 
 /** EncryptedSharedPreferences with a key in the Android Keystore. Not backed up (allowBackup is off). */
@@ -94,5 +95,27 @@ class PrefsBotKeyStore(private val prefs: SharedPreferences) : BotKeyStore {
 
     private companion object {
         const val PREFIX = "bot-key."
+    }
+}
+
+/**
+ * The group key (unpadded base64url) in the same EncryptedSharedPreferences. It
+ * wraps each bot's key for the gateway so the group's other devices can unwrap
+ * it, and never goes to the gateway in clear: a pairing bundle (sealed with the
+ * pairing code) carries it to a new phone.
+ */
+class PrefsGroupKeyStore(private val prefs: SharedPreferences) : GroupKeyStore {
+    override fun groupKey(): ByteArray? = prefs.getString(KEY, null)?.let(Seal::parseKey)
+
+    override fun save(key: ByteArray) {
+        prefs.edit().putString(KEY, Seal.encode(key)).commit()
+    }
+
+    override fun remove() {
+        prefs.edit().remove(KEY).commit()
+    }
+
+    private companion object {
+        const val KEY = "group-key"
     }
 }

@@ -41,6 +41,10 @@ data class Bot(
     @SerialName("default_level") val defaultLevel: String = "active",
     @SerialName("created_at") val createdAt: Long = 0,
     @SerialName("updated_at") val updatedAt: Long = 0,
+    /** End-to-end encryption is on for this bot (the gateway refuses its plaintext). */
+    val encrypted: Boolean = false,
+    /** The bot's key sealed with the group key ([KeyWrap]); empty when there is none. */
+    @SerialName("key_wrapped") val keyWrapped: String = "",
 )
 
 /** One item from the gateway's queue: a new message, or an edit or delete of one. */

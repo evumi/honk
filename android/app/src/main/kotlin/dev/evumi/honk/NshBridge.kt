@@ -250,7 +250,8 @@ class NshBridge(
             val key = existing ?: Seal.generateKey()
             service.botKeys.save(id, key)
             try {
-                service.api.updateBot(id, encrypted = true)
+                // The wrapped key lets the group's other devices unwrap it.
+                service.api.updateBot(id, encrypted = true, keyWrapped = service.keyRing.wrapped(id))
             } catch (e: Exception) {
                 if (existing == null) service.botKeys.remove(id)
                 throw e
@@ -260,7 +261,7 @@ class NshBridge(
         handle("honk.bot.encryption.disable") { a ->
             val id = a.requireString("botId")
             // The gateway first: with its flag still on, plaintext sends stay refused.
-            service.api.updateBot(id, encrypted = false)
+            service.api.updateBot(id, encrypted = false, keyWrapped = "")
             service.botKeys.remove(id)
             true
         }
@@ -270,7 +271,7 @@ class NshBridge(
             val key = Seal.generateKey()
             service.botKeys.save(id, key)
             try {
-                service.api.updateBot(id, encrypted = true)
+                service.api.updateBot(id, encrypted = true, keyWrapped = service.keyRing.wrapped(id))
             } catch (e: Exception) {
                 if (old != null) service.botKeys.save(id, old) else service.botKeys.remove(id)
                 throw e

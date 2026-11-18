@@ -13,6 +13,9 @@ import dev.evumi.honk.core.ApiClient
 import dev.evumi.honk.core.ApiException
 import dev.evumi.honk.core.Banner
 import dev.evumi.honk.core.BotKeyStore
+import dev.evumi.honk.core.GroupKeyStore
+import dev.evumi.honk.core.KeyRing
+import dev.evumi.honk.core.Seal
 import dev.evumi.honk.core.BotTokenStore
 import dev.evumi.honk.core.CredentialStore
 import dev.evumi.honk.core.DeviceLinking
@@ -44,6 +47,9 @@ class HonkService private constructor(context: Context) {
     val botTokens: BotTokenStore
     /** Each bot's end-to-end key; with [opener] it decrypts what the queue delivers. */
     val botKeys: BotKeyStore
+    /** The group key, which wraps each bot's key for the gateway so the group's other devices can unwrap it. */
+    val groupKey: GroupKeyStore
+    val keyRing: KeyRing
     val opener: MessageOpener
     val store: LocalStore = LocalStore(AndroidSql(File(this.context.noBackupFilesDir, "honk.sqlite")))
     val notifier = Notifier(this.context)
@@ -77,6 +83,8 @@ class HonkService private constructor(context: Context) {
         credentials = PrefsCredentialStore(secure)
         botTokens = PrefsBotTokenStore(secure)
         botKeys = PrefsBotKeyStore(secure)
+        groupKey = PrefsGroupKeyStore(secure)
+        keyRing = KeyRing(botKeys, groupKey)
         opener = MessageOpener(botKeys, this.context.getString(R.string.undecryptable_notification))
         if (credentials.load() != null) registration = Registration.Registered
     }
@@ -230,6 +238,7 @@ class HonkService private constructor(context: Context) {
         credentials.clear()
         botTokens.removeAll()
         botKeys.removeAll()
+        groupKey.remove()
         notifier.cancel(store.reset())
         notifier.syncChannels(emptyList())
     }
@@ -283,7 +292,12 @@ class HonkService private constructor(context: Context) {
     }
 
     /** A pairing code for another phone, with this phone's bot tokens sealed in it. Blocking. */
-    fun createLink(): DeviceLinking.Created = DeviceLinking.create(api, store, botTokens)
+    fun createLink(): DeviceLinking.Created =
+        // The bundle carries the group key (made now if this is the first pairing) and the bot keys.
+        DeviceLinking.create(
+            api, store, botTokens,
+            keys = keyRing.bundleKeys(store.botIds()), groupKey = Seal.encode(keyRing.ensureGroupKey()),
+        )
 
     /**
      * Joins the group that made [code]: stores the tokens it holds, then
@@ -292,7 +306,9 @@ class HonkService private constructor(context: Context) {
      */
     fun claimLink(code: String) {
         if (!isRegistered) retryRegistration()
-        DeviceLinking.claim(code, api, store, botTokens)
+        // Adopt the creator's group key and bot keys; the refresh after this re-wraps
+        // this phone's own encrypted bots with it (KeyRing.reconcile).
+        keyRing.adopt(DeviceLinking.claim(code, api, store, botTokens))
         refresh()
     }
 
@@ -313,6 +329,27 @@ class HonkService private constructor(context: Context) {
         return ids.isNotEmpty()
     }
 
+    /**
+     * The queued item, decrypted. When it does not open, another device of the
+     * group may have turned encryption on or reset the key: unwrap what the
+     * gateway holds and try again. Blocking.
+     */
+    private fun fetchOpened(messageId: Long): QueuedMessage? {
+        val item = api.message(messageId)
+        if (!opener.opens(item)) refreshKeys()
+        return opener.open(item)
+    }
+
+    /** Fetches the bot list and reconciles the keys with the gateway's wrapped ones. A short timeout; failures are ignored. */
+    private fun refreshKeys() {
+        try {
+            val client = ApiClient(gatewayUrl, credentials.load()?.secret, HttpTransport(timeoutMs = 5_000))
+            keyRing.reconcile(client.listBots()) { id, wrapped -> client.updateBot(id, keyWrapped = wrapped) }
+        } catch (e: Exception) {
+            Log.w(TAG, "key refresh failed", e)
+        }
+    }
+
     /** Fetches the bot list and anything queued, then refreshes the UI. Blocking. */
     fun refresh() {
         if (!isRegistered || !syncing.compareAndSet(false, true)) return
@@ -325,6 +362,8 @@ class HonkService private constructor(context: Context) {
             val renamed = LegacyBotIds.rename(store, botTokens, bots) { client.getMe(it) }
             renamed.renamed.forEach { notifier.moveChannel(it.old, it.new) }
             store.replaceBots(bots, keeping = renamed.pending)
+            // Keys other devices turned on or reset arrive here; ours are published.
+            keyRing.reconcile(bots) { id, wrapped -> client.updateBot(id, keyWrapped = wrapped) }
             notifier.syncChannels(store.chats().map { it.bot })
             val out = SyncEngine(api, store, opener).run()
             notifier.cancel(out.staleNotificationIds)
@@ -378,7 +417,7 @@ class HonkService private constructor(context: Context) {
         // A sealed message is decrypted here; one that cannot be opened is stored
         // as a placeholder and the notification says so.
         val fetched = try {
-            opener.open(api.message(info.messageId))
+            fetchOpened(info.messageId)
         } catch (e: Exception) {
             // Offline, not registered, or already gone from the queue: show the push's own text.
             Log.w(TAG, "fetch message ${info.messageId} failed", e)
@@ -434,7 +473,7 @@ class HonkService private constructor(context: Context) {
         if (!isRegistered) return
         renameBeforePush()
         try {
-            opener.open(api.message(info.messageId))?.let {
+            fetchOpened(info.messageId)?.let {
                 notifier.cancel(store.apply(it).staleNotificationIds)
             }
             changed()

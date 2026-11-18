@@ -161,12 +161,14 @@ class ApiClient(
         avatar: String? = null,
         defaultLevel: String? = null,
         encrypted: Boolean? = null,
+        keyWrapped: String? = null,
     ): Bot {
         val body = buildMap<String, Any> {
             name?.let { put("name", it) }
             avatar?.let { put("avatar", it) }
             defaultLevel?.let { put("default_level", it) }
             encrypted?.let { put("encrypted", it) }
+            keyWrapped?.let { put("key_wrapped", it) }
         }
         return request("PATCH", "v1/bots/$id", Bot.serializer(), body = body)
     }
