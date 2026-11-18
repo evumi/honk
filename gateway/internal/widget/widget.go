@@ -40,7 +40,14 @@ var (
 // dropped with its whole subtree.
 var allowed = map[string]bool{}
 
+// svgElements are the allowed SVG elements, whose attributes are CSS values
+// too (fill, stroke, mask, clip-path, filter, marker-*).
+var svgElements = map[string]bool{}
+
 func init() {
+	for _, t := range strings.Fields(`svg g path rect circle ellipse line polyline polygon text tspan defs lineargradient radialgradient stop symbol use title desc`) {
+		svgElements[t] = true
+	}
 	for _, t := range strings.Fields(`
 		div span p br hr h1 h2 h3 h4 h5 h6 section article header footer main aside nav
 		pre code blockquote figure figcaption strong b em i u s small sub sup mark abbr time
@@ -215,7 +222,25 @@ func keepAttr(el string, a html.Attribute) bool {
 	case "srcset", "formaction", "action", "contenteditable", "draggable", "tabindex", "autofocus", "accesskey":
 		return false
 	}
+	if svgElements[el] && badSVGValue(a.Val) {
+		return false
+	}
 	return true
+}
+
+// badSVGValue reports an SVG attribute value that could load something: a
+// url() other than a same-document reference (url(#grad)), or a CSS escape
+// that could spell one.
+func badSVGValue(v string) bool {
+	if strings.Contains(v, `\`) {
+		return true
+	}
+	for _, m := range cssURL.FindAllStringSubmatch(v, -1) {
+		if !strings.HasPrefix(m[1], "#") {
+			return true
+		}
+	}
+	return false
 }
 
 func okHref(el, v string) bool {

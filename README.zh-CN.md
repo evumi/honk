@@ -120,8 +120,11 @@ curl https://honk.example.com/bot$TOKEN/sendMessage \
 - 带 `src` 或 `type` 不是 JavaScript 的脚本（包括 module）、`on*` 事件属性、表单控件
 - 外部链接；`a` 只允许 `https://`、`#id` 或 `{{key}}`
 - CSS 里引用外部资源的写法：`@import`、`expression()`、非 data: 的 `url()`
+- SVG 属性值里不是 `url(#id)` 的 `url()`，以及带 CSS 转义（`\`）的值
 
 渲染时客户端还会再按自己的 CSS 白名单过滤一遍。
+
+App 把内联 SVG（`svg`、`g`、各种图形、`text`/`tspan`、渐变、`symbol`/`use`）画成图片：把清理过的子树重新写成 SVG 标记，只保留白名单里的元素和属性、卡片内的 `use` 引用（`#id`）和 `url(#id)` 填充，再栅格化。尺寸先看 CSS，再看 `width`、`height` 属性（`width="100%"` 占满卡片宽度，`height` 按 px），都没有时按 `viewBox` 的宽高比；`preserveAspectRatio`（包括 `none`）决定怎么填满这个框。`{{key}}`、`var()` 和 `currentColor` 在绘制前替换好；`<style>` 规则管不到 SVG 内部，所以 SVG 里的元素要用属性或固定颜色。`<title>` 或 `aria-label` 作为无障碍标签。旧版 App 会跳过内联 SVG。
 
 ### 卡片样式
 

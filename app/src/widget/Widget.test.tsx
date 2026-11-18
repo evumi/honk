@@ -127,3 +127,18 @@ test("without a host that runs scripts, a scripted card stays static", async () 
   await app.press("text:open");
   expect(app.openedUrls()).toEqual(["https://example.com/static"]);
 });
+
+const svgCard = `<p>Visitors</p><svg viewBox="0 0 320 112" width="100%" height="{{h}}" preserveAspectRatio="none"><title>Trend for {{site}}</title><path d="M0 90L320 80" fill="none" stroke="currentColor"/><text x="4" y="12">axis label</text></svg><span>inline <svg width="10" height="10"><text>inline svg</text></svg></span><p>After</p>`;
+
+test("an inline svg draws as one image, in light and dark; its text never leaks into the card", async () => {
+  const app = await open("../../App.tsx", { locale: "zh-Hans-CN", colorScheme: "light", host: host(svgCard, { h: 112, site: "evumi.com" }) });
+  await app.press("id:chat-aZ3kQ9xT");
+  await app.waitFor("text:After");
+  expect(app.count("label:Trend for evumi.com")).toBe(1);
+  const texts = app.texts().join("|");
+  expect(texts).toContain("Visitors");
+  expect(texts).not.toContain("axis label");
+  expect(texts).not.toContain("inline svg");
+  await app.setColorScheme("dark");
+  expect(app.count("label:Trend for evumi.com")).toBe(1);
+});
