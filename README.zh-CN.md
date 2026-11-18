@@ -25,9 +25,17 @@ Honk 是一个以 bot 为渠道的推送通知服务：每个 bot 都是一个�
 4. 设备端（iOS 的 NSE 或 Android 的 FCM Service）按 `msg_id` 调 `GET /v1/messages/:id` 拉完整消息（包括卡片），存进本地库。
 5. App 打开时调 `GET /v1/sync` 补齐离线期间漏掉的消息，存好后调 `POST /v1/ack`。
 
-队列里的消息默认保存 7 天；已 ack 的消息保留 1 天后删除。
+队列里的消息默认保存 7 天；设备组里每台设备都 ack 过的消息，在创建满 1 天（`HONK_ACKED_KEEP`）后删除。
 
-推送失败而且可能恢复时（网络错误、超时、5xx、带 `retry_after` 的 429），网关从内存里的有界队列重试：2 秒、10 秒、60 秒后各一次，一共发 4 次；设备在这期间已 ack 这条消息、或者 push token 换了，就放弃。重试状态不跨重启保存，设备仍能从 `/v1/sync` 拿到消息。App 还会在后台大约每 6 小时同步一次（iOS 用 `BGAppRefreshTask`，Android 用 WorkManager）：应用修改和删除、更新角标，但不会补发通知。
+推送失败而且可能恢复时（网络错误、超时、5xx、带 `retry_after` 的 429），网关从内存里的有界队列重试：2 秒、10 秒、60 秒后各一次，一共发 4 次；这台设备在这期间已 ack 这条消息、或者它的 push token 换了，就放弃。重试状态不跨重启保存，设备仍能从 `/v1/sync` 拿到消息。App 还会在后台大约每 6 小时同步一次（iOS 用 `BGAppRefreshTask`，Android 用 WorkManager）：应用修改和删除、更新角标，但不会补发通知。
+
+## 多台手机：设备组
+
+手机不再和 bot 绑死：配过对的设备组成一个**设备组**，共用同一批 bot 和同一个队列。每条消息（包括修改和删除）会推送给组里每一台能收推送的设备；每台设备有自己的同步游标和 ack 水位，慢的手机不会因为快的手机而丢消息。消息在过期后删除，或者组里每台设备都 ack 过、并且创建超过 `HONK_ACKED_KEEP` 后删除。静音、置顶、已读各手机自己保存，更早的本地历史不会迁移（只有队列里还没过期的消息会到新手机）。
+
+换手机或加一台：在旧手机打开「设置 → 设备 → 添加设备」，会显示 26 位配对码（16 个随机字节的 Crockford base32，每 4 位一组；nsh 没有二维码接口，所以只有文字，可以复制）。新手机用「已有设备？输入配对码」（设置页，或没有 Bot 时的首页）。配对码 10 分钟内有效，只能用一次；网关看不到它，只存放由它经 HKDF-SHA256 派生出的 `link_id`，以及用派生密钥加密过的 bot token。新手机原有的 bot 也会并入设备组。认领按客户端 IP 限流，猜不出配对码。丢了手机又没有其他设备时不能恢复：bot token 只存在设备上，请重新创建 bot。
+
+「设置 → 设备」列出设备组（名称、平台、最近在线、这台设备），可以移除其中一台。「数据」里有两个按钮：「从设备组移除这台设备」（这台手机退出，bot 留给其他设备）和「删除全部数据」（网关上整个设备组的设备、bot 和队列，再清空本机）。push token 已失效、且超过 `HONK_DEVICE_GC`（默认 90 天）没有任何请求的设备，网关会自动删除；它是组里最后一台时，bot 和队列一并删除。
 
 ## 运行网关
 
@@ -58,10 +66,11 @@ docker run -p 8080:8080 -v honk-data:/data \
 | `HONK_ADDR` | `:8080` | 监听地址 |
 | `HONK_DB` | `./data/honk.db` | SQLite 文件路径 |
 | `HONK_MESSAGE_TTL` | `168h` | 消息在队列里保存多久 |
-| `HONK_ACKED_KEEP` | `24h` | 已 ack 的消息再保留多久 |
+| `HONK_ACKED_KEEP` | `24h` | 设备组里每台设备都已 ack 的消息再保留多久（从创建时算起） |
+| `HONK_DEVICE_GC` | `2160h` | push token 已失效、且这么久没有任何请求的设备会被删除；它是组里最后一台时，bot 和队列一并删除 |
 | `HONK_SEND_RATE` / `HONK_SEND_BURST` | `5` / `20` | 每个 bot 每秒最多发几条 / 突发上限 |
 | `HONK_REGISTER_PER_HOUR` | `10` | 每个 IP 每小时最多注册几台设备（突发 5） |
-| `HONK_MAX_BOTS_PER_DEVICE` | `100` | 每台设备最多几个 bot |
+| `HONK_MAX_BOTS_PER_DEVICE` | `100` | 每个设备组最多几个 bot（名字沿用分组之前的叫法）；会超出上限的配对会被拒绝 |
 | `HONK_APNS_KEY_FILE` | | APNs `.p8` key 文件路径；不设就不推 iOS |
 | `HONK_APNS_KEY_ID` / `HONK_APNS_TEAM_ID` / `HONK_APNS_TOPIC` | | 设置了 key 文件时必填；topic 就是 bundle ID |
 | `HONK_APNS_SANDBOX` | `false` | 用 APNs 开发环境，开发版构建要设为 true |
@@ -250,14 +259,18 @@ GitHub 适配不校验 `X-Hub-Signature-256`：URL 里的 token 就是密钥，�
 
 | 接口 | 说明 |
 | --- | --- |
-| `GET /v1/info` | `{"name":"honk","version","api":2,"features":[…],"push":{"ios","android"}}`（`direct`、`relay` 或 `off`）；设了 `HONK_REGISTER_KEY` 时多一个 `register_key_required` |
-| `POST /v1/devices` | `{"platform":"ios"\|"android","push_token":"…","register_key":"…"}`（网关要求口令时才需要带 `register_key`），返回 `device` 和 `device_secret` |
-| `GET` / `PUT` / `DELETE /v1/devices/me` | 读取设备信息；更新 push token；删除设备及它的所有 bot 和消息（App「设置 → 删除这台设备的数据」调用它，成功后再清空本机） |
+| `GET /v1/info` | `{"name":"honk","version","api":2,"features":[…],"push":{"ios","android"}}`（`features` 有 `link` 表示支持设备组和配对，中继会有 `relay`）（`direct`、`relay` 或 `off`）；设了 `HONK_REGISTER_KEY` 时多一个 `register_key_required` |
+| `POST /v1/devices` | `{"platform":"ios"\|"android","push_token":"…","name":"…","register_key":"…"}`（`name` 可选，最长 64 个字符：手机的名称或型号；网关要求口令时才需要带 `register_key`），返回 `device` 和 `device_secret`。每台新设备先自成一个设备组 |
+| `GET` / `PUT` / `DELETE /v1/devices/me` | 读取设备信息；更新 push token 和/或 `name`；把这台设备从设备组移除（最后一台时，设备组连同它的 bot 和队列一起删除）。`DELETE /v1/devices/me?all=true` 删除整个设备组：所有设备、bot 和排队的消息（App「删除全部数据」） |
+| `GET /v1/devices` | 设备组里的设备：`id`、`name`、`platform`、`seen_at`（Unix 毫秒，最多每小时写一次）、`current` |
+| `DELETE /v1/devices/:id` | 移除设备组里的一台设备（不在组内的返回 404） |
+| `POST /v1/links` | `{"link_id","bundle"}`：保存一份配对数据（不透明的 base64url，最大 16 KB；`link_id` 是 16 到 64 个 base64url 字符），10 分钟有效，每个设备组同时只有一个，返回 `expires_in` 秒数；`link_id` 已被占用时返回 409 |
+| `POST /v1/links/claim` | 新设备发 `{"link_id"}`：把它所在的整个设备组（设备、bot、排队的消息）并入创建配对的设备组，返回 `bundle`。只能用一次；未知、过期或已用过返回 404；合并后超过 bot 上限返回 400；同一 IP 尝试太多返回 429（突发 5 次，之后每小时 10 次） |
 | `GET` / `POST /v1/bots` | 列出 bot；创建 bot：`{"name","avatar","default_level"}`，返回 `bot` 和 `token`。`avatar` 是 `preset:<icon>:<#rrggbb>`、https URL，或 `local:<文件名>`：用户在 App 里从相册选的图片，只存在手机上（网关只存这个名字） |
 | `GET` / `PATCH` / `DELETE /v1/bots/:id` | 读取、修改、删除一个 bot（`:id` 是 bot 的短 id） |
 | `POST /v1/bots/:id/token` | 重置 token，旧 token 立即失效 |
 | `GET /v1/messages/:id` | 拉一条消息；条目可能是 `message`、`edit` 或 `delete` |
 | `GET /v1/sync?cursor=&limit=` | 拉 cursor 之后的消息，返回 `messages`、`cursor`、`has_more` |
-| `POST /v1/ack` | `{"up_to": <id>}`：告诉网关这个 id 及之前的消息都已存好 |
+| `POST /v1/ack` | `{"up_to": <id>}`：告诉网关这台设备已存好这个 id 及之前的消息（设备组里每台设备各有一个水位，只升不降） |
 
 `edit` 和 `delete` 条目用 `target_id` 或 `id` 指向原消息。原消息可能已经从队列删掉了，客户端要对自己本地存的那份执行。

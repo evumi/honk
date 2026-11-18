@@ -6,12 +6,13 @@ Honk Push is a notification utility published by Le He. This policy describes th
 
 ## Information used to deliver notifications
 
-- Device information: the gateway stores a randomly assigned device identifier, platform, Apple push notification token, and a hash of the device authentication secret. These associate your bots and queued messages with your installation.
+- Device information: the gateway stores a randomly assigned device identifier, platform, Apple (or Firebase) push notification token, a hash of the device authentication secret, the device name or model the app reports (for example "iPhone 15", shown in your device list), and the time of the device's last request (updated at most once an hour). These associate your bots and queued messages with your installation.
+- Device groups: devices you pair (to switch phones or use several) belong to one group with a random identifier, which owns the bots and the message queue. When you pair, the old device uploads a bundle of your bot tokens that is encrypted with a key derived from the pairing code; the gateway keeps it for ten minutes at most, until it is claimed once, and cannot read it because it never sees the code. The pairing code is not stored on the gateway; only a value derived from it is, in hashed form.
 - Bot settings: the gateway stores bot identifiers, names, avatar references, notification preferences, and hashed bot credentials.
 - Notification content: services you authorize with a bot token send message titles, bodies, HTML cards, card data, links, and related message metadata to the gateway. This content is stored temporarily so your device can retrieve it.
 - Operational information: network requests expose an IP address to the gateway and hosting infrastructure. The gateway uses IP addresses for registration rate limits and records operational errors and push-delivery failures for troubleshooting.
 
-These data are used to provide, secure, and troubleshoot the notification service. Notification content and bot settings are associated with the device identifier. Honk Push does not require a name, email address, or phone number to use the app.
+These data are used to provide, secure, and troubleshoot the notification service. Notification content and bot settings are associated with your device group, which each of your devices belongs to. Honk Push does not require a name, email address, or phone number to use the app.
 
 ## Data on your device
 
@@ -31,14 +32,14 @@ Opening a link in a notification or loading a configured remote avatar may conta
 
 ## Retention and deletion
 
-The gateway's default configuration expires queued messages after seven days and removes acknowledged messages after about one day, during periodic cleanup. Self-hosted operators can change these intervals. Device records and bot settings remain until deleted. Local history is separate from the temporary gateway queue.
+The gateway's default configuration expires queued messages after seven days and removes messages that every device of your group has acknowledged about one day after they were created, during periodic cleanup. A device whose push token the push service has rejected and that has made no request for 90 days is deleted automatically, together with the group's bots and queued messages when it was the group's last device. Self-hosted operators can change these intervals. Device records and bot settings remain until deleted. Local history is separate from the temporary gateway queue.
 
-You can delete a bot from the app to remove that bot and its queued messages. You can also delete everything the gateway holds for this device from the app: Settings, "Delete this device's data". The app asks the gateway to delete the device registration, all its bots (their tokens stop working immediately) and the queued messages (DELETE /v1/devices/me), and only when the gateway confirms does it clear the messages, avatars, bot tokens, device credentials and notifications stored on the phone. If the gateway cannot be reached, nothing is deleted and the app says so; try again later. The device registers again only when you next create a bot or reopen the app. Deleting a local message or uninstalling the app does not by itself necessarily remove the gateway registration. Notification permissions can be changed in iOS Settings.
+You can delete a bot from the app to remove that bot and its queued messages. In Settings you can remove a device from your device group (the other devices and the bots stay), either another device from the list or "Remove this device from the group" for the phone in your hand. You can also delete everything the gateway holds for you: Settings, "Delete all data". The app asks the gateway to delete every device registration of the group, all its bots (their tokens stop working immediately) and the queued messages (DELETE /v1/devices/me?all=true), and only when the gateway confirms does it clear the messages, avatars, bot tokens, device credentials and notifications stored on the phone. If the gateway cannot be reached, nothing is deleted and the app says so; try again later. The device registers again only when you next create a bot or reopen the app. Deleting a local message or uninstalling the app does not by itself necessarily remove the gateway registration. Notification permissions can be changed in iOS Settings.
 
 Operational logs and hosting backups, where present, are separate from the live message queue and follow the infrastructure operator's retention practices.
 
 ## Your choices and contact
 
-You may choose a self-hosted gateway in the app, revoke a bot token, delete a bot, delete this device's data, or disable notifications. For privacy questions or assistance with deletion on the default gateway, contact the maintainer through https://github.com/evumi/honk/issues. Do not post device secrets, bot tokens, notification contents, or other private information in a public issue; ask for a private follow-up channel.
+You may choose a self-hosted gateway in the app, revoke a bot token, delete a bot, delete all data, or disable notifications. For privacy questions or assistance with deletion on the default gateway, contact the maintainer through https://github.com/evumi/honk/issues. Do not post device secrets, bot tokens, notification contents, or other private information in a public issue; ask for a private follow-up channel.
 
 This policy may be updated when the service changes. The date above identifies the current version.

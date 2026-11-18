@@ -25,9 +25,17 @@ The development design (Chinese) is [docs/DESIGN.zh-CN.md](docs/DESIGN.zh-CN.md)
 4. On the device, the Notification Service Extension (iOS) or FCM service (Android) fetches `GET /v1/messages/:id`, card included, and stores it locally.
 5. When the app opens it calls `GET /v1/sync` for anything missed, then `POST /v1/ack`.
 
-Queued messages expire after 7 days; acked ones are deleted a day after the ack.
+Queued messages expire after 7 days; a message that every device of the group has acked is deleted a day after it was created (`HONK_ACKED_KEEP`).
 
-A push that fails for a reason that may pass (a network error, a timeout, a 5xx, a 429 with its `retry_after`) is retried from a bounded in-memory queue after 2 s, 10 s and 60 s, four attempts in all; it is dropped when the device has acked the message or its push token changed meanwhile. Retries are not kept across a restart: the device still gets the message from `/v1/sync`. The apps also sync in the background about every six hours (iOS `BGAppRefreshTask`, Android WorkManager), which applies edits and deletes and updates the badge but never posts notifications.
+A push that fails for a reason that may pass (a network error, a timeout, a 5xx, a 429 with its `retry_after`) is retried from a bounded in-memory queue after 2 s, 10 s and 60 s, four attempts in all; it is dropped when that device has acked the message or its push token changed meanwhile. Retries are not kept across a restart: the device still gets the message from `/v1/sync`. The apps also sync in the background about every six hours (iOS `BGAppRefreshTask`, Android WorkManager), which applies edits and deletes and updates the badge but never posts notifications.
+
+## Several phones: device groups
+
+A phone is not tied to its bots: devices that were paired form a **device group**, which shares the bots and the queue. Every message is pushed to every device of the group that can take a push (edits and deletes too), and each device keeps its own sync cursor and ack watermark, so a slow phone never loses a message to a fast one. A message leaves the queue when it has expired, or when every device of the group has acked it and it is older than `HONK_ACKED_KEEP`. Muting, pinning and read state stay on each phone; older local history does not move (only what is still queued does).
+
+To switch phones or add one, open Settings → Devices → Add device on the old phone: it shows a 26-character pairing code (16 random bytes in Crockford base32, grouped in fours; nsh has no QR code API, so it is text only, with a copy button). On the new phone use "Already have a device? Enter a pairing code" (Settings, or the empty home screen). The code is good for 10 minutes and works once; the gateway never sees it, only a `link_id` and the bot tokens encrypted with a key, both derived from the code with HKDF-SHA256. The new phone's own bots, if it had any, join the group too. Claims are limited per client IP, so a code cannot be guessed. There is no recovery for a lost phone with no other device: bot tokens only exist on devices and in the groups' senders, so create the bots again.
+
+Settings → Devices lists the group (name, platform, last seen, this device); a device can be removed from there. Data has two buttons: "Remove this device from the group" (this phone leaves, the bots stay with the others) and "Delete all data" (the whole group's devices, bots and queue on the gateway, then this phone). A device whose push token has been rejected and that has made no request for `HONK_DEVICE_GC` (90 days) is deleted by the gateway, together with the bots and queue when it was the last device of its group.
 
 ## Running the gateway
 
@@ -46,10 +54,11 @@ See `gateway/Dockerfile` for the container. Settings:
 | `HONK_ADDR` | `:8080` | listen address |
 | `HONK_DB` | `./data/honk.db` | SQLite file |
 | `HONK_MESSAGE_TTL` | `168h` | how long a message stays queued |
-| `HONK_ACKED_KEEP` | `24h` | how long an acked message is kept |
+| `HONK_ACKED_KEEP` | `24h` | how long a message that every device of the group has acked is kept (counted from its creation) |
+| `HONK_DEVICE_GC` | `2160h` | a device whose push token is gone and that made no request for this long is deleted, with the group's bots and queue if it was the last |
 | `HONK_SEND_RATE` / `HONK_SEND_BURST` | `5` / `20` | per-bot messages per second / burst |
 | `HONK_REGISTER_PER_HOUR` | `10` | device registrations per client IP per hour (burst 5) |
-| `HONK_MAX_BOTS_PER_DEVICE` | `100` | bots one device can own |
+| `HONK_MAX_BOTS_PER_DEVICE` | `100` | bots one device group can own (the name is from before groups); a pairing that would exceed it is refused |
 | `HONK_APNS_KEY_FILE` | | APNs `.p8` key; iOS push is off without it |
 | `HONK_APNS_KEY_ID` / `HONK_APNS_TEAM_ID` / `HONK_APNS_TOPIC` | | required with the key; the topic is the bundle ID |
 | `HONK_APNS_SANDBOX` | `false` | use the APNs development gateway (debug builds) |
@@ -172,14 +181,18 @@ Everything except device registration needs `Authorization: Bearer <device_secre
 
 | Endpoint | Purpose |
 | --- | --- |
-| `GET /v1/info` | `{"name":"honk","version","api":2,"features":[…],"push":{"ios","android"}}` (`direct`, `relay` or `off`), plus `register_key_required` when `HONK_REGISTER_KEY` is set |
-| `POST /v1/devices` | `{"platform":"ios"\|"android","push_token":"…","register_key":"…"}` (the key only when the gateway asks for one) → `device`, `device_secret` |
-| `GET` / `PUT` / `DELETE /v1/devices/me` | read; update the push token; delete with all bots and messages (the app's Settings, "Delete this device's data", calls it and then clears the phone) |
+| `GET /v1/info` | `{"name":"honk","version","api":2,"features":[…],"push":{"ios","android"}}` (`features` has `link` when device groups and pairing are available, `relay` on a relay) (`direct`, `relay` or `off`), plus `register_key_required` when `HONK_REGISTER_KEY` is set |
+| `POST /v1/devices` | `{"platform":"ios"\|"android","push_token":"…","name":"…","register_key":"…"}` (`name` optional, at most 64 characters: the phone's name or model; the key only when the gateway asks for one) → `device`, `device_secret`. Each new device starts as a group of its own |
+| `GET` / `PUT` / `DELETE /v1/devices/me` | read; update the push token and/or `name`; remove this device from its group (the last device takes the group, its bots and queue with it). `DELETE /v1/devices/me?all=true` deletes the whole group: every device, bot and queued message (the app's "Delete all data") |
+| `GET /v1/devices` | the group's devices: `id`, `name`, `platform`, `seen_at` (Unix ms, written at most hourly), `current` |
+| `DELETE /v1/devices/:id` | remove one device of the group (404 for one that is not in it) |
+| `POST /v1/links` | `{"link_id","bundle"}`: store a pairing bundle (opaque base64url, at most 16 KB; `link_id` 16 to 64 base64url characters) for 10 minutes, one active link per group → `expires_in` seconds; 409 when the `link_id` is taken |
+| `POST /v1/links/claim` | `{"link_id"}` from the new device: merges its whole group (devices, bots, queued messages) into the group that made the link and returns `bundle`. Works once; 404 for an unknown, expired or used link; 400 when the merged group would exceed the bot limit; 429 after too many attempts from one IP (burst 5, then 10 an hour) |
 | `GET` / `POST /v1/bots` | list; create with `{"name","avatar","default_level"}` → `bot`, `token`. `avatar` is `preset:<icon>:<#rrggbb>`, an https URL, or `local:<file>` for an image the user picked in the app, which stays on the phone (the gateway stores only the name) |
 | `GET` / `PATCH` / `DELETE /v1/bots/:id` | read, change, delete a bot (`:id` is the short bot id) |
 | `POST /v1/bots/:id/token` | reset the token; the old one stops working |
 | `GET /v1/messages/:id` | one queued item: `message`, `edit` or `delete` |
 | `GET /v1/sync?cursor=&limit=` | items after the cursor → `messages`, `cursor`, `has_more` |
-| `POST /v1/ack` | `{"up_to": <id>}`: everything up to that id is stored on the device |
+| `POST /v1/ack` | `{"up_to": <id>}`: everything up to that id is stored on this device (each device of a group has its own watermark, which never goes down) |
 
 An `edit` or `delete` names its message by `target_id` and/or `id`. The message may already be gone from the queue, so the client applies it to its local copy.

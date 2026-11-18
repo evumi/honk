@@ -61,9 +61,11 @@ Honk 是一个以 bot 为渠道的推送通知服务：每个 bot 是一个独�
 
 见 `gateway/internal/store/schema.sql`。时间戳都是 Unix 毫秒。
 
-- `devices`：`id`（UUIDv7）、`secret_hash`、`platform`（ios / android）、`push_token`、`push_ok`（APNs/FCM 报告 token 失效后置 0）
-- `bots`：`id`（自增整数，只在库内使用）、`public_id`（对外的 bot id，v2 加入）、`device_id`、`token_hash`、`name`、`avatar`、`default_level`
-- `messages`：队列。`kind` 是 message / edit / delete；edit 和 delete 用 `target_id` 或 `collapse_id` 指向原消息
+- `devices`：`id`（UUIDv7）、`secret_hash`、`platform`（ios / android）、`push_token`、`push_ok`（APNs/FCM 报告 token 失效后置 0）；v4 加 `owner_id`、`name`（机型名）、`seen_at`（最近一次请求，最多每小时写一次）、`acked_up_to`（这台设备的 ack 水位）
+- `owners`（v4）：设备组，`id`（UUIDv7，不透明）、`created_at`。bot、队列和设备都属于一个组；授权只看 `owner_id`
+- `links`（v4）：配对数据，`link_hash`（`link_id` 的 sha256）、`owner_id`、`bundle`（网关不能解开）、`created_at`、`expires_at`
+- `bots`：`id`（自增整数，只在库内使用）、`public_id`（对外的 bot id，v2 加入）、`device_id`（v1 的列，v4 之后只表示创建它的设备，不再用来授权）、`owner_id`（v4）、`token_hash`、`name`、`avatar`、`default_level`
+- `messages`：队列（v4 起按 `owner_id` 查，`device_id` 不再写入；`acked_at` 不再用）。`kind` 是 message / edit / delete；edit 和 delete 用 `target_id` 或 `collapse_id` 指向原消息
 - `relays`（v3）：登记过的自建网关，`id`、`key_hash`、`created_at`、`last_used_at`（每分钟最多写一次）、`blocked`；只有开了 `HONK_RELAY_SERVE` 的网关用它
 - `meta`（v3）：这个网关自己的键值设置；中继客户端把 `relay_url`、`relay_id`、`relay_key` 存在这里
 
@@ -72,6 +74,8 @@ bot id 是 8 位随机 base62 字符、以字母开头（如 `aZ3kQ9xT`），生
 bot token 形如 `<bot id>:<32 位随机串>`；token 和 device secret 都只存 sha256。查 token 时按整串的哈希查，所以 v2 迁移前发出的 `<整数 id>:<secret>` 旧 token 继续有效，直到重置。
 
 迁移：`schema.sql` 是 v1；之后的版本在 `store.go` 的 `migrate` 里按 `PRAGMA user_version` 逐步执行，每步一个事务。v2 给 bots 加 `public_id` 列、为已有 bot 补上短 id、建唯一索引。App 解码 bot id 时也接受数字（旧网关），所以要先发 App 再升级网关。`/v1/info` 的 `api` 从 1 升到 2。`/v1/bots/:id` 仍接受 v2 之前的整数 id，但只认本设备自己的 bot（按库内主键查），这样改名还在 pending 的 bot 也能删除、修改。
+
+v4 迁移：建 `owners`、`links`；给 `devices`、`bots`、`messages` 加 `owner_id`；每台现有设备各自成组（行为不变），它的 bot 和排队的消息随它；`seen_at` 用 `updated_at` 补，`acked_up_to` 由 v1 的逐条 `acked_at` 推出（第一条未 ack 的消息之前的最大 id，全部 ack 过就是最大 id）。`bots.device_id` 对 `devices` 有外键级联，SQLite 不重建表就删不掉它，重建又会级联删除消息，所以保留这一列；删除设备组里的一台设备时先把它创建的 bot 的 `device_id` 改给组里留下的设备，bot 才不会被级联删掉。
 
 ### 接口
 
@@ -83,10 +87,12 @@ bot token 形如 `<bot id>:<32 位随机串>`；token 和 device secret 都只�
 | `/bot<token>/editMessageData` | 发送方 | `message_id` 或 `id` + `data`，卡片原地更新，不弹通知 |
 | `/bot<token>/deleteMessage` | 发送方 | `message_id` 或 `id` |
 | `/bot<token>/getMe` | 发送方 | 测试 token |
-| `GET /v1/info` | App | `{name:"honk", version, api, features, push}`，切换网关前用来确认地址是 Honk 网关；`api` 2 表示 bot id 是字符串；`features` 是能力列表（开了 `HONK_RELAY_SERVE` 含 `"relay"`，旧网关没有这个字段）；`push: {ios, android}` 是每个平台的推送方式 `direct` / `relay` / `off`（旧网关没有）；设了 `HONK_REGISTER_KEY` 时多一个 `register_key_required: true` |
+| `GET /v1/info` | App | `{name:"honk", version, api, features, push}`，切换网关前用来确认地址是 Honk 网关；`api` 2 表示 bot id 是字符串；`features` 是能力列表（支持设备组和配对含 `"link"`，开了 `HONK_RELAY_SERVE` 含 `"relay"`，旧网关没有这个字段）；`push: {ios, android}` 是每个平台的推送方式 `direct` / `relay` / `off`（旧网关没有）；设了 `HONK_REGISTER_KEY` 时多一个 `register_key_required: true` |
 | `POST /v1/relay/gateways`、`POST /v1/relay/push` | 自建网关 | 推送中继，只在 `HONK_RELAY_SERVE=true` 时存在，见下一节 |
 | `POST /v1/devices` | App | 注册，返回 `device_secret`（只返回这一次）；设了 `HONK_REGISTER_KEY` 时必须带相同的 `register_key`，否则 401 |
-| `GET` / `PUT` / `DELETE /v1/devices/me` | App | 读取；更新 push token；删除设备及全部数据 |
+| `GET` / `PUT` / `DELETE /v1/devices/me` | App | 读取；更新 push token 和 `name`；把这台设备从设备组移除（最后一台时连组、bot、队列一起删）；`?all=true` 删除整个设备组 |
+| `GET /v1/devices`、`DELETE /v1/devices/:id` | App | 设备组里的设备（`id`、`name`、`platform`、`seen_at`、`current`）；移除组里的一台 |
+| `POST /v1/links`、`POST /v1/links/claim` | App | 配对，见下面「设备组」 |
 | `GET` / `POST /v1/bots`，`GET` / `PATCH` / `DELETE /v1/bots/:id`，`POST /v1/bots/:id/token` | App | bot 管理；token 只在创建和重置时返回 |
 | `GET /v1/messages/:id` | NSE / FCM Service | 拉一条 |
 | `GET /v1/sync?cursor=&limit=`、`POST /v1/ack` | App | 补拉和确认 |
@@ -97,7 +103,7 @@ bot token 形如 `<bot id>:<32 位随机串>`；token 和 device secret 都只�
 - **字段长度**：`title` ≤ 256 字，`body` ≤ 4096 字，`id` ≤ 128 字节，`icon` 必须是 https。
 - **限流**：每个 bot 每秒 5 条，突发 20 条（可配）。
 - **模拟器身份**：push token 以 `simulator-` 开头的设备照常注册和排队，但不发推送（见第 5 节「模拟器开发」）。
-- **清理**：每小时删除过期和 ack 超过 1 天的消息。
+- **清理**：每小时删除过期的消息、设备组里每台设备都已 ack 且创建超过 `HONK_ACKED_KEEP`（1 天）的消息，以及按 `HONK_DEVICE_GC` 回收的废弃设备（见下面「设备组」）。
 - **注册口令**：`HONK_REGISTER_KEY` 不为空时，`POST /v1/devices` 必须带相同的 `register_key`（常量时间比较，先过 IP 限流）。App 的网关页有可选的「注册口令」输入框；iOS 存在 Keychain（`RegisterKeyStore`），Android 存在加密的 SharedPreferences，注册时作为 `register_key` 发出。只改口令（网关地址不变）不清本机数据，设备还没注册就立刻重试注册。
 
 ### 推送队列与重试
@@ -106,8 +112,30 @@ bot token 形如 `<bot id>:<32 位随机串>`；token 和 device secret 都只�
 
 - 时机：立即、2 秒后、10 秒后、60 秒后，共 4 次（`Options.PushBackoff`）。
 - 重试的失败：网络错误、超时、5xx、429；服务给了 `retry_after`（FCM 的 `Retry-After` 头）就取较大的等待，上限 2 分钟。APNs 和 FCM 把这些失败包成 `push.RetryableError{After}`，`push.Retryable(err)` 判断。token 失效（`ErrTokenGone`，照旧 `MarkPushGone`）和其他 4xx 不重试。
-- 重试前检查（`store.PushStillWanted`）：设备已不存在、push token 换了或已失效、这条消息已被设备 ack（或已过期被清理），就放弃。
+- 重试前检查（`store.PushStillWanted`）：设备已不存在、push token 换了或已失效、这条消息已被**这台设备**的水位覆盖（`id <= devices.acked_up_to`），或已不在设备组的队列里（过期、被清理），就放弃。设备组里别的设备是否 ack 不影响这台的重试。
+- 扇出：`notifyOwner` 对设备组里每台 `push_ok` 且有 token 的设备各发一次（消息、修改、删除都一样），每台各自重试。
 - 状态只在内存里。`Server.Wait()` 等排队和正在发的这一轮发完（测试用）；`Server.Close()` 是关闭路径：停止接收、丢弃还在等退避的重试、等当前这一轮发完。
+
+### 设备组（多设备与换机）
+
+**模型**：`owners` 是设备组。一组设备共用同一批 bot 和同一个队列；没有账号，加入只靠配对码；不做把 bot 分享给别人。`HONK_MAX_BOTS_PER_DEVICE`（名字不变）按设备组计数。
+
+**同步、确认、清理**：`/v1/sync` 和 `GET /v1/messages/:id` 按 `owner_id` 查，游标仍是消息 id，由各设备自己保存，互不影响。`POST /v1/ack {up_to}` 抬高**这台设备**的水位 `devices.acked_up_to`（只升不降；上限是 `messages` 表发过的最大 id，免得一个过大的值盖住以后才有的消息）。清理删除：过期的；或 `id <= 组内 MIN(acked_up_to)` 且创建超过 `HONK_ACKED_KEEP` 的。一台一直不同步的设备会让消息留到过期为止。推送扇出和重试见上一节。
+
+**配对**（密码学都在设备端，网关只存不透明的字符串）：
+
+1. 旧设备生成 16 字节随机配对码，显示成 26 位 Crockford base32（`0-9A-Z` 去掉 `I L O U`，每 4 位一组，输入时不分大小写，`O` 当 `0`，`I`、`L` 当 `1`；最后一位里有 2 个补位的零，不符的当输入错误）。
+2. `link_id` = HKDF-SHA256(code, 盐为空, info `"honk link id"`, 32 字节) 的 base64url（无填充，43 个字符）；`wrap_key` = 同样但 info 是 `"honk link key"`。
+3. `bundle` = base64url(`nonce(12)` ‖ AES-256-GCM(wrap_key, nonce, 明文, AAD `"honk link v1"`) 的密文 ‖ `tag(16)`)，明文是 JSON `{"v":1,"tokens":{botId:token},"keys":{botId:base64url},"group_key":base64url}`。`keys`（第 7 期每个 bot 的端到端密钥）和 `group_key`（设备组的加密密钥）预留，没有时不出现；`keys` 只在本机存有时才放。旧设备只放自己存着 token 的 bot；整段密文不超过 16 KB（约百来个 bot）。
+4. 旧设备 `POST /v1/links {link_id, bundle}`：网关只存 `link_id` 的 sha256，10 分钟有效，一个设备组同时只有一个有效配对（新建会顶掉旧的）。
+5. 新设备先照常注册（这时它自成一组），再 `POST /v1/links/claim {link_id}`：网关在一个事务里把新设备**所在的整个组**（设备、bot、排队的消息）并入创建配对的组，删掉旧组，返回 `bundle` 并删除这条配对（只能用一次，过期的认领也会把它删掉）。并入后超过 bot 上限则整个事务回滚、配对保留，返回 400。认领按客户端 IP 限流（突发 5 次，之后每小时 10 次，`Options.ClaimBurst` / `ClaimPerHour`），猜不出 128 位的码。
+6. 新设备解开 `bundle`，把 token（以后还有 `keys`、`group_key`）存好，把同步游标归零（队列里的消息是整个组的，id 比它旧游标小的也要拿），然后刷新。并入的设备水位清零，免得旧组里的 ack 盖住新组的消息。新设备拿不到：更早的本地历史、静音/置顶/已读、`local:` 头像。并入的另一侧（原来就在新设备所在组里的 bot）的 token 不在 bundle 里，别的设备上看得到这些 bot、能收消息，但没有 token 就不能发送。
+
+代码：HonkKit 的 `DeviceLink.swift`（`PairingCode`、`LinkCrypto`、`LinkBundle`、`DeviceLinking`）和 `:core` 的 `DeviceLink.kt` 是同一套，`docs/link-vectors.json` 是两边测试共用的向量（用 Go 标准库独立生成）。网关不解 bundle，所以 Go 里没有这套代码。二维码：nsh 0.5 没有二维码或相机接口，第一版只有文字、复制和粘贴。
+
+**设备管理**：注册时带 `name`（iOS `UIDevice.current.name`，Android `Build.MODEL`，最长 64 字）；`seen_at` 在设备认证通过的请求里写，距上次超过 1 小时才写。`GET /v1/devices` 列出本组设备（`current` 标出自己），`DELETE /v1/devices/:id` 移除组内一台（不在组内 404）。移除最后一台时连组、bot、队列、配对一起删；移除非最后一台时，它创建的 bot 的 `device_id` 先改给留下的设备。`DELETE /v1/devices/me` 等于移除自己，加 `?all=true` 删整个设备组。被别的设备移除或整组删除的设备，下次请求得到 401：iOS 和 Android 的 `refresh` 都会清掉凭据，用上次的推送 token 重新注册成一个新组。丢手机的恢复密钥不做。
+
+**回收**：每小时随清理跑一次 `GCDevices`：`push_ok = 0` 且 `seen_at` 早于 `HONK_DEVICE_GC`（默认 `2160h`，90 天）的设备按「移除」处理，所以它是组里最后一台时，只属于它的 bot 和队列一起删。
 
 ### 推送中继（`internal/push/relay.go`、`internal/api/relay.go`）
 
@@ -275,6 +303,7 @@ App 用 TSX 写，跑在 QuickJS 上。页面：
 - 新建 Bot（`NewBot`）
 - 创建成功（`BotCreated`）
 - Bot 设置（`BotSettings`）
+- 添加设备（`AddDevice`：配对码、复制、倒计时）和输入配对码（`Pair`）；设置页的「设备」区列出设备组，「数据」区分成「从设备组移除这台设备」（组里还有其他设备时才有）和「删除全部数据」
 
 没有宿主时（例如在桌面上 `nsh run`）自动使用 `src/demo.ts` 的内存数据，方便单独调界面。
 
@@ -295,7 +324,11 @@ App 用 TSX 写，跑在 QuickJS 上。页面：
 | `honk.bot.setMuted` / `honk.bot.setPinned` | `{botId, muted / pinned}` | |
 | `honk.message.delete` | `{messageId}` | 只删本机 |
 | `honk.chat.clear` | `{botId}` | 只删本机 |
-| `honk.device.delete` | | 先请求网关 `DELETE /v1/devices/me`（401 视为网关已忘记这台设备），成功后清空本机：本地库、凭据、bot token、`local:` 头像、已显示的通知（Android 还有 channel 和快捷方式），复用切换网关时的清空逻辑。网关失败就整个调用失败，本机不动。之后不立即重新注册：下次创建 bot（`honk.bot.create` 发现未注册会先注册）或重新打开 App（推送 token 到达时）才注册；这期间 `honk.status` 的 `registration` 是 `notRegistered` |
+| `honk.devices.list` | | `{id, name, platform, seenAt, current}[]`（没注册时是空数组；老网关会失败，App 当作没有设备组） |
+| `honk.devices.remove` | `{deviceId}` | 移除组里的一台；`deviceId` 是自己的 id 就是退出设备组：`DELETE /v1/devices/me`，成功后清空本机（同下），其他设备和 bot 不受影响 |
+| `honk.link.create` | | 生成配对码，把本机存有 token 的 bot 封进 bundle，`POST /v1/links`；返回 `{code, expiresAt}`（`code` 已按 4 位分组） |
+| `honk.link.claim` | `{code}` | 解析配对码（不分大小写、可带短横线或空格），`POST /v1/links/claim`，存下 bundle 里的 token，游标归零并刷新；码不对、过期、已用、尝试太多都会让调用失败并带上原因 |
+| `honk.device.delete` | | 删除全部数据：先请求网关 `DELETE /v1/devices/me?all=true`（整个设备组；401 视为网关已忘记这台设备），成功后清空本机：本地库、凭据、bot token、`local:` 头像、已显示的通知（Android 还有 channel 和快捷方式），复用切换网关时的清空逻辑。网关失败就整个调用失败，本机不动。之后不立即重新注册：下次创建 bot（`honk.bot.create` 发现未注册会先注册）或重新打开 App（推送 token 到达时）才注册；这期间 `honk.status` 的 `registration` 是 `notRegistered` |
 | `honk.notifications.open` | | 打开系统的通知设置 |
 | `honk.register.retry` | | 重试注册，返回新的 status |
 | `honk.gateway.get` | | `{url, defaultURL, custom, registerKey}`（`registerKey` 是已保存的注册口令，没有就是空串） |
@@ -450,8 +483,9 @@ cd android && make setup && ./gradlew assembleDebug   # 下载 nsh AAR 并编译
 - [ ] 真机跑通 APNs、NSE 和通讯通知头像（模拟器已能连真实网关完成注册、建 bot、发送和同步；CI 的 `iosapp` job 已构建模拟器版）
 - [ ] 推送中继只在测试里用两个 `httptest` 网关首尾相接验证过，还没有对着真实的官方中继、APNs / FCM 跑过；iOS 的 `Localizable.strings` 和 NSE 的横幅改动、Android 的 `Banner` 接线只在 CI 里编译
 - [ ] 在有 GMS 的设备或模拟器上跑通 FCM、通知和 nsh 界面（CI 的 `android` job 已用 Android SDK 跑 `:core:test` 并构建 debug 版）
-- [ ] 后台刷新（iOS `BGAppRefreshTask`、Android WorkManager 每 6 小时）和「删除这台设备的数据」的原生代码只在 CI 里编译，没在真机上跑过；Android 的后台同步还不补发通知
+- [ ] 后台刷新（iOS `BGAppRefreshTask`、Android WorkManager 每 6 小时）、「删除全部数据」、设备组和配对的原生代码只在 CI 里编译，没在真机上跑过；Android 的后台同步还不补发通知
 - [ ] Android 预设头像现在画的是 bot 名称首字，和 App 内的图标不一致；可以给 Android 加一套对应的矢量图标
+- [ ] 设备组配对：网关、HonkKit 和 `:core`（含共用的 HKDF / AES-GCM 向量）都有测试，两端 App 的接线（`ios/App`、`android/app`）只在 CI 里编译；没有二维码（nsh 0.5 无二维码接口）；`keys` / `group_key` 字段已预留，等第 7 期的密钥存储接上
 - [x] 卡片 profile 2：JS（宿主里的 quickjs-ng）、`TelegramWidget` 兼容接口
 - [ ] 卡片按钮回调：沙箱一侧已就绪（`request()`、`honk_card_answer`），网关的 `answerWidgetQuery`、webhook / 长轮询和宿主接线随同一个版本；`publicData` / 共享卡片
 - [ ] 卡片脚本在真机上的耗时和内存还没测过；pointer 事件、canvas 没有

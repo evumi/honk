@@ -157,8 +157,6 @@ const EN: Record<string, string> = {
   "删除 Bot": "Delete Bot",
   // delete this device's data
   "数据": "Data",
-  "删除这台设备的数据": "Delete this device's data",
-  "删除这台设备的数据？": "Delete this device's data?",
   "将删除：这台设备在网关上的注册；所有 Bot，它们的 token 立即失效；网关上排队的消息；本机的消息和头像。无法恢复。":
     "This deletes this device's registration on the gateway; all bots, whose tokens stop working at once; the messages queued on the gateway; and the messages and avatars on this phone. It can't be undone.",
   "删除这台设备在网关上的注册、所有 Bot 和排队的消息，并清空本机数据。之后创建 Bot 或重新打开 App 时，这台设备会重新注册。":
