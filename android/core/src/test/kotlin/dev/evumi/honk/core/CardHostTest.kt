@@ -70,6 +70,12 @@ class CardHostTest {
         assertTrue(host.open("ok", load("document.getElementById('out').textContent = 'fine'")).contains("fine"))
     }
 
+    @Test fun anOpenAfterItsCloseIsRefused() {
+        host.close("late")
+        assertTrue(host.open("late", load("setInterval(function () {}, 16)")).contains("\"stopped\":\"closed\""))
+        assertEquals(0, host.count)
+    }
+
     @Test fun keepsAtMostMaxCards() {
         repeat(CardHost.MAX_CARDS + 3) { host.open("k$it", load("")) }
         assertEquals(CardHost.MAX_CARDS, host.count)

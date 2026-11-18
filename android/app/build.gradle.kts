@@ -30,6 +30,8 @@ val gatewayUrl = (findProperty("honk.gatewayUrl") as String?)
 // with the debug key, so assembleRelease also works locally.
 val releaseKeystore = env("HONK_KEYSTORE_FILE")?.let(::file)
 
+val hasAndroidSdk = env("ANDROID_HOME") != null || env("ANDROID_SDK_ROOT") != null || localProps.getProperty("sdk.dir") != null
+
 android {
     namespace = "dev.evumi.honk"
     compileSdk = 35
@@ -84,10 +86,14 @@ android {
     }
 
     // libhonkcard.so: card scripts (quickjs-ng and the card sandbox, native/), for CardHost in :core.
-    externalNativeBuild {
-        cmake {
-            path = rootProject.file("../native/jni/CMakeLists.txt")
-            version = "3.22.1"
+    // Only with an SDK: CMake makes AGP look for one while configuring, and
+    // `./gradlew :core:test` must keep working with only a JDK.
+    if (hasAndroidSdk) {
+        externalNativeBuild {
+            cmake {
+                path = rootProject.file("../native/jni/CMakeLists.txt")
+                version = "3.22.1"
+            }
         }
     }
 

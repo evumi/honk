@@ -68,6 +68,10 @@ func TestCleanKeepsInlineScript(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := `<script>document.getElementById("b").addEventListener("click", () => { if (1 < 2 && "</p>") n++ })</script>`
+	// "<script" only counts as a tag: comparisons like i<scriptCount stay.
+	if got, _ := Clean(`<script>var i = 0, scriptCount = 2; if (i<scriptCount) i++</script>`); !strings.Contains(got, "i<scriptCount") {
+		t.Errorf("script with <scriptCount dropped: %q", got)
+	}
 	if !strings.Contains(got, want) {
 		t.Errorf("inline script changed:\n got %s\nwant %s", got, want)
 	}

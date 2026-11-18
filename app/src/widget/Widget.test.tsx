@@ -68,6 +68,8 @@ const scripted = `<p id="n">{{start}}</p><button id="b">+1</button><a href="http
 function scriptedHost(clicks: string[]) {
   const tree = (text: string, on = true) => [
     { type: "element", tag: "p", attrs: { id: "n" }, children: [{ type: "text", text }] },
+    // Dropped by the whitelist, but still in the card's tree: paths must skip over it, not shift.
+    { type: "element", tag: "script", attrs: {}, children: [{ type: "text", text: "x" }] },
     { type: "element", tag: "button", attrs: { id: "b", onclick: "steal()" }, children: [{ type: "text", text: "+1" }], on },
     { type: "element", tag: "a", attrs: { href: "https://example.com/static" }, children: [{ type: "text", text: "open" }], on },
     { type: "element", tag: "iframe", attrs: { src: "https://evil.example" }, children: [{ type: "text", text: "evil frame" }] },
@@ -86,9 +88,9 @@ function scriptedHost(clicks: string[]) {
       "honk.card.click": (d: unknown) => {
         const path = (d as { path: string }).path;
         clicks.push(path);
-        if (path === "[1]") return JSON.stringify({ tree: tree("count 1"), prevented: false, open: "https://example.com/one", copy: "copied", stopped: null, logs: [] });
+        if (path === "[2]") return JSON.stringify({ tree: tree("count 1"), prevented: false, open: "https://example.com/one", copy: "copied", stopped: null, logs: [] });
         // The link's handler prevents its default the first time only.
-        return JSON.stringify({ tree: null, prevented: clicks.filter((c) => c === "[2]").length === 1, stopped: null, logs: [] });
+        return JSON.stringify({ tree: null, prevented: clicks.filter((c) => c === "[3]").length === 1, stopped: null, logs: [] });
       },
       "honk.card.set": JSON.stringify({ tree: null, prevented: false, stopped: null, logs: [] }),
       "honk.card.close": true,
@@ -105,7 +107,7 @@ test("a scripted card draws what the host's runtime returns, through the whiteli
   expect(texts).not.toContain("evil frame");
   await app.press("text:+1");
   await app.waitFor("text:count 1");
-  expect(clicks).toEqual(["[1]"]);
+  expect(clicks).toEqual(["[2]"]);
   expect(app.openedUrls()).toEqual(["https://example.com/one"]);
   expect(app.clipboard()).toBe("copied");
   // A handler that prevents the default keeps the link closed; the next tap opens it.

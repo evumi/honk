@@ -65,6 +65,9 @@ var (
 	// image-set("https://…" 1x) would fetch without any url().
 	cssLoaders = regexp.MustCompile(`(?i)(?:^|[^\w-])(?:-webkit-)?(?:image-set|cross-fade|image|element|src)\s*\(`)
 	cssURL     = regexp.MustCompile(`(?i)url\s*\(\s*['"]?\s*([^'")\s]*)`)
+	// A script tag inside script text, as the HTML tokenizer sees one (the
+	// name followed by space, / or >), or a comment opener.
+	ambiguousScript = regexp.MustCompile(`(?i)<!--|</?script[\s/>]`)
 )
 
 // Clean checks the size limits and returns the cleaned HTML. An empty input
@@ -179,8 +182,7 @@ func keepScript(n *html.Node) bool {
 		// Script text with "<!--", "<script" or "</script" parses differently
 		// here (the HTML spec's escaped states) and in the app's simpler
 		// parser, which would read what follows as markup the whitelist never saw.
-		t := strings.ToLower(c.Data)
-		if strings.Contains(t, "<!--") || strings.Contains(t, "<script") || strings.Contains(t, "</script") {
+		if ambiguousScript.MatchString(c.Data) {
 			return false
 		}
 	}

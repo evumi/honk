@@ -50,13 +50,15 @@ const MAX_DEPTH = 128;
  * A tree a card's script handed back (JSON), as nodes the renderer may draw:
  * only whitelisted elements and attributes, no scripts. `on` marks elements
  * with click handlers. Null when it is not a tree or is over the limits.
+ * `paths` gets each element's path in the card's tree (for honk.card.click).
  */
-export function cleanTree(json: unknown): WidgetNode[] | null {
+export function cleanTree(json: unknown, paths?: Map<ElementNode, number[]>): WidgetNode[] | null {
   let count = 0;
-  const walk = (list: unknown, depth: number): WidgetNode[] | null => {
+  const walk = (list: unknown, depth: number, at: number[]): WidgetNode[] | null => {
     if (!Array.isArray(list) || depth > MAX_DEPTH) return null;
     const out: WidgetNode[] = [];
-    for (const n of list) {
+    for (let index = 0; index < list.length; index++) {
+      const n: unknown = list[index];
       if (++count > MAX_TREE_NODES) return null;
       if (!n || typeof n !== "object") continue;
       const o = n as Record<string, unknown>;
@@ -67,7 +69,7 @@ export function cleanTree(json: unknown): WidgetNode[] | null {
       if (o.type !== "element" || typeof o.tag !== "string") continue;
       const tag = o.tag.toLowerCase();
       if (!ALLOWED_TAGS.has(tag)) continue;
-      const children = walk(o.children ?? [], depth + 1);
+      const children = walk(o.children ?? [], depth + 1, [...at, index]);
       if (children === null) return null;
       if (tag === "style") {
         const css = children.map((c) => (c.type === "text" ? c.text : "")).join("");
@@ -82,9 +84,11 @@ export function cleanTree(json: unknown): WidgetNode[] | null {
       }
       const el: ElementNode = { type: "element", tag, attrs, children };
       if (o.on === true) el.on = true;
+      // The card's own path to it: dropped nodes do not shift the indexes it resolves.
+      paths?.set(el, [...at, index]);
       out.push(el);
     }
     return out;
   };
-  return walk(json, 0);
+  return walk(json, 0, []);
 }

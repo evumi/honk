@@ -457,6 +457,7 @@ function fillTree(nodes: WidgetNode[], data: Record<string, unknown>): WidgetNod
 
 interface CardResult {
   tree: WidgetNode[] | null;
+  paths: Map<ElementNode, number[]>;
   prevented: boolean;
   open: string | null;
   copy: string | null;
@@ -471,7 +472,8 @@ function readResult(json: unknown): CardResult {
   } catch {}
   const str = (v: unknown) => (typeof v === "string" ? v : null);
   for (const line of Array.isArray(r.logs) ? r.logs.slice(0, 20) : []) console.log(`[card] ${String(line)}`);
-  return { tree: r.tree == null ? null : cleanTree(r.tree), prevented: r.prevented === true, open: str(r.open), copy: str(r.copy) };
+  const paths = new Map<ElementNode, number[]>();
+  return { tree: r.tree == null ? null : cleanTree(r.tree, paths), paths, prevented: r.prevented === true, open: str(r.open), copy: str(r.copy) };
 }
 
 let cardSeq = 0;
@@ -486,14 +488,7 @@ function ScriptedWidget(props: { nodes: WidgetNode[]; data: Record<string, unkno
   const apply = (json: unknown): CardResult => {
     const r = readResult(json);
     if (r.tree && !closed) {
-      const next = new Map<ElementNode, number[]>();
-      const walk = (ns: WidgetNode[], at: number[]) => ns.forEach((n, i) => {
-        if (n.type !== "element") return;
-        next.set(n, [...at, i]);
-        walk(n.children, [...at, i]);
-      });
-      walk(r.tree, []);
-      paths = next;
+      paths = r.paths;
       tree.set(r.tree);
     }
     return r;
@@ -543,7 +538,8 @@ function ScriptedWidget(props: { nodes: WidgetNode[]; data: Record<string, unkno
         const r = apply(json);
         if (r.open && r.open.startsWith("https://")) open(r.open);
         if (r.copy) Clipboard.writeText(r.copy).catch(() => {});
-        if (!r.prevented && href) open(href);
+        // One link per tap: the script's, else the element's own.
+        if (!r.prevented && !r.open && href) open(href);
       }).catch(() => {});
     };
   };

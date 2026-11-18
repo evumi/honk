@@ -44,8 +44,11 @@ class CardHost(private val changed: (key: String, result: String) -> Unit) {
     }
     private val cards = LinkedHashMap<String, Long>(16, 0.75f, true) // access order: least recently used first
     private val timers = HashMap<String, ScheduledFuture<*>>()
+    // Keys closed lately: an open that arrives after its close (host calls are not ordered) is refused.
+    private val closed = ArrayDeque<String>()
 
     fun open(key: String, load: String): String = onThread {
+        if (key in closed) return@onThread CLOSED
         closeNow(key)
         while (cards.size >= MAX_CARDS) closeNow(cards.keys.first())
         val out = arrayOfNulls<ByteArray>(1)
@@ -61,7 +64,11 @@ class CardHost(private val changed: (key: String, result: String) -> Unit) {
     fun set(key: String, state: String): String = call(key) { CardNative.set(it, state.toByteArray(Charsets.UTF_8)) }
 
     fun close(key: String) {
-        onThread { closeNow(key) }
+        onThread {
+            closeNow(key)
+            closed.addLast(key)
+            while (closed.size > 256) closed.removeFirst()
+        }
     }
 
     /** Cards open now (for tests). */

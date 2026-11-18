@@ -110,6 +110,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # ASan crashes at start on the runners' default mmap randomisation.
+      - run: sudo sysctl vm.mmap_rnd_bits=28
       - run: make -C native check test asan
 
   # The iOS side of card scripts (native/Package.swift): CardHost on macOS.

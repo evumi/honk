@@ -16,6 +16,8 @@ public final class CardHost: @unchecked Sendable {
     private var cards: [String: OpaquePointer] = [:]
     private var used: [String] = []
     private var timers: [String: DispatchWorkItem] = [:]
+    /// Keys closed lately: an open that arrives after its close (host calls are not ordered) is refused.
+    private var closed: [String] = []
     private let changed: @Sendable (_ key: String, _ result: String) -> Void
 
     /// `changed` gets a card's result after a timer changed it, on the card queue.
@@ -24,12 +26,15 @@ public final class CardHost: @unchecked Sendable {
     }
 
     deinit {
-        let cards = self.cards
-        queue.sync { for c in cards.values { honk_card_close(c) } }
+        // Nothing else holds the host now (queued blocks hold it strongly), so no queue hop:
+        // deinit may even run on the queue itself.
+        for t in timers.values { t.cancel() }
+        for c in cards.values { honk_card_close(c) }
     }
 
     public func open(key: String, load: String) async -> String {
         await run {
+            if self.closed.contains(key) { return #"{"tree":null,"prevented":false,"stopped":"closed","logs":[]}"# }
             self.closeNow(key)
             while self.cards.count >= Self.maxCards, let oldest = self.used.first { self.closeNow(oldest) }
             var result: UnsafeMutablePointer<CChar>?
@@ -52,7 +57,11 @@ public final class CardHost: @unchecked Sendable {
     }
 
     public func close(key: String) async {
-        await run { self.closeNow(key) }
+        await run {
+            self.closeNow(key)
+            self.closed.append(key)
+            if self.closed.count > 256 { self.closed.removeFirst(self.closed.count - 256) }
+        }
     }
 
     /// Cards open now (for tests).

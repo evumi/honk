@@ -57,6 +57,14 @@ private final class Changes: @unchecked Sendable {
     #expect(ok.contains("fine"))
 }
 
+@Test func anOpenAfterItsCloseIsRefused() async throws {
+    let host = CardHost { _, _ in }
+    await host.close(key: "late")
+    let r = await host.open(key: "late", load: load("setInterval(function () {}, 16)"))
+    #expect(r.contains("\"stopped\":\"closed\""))
+    #expect(host.count == 0)
+}
+
 @Test func keepsAtMostMaxCards() async throws {
     let host = CardHost { _, _ in }
     for i in 0..<(CardHost.maxCards + 3) { _ = await host.open(key: "k\(i)", load: load("")) }
