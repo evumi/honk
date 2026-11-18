@@ -1,8 +1,9 @@
 import { Clipboard, signal, Text, View } from "nsh";
 import { NavPage } from "nsh/base";
 import { FormBody, Icon, Section } from "../components";
+import { deviceJoined } from "../format";
 import { api } from "../host";
-import { devices, loadDevices, nav } from "../store";
+import { loadDevices, nav } from "../store";
 import { palette } from "../theme";
 import { tr } from "../i18n";
 
@@ -26,7 +27,11 @@ export function AddDevicePage() {
   const copied = signal(false);
   let expiresAt = 0;
   let timer: number | undefined;
-  let known = devices().length;
+  // The device list when the code was made; null when it could not be fetched.
+  let known: { id: string }[] | null = null;
+  // Bumped by every make(): a stale one must not start a timer.
+  let makeSeq = 0;
+  let generating = false;
 
   const stop = () => {
     if (timer !== undefined) clearInterval(timer);
@@ -44,7 +49,7 @@ export function AddDevicePage() {
     // A device joined: back to the list, which shows it.
     if (++polls % 3 === 0) {
       void api.devices().then(async (list) => {
-        if (list.length > known && onTop()) {
+        if (deviceJoined(known, list) && onTop()) {
           await loadDevices();
           nav.pop();
         }
@@ -53,20 +58,28 @@ export function AddDevicePage() {
   };
 
   const make = async () => {
+    if (generating) return;
+    generating = true;
+    const seq = ++makeSeq;
     stop();
     error.set("");
     code.set("");
     copied.set(false);
     try {
       const link = await api.createLink();
-      known = (await api.devices().catch(() => devices())).length;
+      const baseline = await api.devices().catch(() => null);
+      if (seq !== makeSeq) return;
+      known = baseline;
+      stop();
       code.set(link.code);
       expiresAt = link.expiresAt;
       polls = 0;
       tick();
       timer = setInterval(tick, 1000);
     } catch (e) {
-      error.set(String((e as Error)?.message ?? e));
+      if (seq === makeSeq) error.set(String((e as Error)?.message ?? e));
+    } finally {
+      generating = false;
     }
   };
   void make();

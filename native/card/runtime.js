@@ -1021,7 +1021,7 @@
     // and whatever code the host answers a failed request with (default REQUEST_FAILED).
     request(data) {
       if (!allowQueries) return Promise.reject(requestError("NOT_ALLOWED", "This card cannot send requests to its bot"));
-      const len = typeof data === "string" ? utf8Length(data) : 0;
+      const len = typeof data === "string" && data.indexOf("\u0000") < 0 ? utf8Length(data) : 0;
       if (len < 1 || len > LIMITS.requestBytes) return Promise.reject(requestError("INVALID_DATA", "request() takes a string of 1 to 64 bytes"));
       if (!inTap) return Promise.reject(requestError("NOT_ALLOWED", "request() works from a tap handler"));
       if (tapRequested) return Promise.reject(requestError("NOT_ALLOWED", "request() works once per tap"));

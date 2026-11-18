@@ -32,8 +32,12 @@ export function ChatPage(props: { botId: string; messageId?: number }) {
   const anchor = signal<number | undefined>(props.messageId);
   let scrolledToAnchor = false;
 
-  const loadAround = async (id: number) => {
+  // Only the latest load applies: a slow window must not overwrite the newest page after "back to the newest".
+  let loadSeq = 0;
+
+  const loadAround = async (id: number, seq: number) => {
     const window = await api.messagesAround(props.botId, id);
+    if (seq !== loadSeq) return;
     // Older messages already loaded past the window stay.
     const floor = window.at(-1)?.id;
     const older = floor === undefined ? [] : messages().filter((m) => m.id < floor);
@@ -48,12 +52,16 @@ export function ChatPage(props: { botId: string; messageId?: number }) {
       // Once the rows are laid out.
       setTimeout(() => list?.scrollToIndex({ index: at, animated: false, viewPosition: 0.5 }), 60);
     }
+    // As below: only when something in the window is unread, so marking read does not loop through the reload.
+    if (window.some((m) => !m.read)) await api.markRead(props.botId);
   };
 
   const load = async () => {
+    const seq = ++loadSeq;
     const around = anchor();
-    if (around !== undefined) return loadAround(around);
+    if (around !== undefined) return loadAround(around, seq);
     const latest = await api.messages(props.botId);
+    if (seq !== loadSeq) return;
     const newestBefore = messages()[0]?.id;
     if (away() && newestBefore !== undefined) {
       const at = latest.findIndex((m) => m.id === newestBefore);
@@ -99,6 +107,7 @@ export function ChatPage(props: { botId: string; messageId?: number }) {
     if (!away()) fresh.set(0);
   };
   const jumpToLatest = () => {
+    loadSeq++; // drops a window still loading
     if (anchor() !== undefined) {
       // Leaves the window: the effect above loads the newest page.
       anchor.set(undefined);
