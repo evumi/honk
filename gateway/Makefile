@@ -9,6 +9,6 @@ test:
 vet:
 	go vet ./...
 
-# Local run without push credentials: pushes are logged and skipped.
+# Local run without push credentials: no relay, so pushes are logged and skipped.
 run:
-	HONK_DB=./data/honk.db go run ./cmd/honk
+	HONK_RELAY_URL=off HONK_DB=./data/honk.db go run ./cmd/honk

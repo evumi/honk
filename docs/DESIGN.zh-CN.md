@@ -64,6 +64,8 @@ Honk 是一个以 bot 为渠道的推送通知服务：每个 bot 是一个独�
 - `devices`：`id`（UUIDv7）、`secret_hash`、`platform`（ios / android）、`push_token`、`push_ok`（APNs/FCM 报告 token 失效后置 0）
 - `bots`：`id`（自增整数，只在库内使用）、`public_id`（对外的 bot id，v2 加入）、`device_id`、`token_hash`、`name`、`avatar`、`default_level`
 - `messages`：队列。`kind` 是 message / edit / delete；edit 和 delete 用 `target_id` 或 `collapse_id` 指向原消息
+- `relays`（v3）：登记过的自建网关，`id`、`key_hash`、`created_at`、`last_used_at`（每分钟最多写一次）、`blocked`；只有开了 `HONK_RELAY_SERVE` 的网关用它
+- `meta`（v3）：这个网关自己的键值设置；中继客户端把 `relay_url`、`relay_id`、`relay_key` 存在这里
 
 bot id 是 8 位随机 base62 字符、以字母开头（如 `aZ3kQ9xT`），生成时查重；接口、token、推送和 App 里出现的都是它，用户看不到自增序号。messages 表的 `bot_id` 仍指向 bots 的整数主键，读出时 join 成短 id。
 
@@ -81,7 +83,8 @@ bot token 形如 `<bot id>:<32 位随机串>`；token 和 device secret 都只�
 | `/bot<token>/editMessageData` | 发送方 | `message_id` 或 `id` + `data`，卡片原地更新，不弹通知 |
 | `/bot<token>/deleteMessage` | 发送方 | `message_id` 或 `id` |
 | `/bot<token>/getMe` | 发送方 | 测试 token |
-| `GET /v1/info` | App | `{name:"honk", version, api}`，切换网关前用来确认地址是 Honk 网关；`api` 2 表示 bot id 是字符串；设了 `HONK_REGISTER_KEY` 时多一个 `register_key_required: true` |
+| `GET /v1/info` | App | `{name:"honk", version, api, features, push}`，切换网关前用来确认地址是 Honk 网关；`api` 2 表示 bot id 是字符串；`features` 是能力列表（开了 `HONK_RELAY_SERVE` 含 `"relay"`，旧网关没有这个字段）；`push: {ios, android}` 是每个平台的推送方式 `direct` / `relay` / `off`（旧网关没有）；设了 `HONK_REGISTER_KEY` 时多一个 `register_key_required: true` |
+| `POST /v1/relay/gateways`、`POST /v1/relay/push` | 自建网关 | 推送中继，只在 `HONK_RELAY_SERVE=true` 时存在，见下一节 |
 | `POST /v1/devices` | App | 注册，返回 `device_secret`（只返回这一次）；设了 `HONK_REGISTER_KEY` 时必须带相同的 `register_key`，否则 401 |
 | `GET` / `PUT` / `DELETE /v1/devices/me` | App | 读取；更新 push token；删除设备及全部数据 |
 | `GET` / `POST /v1/bots`，`GET` / `PATCH` / `DELETE /v1/bots/:id`，`POST /v1/bots/:id/token` | App | bot 管理；token 只在创建和重置时返回 |
@@ -106,9 +109,39 @@ bot token 形如 `<bot id>:<32 位随机串>`；token 和 device secret 都只�
 - 重试前检查（`store.PushStillWanted`）：设备已不存在、push token 换了或已失效、这条消息已被设备 ack（或已过期被清理），就放弃。
 - 状态只在内存里。`Server.Wait()` 等排队和正在发的这一轮发完（测试用）；`Server.Close()` 是关闭路径：停止接收、丢弃还在等退避的重试、等当前这一轮发完。
 
+### 推送中继（`internal/push/relay.go`、`internal/api/relay.go`）
+
+官方 App 的 APNs / FCM 凭据只在官方网关手里，自建网关没有。某个平台没有直连凭据时，`Router` 对这个平台用 `push.Relay`：每条推送变成一次对中继网关的 HTTP 请求，中继不落盘地代发并把结果原样返回。App 照常只和自己的网关打交道。
+
+```
+发送方 → 自建网关（队列、内容）──POST /v1/relay/push──▶ 中继 ──▶ APNs / FCM ──▶ 设备
+                                                                            │
+自建网关 ◀──────────────── GET /v1/messages/:id（设备拉完整消息，填横幅）◀──────┘
+```
+
+**配置**：`HONK_RELAY_URL`（默认 `https://honk.bunship.site/`，`off` 关闭）、`HONK_RELAY_SERVE`、`HONK_PUSH_CONTENT`（`full` / `none`，默认直连 `full`、中继 `none`）、`HONK_RELAY_RATE` / `HONK_RELAY_BURST`（10 / 100）、`HONK_RELAY_TOKEN_PER_MINUTE`（60）。`config.PushRoute(platform)` 决定每个平台的路径：有直连凭据 → `direct`；否则开了 `HONK_RELAY_SERVE` 或 `HONK_RELAY_URL=off` → `off`（中继服务端从不再用中继，避免成环）；否则 `relay`。`off` 的平台不入队推送，App 只能在打开时同步到消息。启动时对每个走中继或 `off` 的平台写一条 Warn，说明路径、会经过中继的内容和怎么关。`HONK_RELAY_SERVE` 要求至少一个平台有直连凭据，否则 `config.Load` 拒绝启动。
+
+**客户端**（`push.Relay`，实现 `Pusher`）：第一次推送时惰性登记：`POST /v1/relay/gateways` 拿到 `relay_id` 和 `relay_key`（只返回一次），连同中继地址存进 `meta`；中继地址变了就重新登记。之后 `POST /v1/relay/push`。状态码映射：200 → 成功；410 → `push.ErrTokenGone`（`MarkPushGone`，`push_ok=0`，和直连一样）；429 → `RetryableError`，`After` 取 `parameters.retry_after`（没有就取 `Retry-After` 头），由推送队列按第 4 节重试；5xx、网络错误、超时 → `RetryableError`；503 且说明没有凭据 → 永久错误；401 和其他 4xx → 永久错误，记 Error 日志，不重试。**401 的决定**：只有说明“key 未知”（中继丢了数据库）时才丢掉本地 key、重新登记并把这条推送再发一次，一小时最多一次；“已封禁”不重新登记，否则等于绕过封禁。
+
+**请求字段**：`platform`、`token`、`kind`、`msg_id`、`target_id`、`bot_id`、`level`、`collapse_key`，`HONK_PUSH_CONTENT=full` 时再加 `bot_name`、`title`、`body`、`group`（正文截断同直连）。`collapse_key` 一律是 `b<bot>:<sha256(id) 前 16 字节 hex>`（`push.CollapseKeyFor`），中继看不到发送方原始的 `id`；中继用它直接做 `apns-collapse-id` / FCM `collapse_key`（`Notification.CollapseKey`）。
+
+**服务端**（`api.Server.relayPush`，只在 `HONK_RELAY_SERVE=true` 时挂载 `/v1/relay/*`）：
+
+- 登记：不需要账号，按客户端 IP 限流，规则同设备注册，但用单独的桶；生成 `relay_id`（`r` 加随机串）和 `relay_key`，库里只存 key 的 sha256。
+- 推送：`Authorization: Bearer <relay_key>`；key 未知 → 401 `unknown relay key`，被封 → 401 `relay blocked`；每个自建网关一个令牌桶（`HONK_RELAY_RATE` / `BURST`），每个 push token（平台加 token 的哈希）每分钟 `HONK_RELAY_TOKEN_PER_MINUTE` 条，超了 429 并带 `parameters.retry_after` 和 `Retry-After` 头；请求体最大 8 KB（413）；字段校验失败 400。
+- 只用直连 pusher（`Options.RelayAPNs` / `RelayFCM`，`cmd/honk` 填的是还没接中继的那份 `Router`），所以从不再转给别的中继；这个平台没有凭据 → 503。
+- 结果：成功 200；`ErrTokenGone` → 410；可重试的失败带 `After` → 429，不带 → 502；其他失败 → 422。推送请求不写库（`last_used_at` 每分钟最多写一次），日志里没有 token。收到的推送没有 `bot_name`、`title`、`body` 就按无内容发。
+- 降速：每个自建网关在内存里按一小时窗口记总数和 410 数；410 超过 100 条（`Options.RelayGoneLimit`）且占一半以上，令牌桶的速率和突发降到十分之一并记 Warn（含 relay id），窗口过完不再满足条件就恢复。封禁由人工：`UPDATE relays SET blocked = 1 WHERE id = '…'`。
+
+**无内容的推送**（`HONK_PUSH_CONTENT=none` 或中继收到的请求没带文字，`Notification.Bare`）：APNs 的 `alert` 只有 `loc-key: "New notification"`（App 和 NSE 里都有 `ios/Localization/{en,zh-Hans}.lproj/Localizable.strings`），`thread-id` 不带 group，也没有自定义的 `id`，照常 `mutable-content: 1`；FCM 的 data 没有 `bot_name`、`title`、`body`、`group`、`id`。横幅文字由设备端决定：iOS 的 `BannerText.choose`（HonkKit）和 Android 的 `Banner.choose`（`:core`）取拉到的消息和本地 bot 的名称，拉不到就用推送里已有的文字，再不行就显示本地化的“新通知 / New notification”。Android 的通知 tag 也改成先拉消息，再用消息里的 collapse id（`Banner.tag`）；拉不到时用 `m<msg_id>`。这个开关对直连同样生效。
+
+**指标**：`honk_pushes_total` 的 `route` 现在有 `direct` 和 `relay`（自建网关一侧）；中继一侧有 `honk_relay_requests_total{result}`（`ok`、`token_gone`、`rate_limited`、`unauthorized`、`blocked`、`no_credentials`、`bad_request`、`failed`、`registered`）和 `honk_relay_pushes_total{platform}`。
+
+**App**：网关页测试连接时，`honk.gateway.test` 的结果多一个可选的 `push: {ios, android}`（来自 `/v1/info`，契约见 `host.contract.json`），页面显示每个平台的推送方式，`off` 时提示“只能在打开 App 时收到通知”。
+
 ### 运维
 
-- `HONK_METRICS_ADDR`（默认空，不开）：在单独的监听地址提供 `/metrics`，Prometheus 文本格式，手写（`internal/metrics`），没有新依赖。计数：`honk_messages_total{kind}`、`honk_pushes_total{platform,route,result}`、`honk_push_retries_total`、`honk_push_dropped_total{reason}`（`queue_full`、`not_wanted`、`shutdown`）、`honk_http_requests_total{class}`；量表：`honk_devices`、`honk_bots`、`honk_push_queue_length`。`route` 现在只有 `direct`。
+- `HONK_METRICS_ADDR`（默认空，不开）：在单独的监听地址提供 `/metrics`，Prometheus 文本格式，手写（`internal/metrics`），没有新依赖。计数：`honk_messages_total{kind}`、`honk_pushes_total{platform,route,result}`、`honk_push_retries_total`、`honk_push_dropped_total{reason}`（`queue_full`、`not_wanted`、`shutdown`）、`honk_http_requests_total{class}`；量表：`honk_devices`、`honk_bots`、`honk_push_queue_length`。`route` 是 `direct` 或 `relay`（见上一节），中继一侧另有 `honk_relay_requests_total`、`honk_relay_pushes_total`。
 - `HONK_LOG_FORMAT=json` 输出 JSON 日志；`HONK_LOG_LEVEL=debug` 时每个请求记一条访问日志（`/bot<token>/…` 里的 token 替换成 `<token>`）。
 
 ### 命令行与 webhook 适配（发送方生态）
@@ -392,7 +425,8 @@ Telegram 的 widget 一般用 class 加 `<style>` 写，所以 Honk 也按样式
 | `level=active` | `interruption-level: active` | priority HIGH |
 | `level=timeSensitive` | `interruption-level: time-sensitive` | priority HIGH |
 | `group` | `thread-id: b<bot>:<group>`（NSE 再把它改成 `bot-<id>:<group>`） | data 里的 `group` |
-| `id` | `apns-collapse-id: b<bot>:<id>`（超过 64 字节时取哈希） | `collapse_key`；data 里的 `id`，App 用它做通知 tag |
+| `id` | `apns-collapse-id: b<bot>:<id>`（超过 64 字节时取哈希；经中继时一律是哈希） | `collapse_key`；data 里的 `id`，App 用它做通知 tag |
+| 无内容的推送（`HONK_PUSH_CONTENT=none`） | `alert` 只有 `loc-key: "New notification"`；没有 bot 名称、标题、正文、group、`id` | data 里没有 `bot_name`、`title`、`body`、`group`、`id` |
 | edit / delete | `content-available: 1` 后台推送 | priority NORMAL 的 data message |
 
 ## 8. 本地开发
@@ -414,6 +448,7 @@ cd android && make setup && ./gradlew assembleDebug   # 下载 nsh AAR 并编译
 ## 9. 待办与风险
 
 - [ ] 真机跑通 APNs、NSE 和通讯通知头像（模拟器已能连真实网关完成注册、建 bot、发送和同步；CI 的 `iosapp` job 已构建模拟器版）
+- [ ] 推送中继只在测试里用两个 `httptest` 网关首尾相接验证过，还没有对着真实的官方中继、APNs / FCM 跑过；iOS 的 `Localizable.strings` 和 NSE 的横幅改动、Android 的 `Banner` 接线只在 CI 里编译
 - [ ] 在有 GMS 的设备或模拟器上跑通 FCM、通知和 nsh 界面（CI 的 `android` job 已用 Android SDK 跑 `:core:test` 并构建 debug 版）
 - [ ] 后台刷新（iOS `BGAppRefreshTask`、Android WorkManager 每 6 小时）和「删除这台设备的数据」的原生代码只在 CI 里编译，没在真机上跑过；Android 的后台同步还不补发通知
 - [ ] Android 预设头像现在画的是 bot 名称首字，和 App 内的图标不一致；可以给 Android 加一套对应的矢量图标

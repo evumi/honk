@@ -31,9 +31,11 @@ Honk 是一个以 bot 为渠道的推送通知服务：每个 bot 都是一个�
 
 ## 运行网关
 
+自己部署网关见 [docs/SELF-HOSTING.zh-CN.md](docs/SELF-HOSTING.zh-CN.md)（Docker Compose、反向代理和 TLS、备份、升级）。
+
 ```bash
 cd gateway
-make run        # 不配推送凭据也能跑：推送会记日志后跳过
+make run        # 不配推送凭据也能跑（关闭中继）：推送直接跳过
 make test
 ```
 
@@ -65,12 +67,36 @@ docker run -p 8080:8080 -v honk-data:/data \
 | `HONK_APNS_SANDBOX` | `false` | 用 APNs 开发环境，开发版构建要设为 true |
 | `HONK_FCM_CREDENTIALS_FILE` | | Firebase service account JSON；不设就不推 Android |
 | `HONK_PUSH_QUEUE` / `HONK_PUSH_WORKERS` | `1024` / `16` | 推送队列最多排几条（满了就丢弃并计数）/ 同时在发的推送数 |
+| `HONK_RELAY_URL` | `https://honk.bunship.site/` | 没配直连凭据的平台走这个推送中继；`off` 关闭（该平台就收不到推送）。见[推送中继](#推送中继) |
+| `HONK_RELAY_SERVE` | `false` | 对外提供 `/v1/relay/*`；至少一个平台配了直连凭据才能开，否则拒绝启动 |
+| `HONK_PUSH_CONTENT` | 直连 `full`，中继 `none` | `full` 在推送里带 bot 名称、标题、正文，`none` 只带 id（APNs 在设备拉到消息之前显示“新通知”）。设了就对两条路径都生效 |
+| `HONK_RELAY_RATE` / `HONK_RELAY_BURST` | `10` / `100` | 中继端：每个自建网关每秒条数 / 突发 |
+| `HONK_RELAY_TOKEN_PER_MINUTE` | `60` | 中继端：每个 push token 每分钟条数 |
 | `HONK_REGISTER_KEY` | | 设了以后 `POST /v1/devices` 必须带相同的 `register_key`，`/v1/info` 会返回 `register_key_required`。App 的网关页有可选的「注册口令」输入框 |
 | `HONK_METRICS_ADDR` | | 例如 `127.0.0.1:9100`：在单独的端口提供 Prometheus 文本格式的 `/metrics`；留空就不开 |
 | `HONK_LOG_FORMAT` | `text` | 设成 `json` 输出结构化日志 |
 | `HONK_LOG_LEVEL` | `info` | 设成 `debug` 会再记录每个请求（路径里的 bot token 不会出现在日志里） |
 
-`/metrics` 有 `honk_messages_total{kind}`、`honk_pushes_total{platform,route,result}`（结果是 `ok`、`retry`、`token_gone`、`failed`）、`honk_push_retries_total`、`honk_push_dropped_total{reason}`、`honk_http_requests_total{class}`，以及量表 `honk_devices`、`honk_bots`、`honk_push_queue_length`。
+`/metrics` 有 `honk_messages_total{kind}`、`honk_pushes_total{platform,route,result}`（`route` 为 `direct` 或 `relay`；结果是 `ok`、`retry`、`token_gone`、`failed`）、中继上的 `honk_relay_requests_total{result}` 和 `honk_relay_pushes_total{platform}`、`honk_push_retries_total`、`honk_push_dropped_total{reason}`、`honk_http_requests_total{class}`，以及量表 `honk_devices`、`honk_bots`、`honk_push_queue_length`。
+
+## 推送中继
+
+APNs 和 FCM 只接受带已发布 App 凭据签名的推送，自建网关手里没有这些凭据。某个平台没有凭据时，网关把每条推送换成一次对中继（默认是官方网关 `https://honk.bunship.site/`）的 HTTP 请求，由中继交给 APNs 或 FCM 并把结果返回。App 仍然只和你自己的网关打交道，注册流程不变。启动日志会写明每个平台走哪条路。
+
+1. 发送方在你的网关上调用 `sendMessage`，队列和内容都在你的网关里。
+2. 你的网关把 push token、`msg_id`、bot id、打扰级别和哈希过的 collapse key 发给中继。
+3. 中继把推送交给 APNs/FCM，唤醒设备。
+4. 设备向你的网关 `GET /v1/messages/:id` 拉完整消息，用它填横幅。
+
+默认中继推送**不带内容**（`HONK_PUSH_CONTENT=none`）：没有 bot 名称、标题、正文，发送方的 `id` 也只以哈希出现。iOS 在 NSE 拉到消息之前显示本地化的“新通知”，拉到后换成真实文字；Android 同样用拉到的消息。设成 `HONK_PUSH_CONTENT=full` 时，bot 名称、标题、正文（按横幅长度截断）和直连一样经过中继和 Apple/Google。中继不保存推送，只有已登记网关的表（id、key 的哈希、时间、`blocked`）和内存计数器。
+
+协议（沿用 Telegram 的 `{"ok":…}` 格式）：
+
+- `POST /v1/relay/gateways`：不需要账号，登记一个网关，返回一次 `relay_id` 和 `relay_key`，网关存进自己的 `meta` 表。按客户端 IP 限流，规则同设备注册。
+- `POST /v1/relay/push`：`Authorization: Bearer <relay_key>`，JSON 字段 `platform`、`token`、`kind`、`msg_id`、`target_id`、`bot_id`、`level`、`collapse_key`（`full` 时再加 `bot_name`、`title`、`body`、`group`）。请求体最大 8 KB。
+- 响应：200 已发出；410 token 失效（网关照直连处理，标记失效）；429 带 `parameters.retry_after`（由推送队列重试）；401 key 未知或被封（不重试；key 未知时网关重新登记，一小时最多一次，被封则不会）；503 中继没有这个平台的凭据（不重试）；5xx 和网络错误会重试。
+
+提供中继：在配好自己凭据的网关上设 `HONK_RELAY_SERVE=true`。中继只用直连凭据发送，从不再转给别的中继。每个自建网关和每个 push token 都有限流；一小时内发往失效 token 的推送超过 100 条且占一半以上的网关会被降速并记日志，用 `UPDATE relays SET blocked = 1 WHERE id = '…'` 可以封禁。`/v1/info` 的 `features` 含 `"relay"`；所有网关都用 `push: {"ios","android"}`（`direct`、`relay` 或 `off`）报告推送方式，App 网关页测试连接时会显示。
 
 ## Bot API
 
@@ -224,7 +250,7 @@ GitHub 适配不校验 `X-Hub-Signature-256`：URL 里的 token 就是密钥，�
 
 | 接口 | 说明 |
 | --- | --- |
-| `GET /v1/info` | `{"name":"honk","version","api":2}`；设了 `HONK_REGISTER_KEY` 时多一个 `register_key_required` |
+| `GET /v1/info` | `{"name":"honk","version","api":2,"features":[…],"push":{"ios","android"}}`（`direct`、`relay` 或 `off`）；设了 `HONK_REGISTER_KEY` 时多一个 `register_key_required` |
 | `POST /v1/devices` | `{"platform":"ios"\|"android","push_token":"…","register_key":"…"}`（网关要求口令时才需要带 `register_key`），返回 `device` 和 `device_secret` |
 | `GET` / `PUT` / `DELETE /v1/devices/me` | 读取设备信息；更新 push token；删除设备及它的所有 bot 和消息（App「设置 → 删除这台设备的数据」调用它，成功后再清空本机） |
 | `GET` / `POST /v1/bots` | 列出 bot；创建 bot：`{"name","avatar","default_level"}`，返回 `bot` 和 `token`。`avatar` 是 `preset:<icon>:<#rrggbb>`、https URL，或 `local:<文件名>`：用户在 App 里从相册选的图片，只存在手机上（网关只存这个名字） |

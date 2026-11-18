@@ -31,9 +31,11 @@ A push that fails for a reason that may pass (a network error, a timeout, a 5xx,
 
 ## Running the gateway
 
+Hosting your own gateway: see [docs/SELF-HOSTING.md](docs/SELF-HOSTING.md) (Docker Compose, reverse proxy and TLS, backups, upgrades).
+
 ```bash
 cd gateway
-make run        # works without push credentials: pushes are logged and skipped
+make run        # works without push credentials (relay off): pushes are skipped
 make test
 ```
 
@@ -53,12 +55,36 @@ See `gateway/Dockerfile` for the container. Settings:
 | `HONK_APNS_SANDBOX` | `false` | use the APNs development gateway (debug builds) |
 | `HONK_FCM_CREDENTIALS_FILE` | | Firebase service account JSON; Android push is off without it |
 | `HONK_PUSH_QUEUE` / `HONK_PUSH_WORKERS` | `1024` / `16` | pushes that may wait in the queue (a full queue drops and counts) / pushes in flight at once |
+| `HONK_RELAY_URL` | `https://honk.bunship.site/` | the push relay a platform without direct credentials uses; `off` turns it off (that platform then gets no pushes). See [Push relay](#push-relay) |
+| `HONK_RELAY_SERVE` | `false` | serve `/v1/relay/*` for other gateways; refuses to start unless at least one platform has direct credentials |
+| `HONK_PUSH_CONTENT` | `full` direct, `none` through a relay | `full` puts the bot name, title and body in the push, `none` only ids (APNs shows "New notification" until the device fetches the message). Set it to choose for both routes |
+| `HONK_RELAY_RATE` / `HONK_RELAY_BURST` | `10` / `100` | relay side: pushes per second / burst per relayed gateway |
+| `HONK_RELAY_TOKEN_PER_MINUTE` | `60` | relay side: pushes per push token per minute |
 | `HONK_REGISTER_KEY` | | when set, `POST /v1/devices` must carry the same `register_key`; `/v1/info` then reports `register_key_required`. The app's Gateway page has an optional register key field |
 | `HONK_METRICS_ADDR` | | e.g. `127.0.0.1:9100`: serves Prometheus text at `/metrics` on its own listener; off when empty |
 | `HONK_LOG_FORMAT` | `text` | `json` for structured logs |
 | `HONK_LOG_LEVEL` | `info` | `debug` also logs every request (the bot token in the path is hidden) |
 
-`/metrics` has `honk_messages_total{kind}`, `honk_pushes_total{platform,route,result}` (`ok`, `retry`, `token_gone`, `failed`), `honk_push_retries_total`, `honk_push_dropped_total{reason}`, `honk_http_requests_total{class}`, and the gauges `honk_devices`, `honk_bots` and `honk_push_queue_length`.
+`/metrics` has `honk_messages_total{kind}`, `honk_pushes_total{platform,route,result}` (`route` `direct` or `relay`; `ok`, `retry`, `token_gone`, `failed`), `honk_relay_requests_total{result}` and `honk_relay_pushes_total{platform}` on a relay, `honk_push_retries_total`, `honk_push_dropped_total{reason}`, `honk_http_requests_total{class}`, and the gauges `honk_devices`, `honk_bots` and `honk_push_queue_length`.
+
+## Push relay
+
+APNs and FCM only accept pushes signed with the credentials of the published app, so a self-hosted gateway has none of its own. Without credentials for a platform, the gateway sends each push as one HTTP request to a relay (by default the official gateway at `https://honk.bunship.site/`), which passes it to APNs or FCM and answers with the result. The app still talks only to your gateway, and registration is unchanged. The start-up log says which route each platform uses.
+
+1. A sender calls `sendMessage` on your gateway, which keeps the queue and the content.
+2. Your gateway sends the push token, `msg_id`, bot id, level and a hashed collapse key to the relay.
+3. The relay sends the push to APNs/FCM and wakes the device.
+4. The device fetches `GET /v1/messages/:id` from your gateway and builds the banner from it.
+
+By default a relayed push carries **no content** (`HONK_PUSH_CONTENT=none`): no bot name, title or body, and the sender's `id` only as a hash. iOS shows the localised "New notification" until the extension has fetched the message, then the real text; Android does the same from the fetched message. With `HONK_PUSH_CONTENT=full` the bot name, title and body (cut to the usual banner length) go through the relay and Apple/Google as they do on a direct push. The relay does not store pushes; it keeps a table of registered gateways (id, a hash of the key, timestamps, `blocked`) and in-memory counters.
+
+Protocol (Telegram's `{"ok":…}` envelope):
+
+- `POST /v1/relay/gateways` registers a gateway without any account and returns `relay_id` and `relay_key` once; the gateway keeps them in its `meta` table. Limited per client IP like device registration.
+- `POST /v1/relay/push` with `Authorization: Bearer <relay_key>` and JSON `platform`, `token`, `kind`, `msg_id`, `target_id`, `bot_id`, `level`, `collapse_key` (and `bot_name`, `title`, `body`, `group` for `full`). Body at most 8 KB.
+- Answers: 200 sent; 410 the token is gone (the gateway marks it, as for a direct push); 429 with `parameters.retry_after` (retried by the push queue); 401 unknown or blocked key (not retried; an unknown key makes the gateway register again, at most once an hour, a blocked one does not); 503 the relay has no credentials for the platform (not retried); 5xx and network errors are retried.
+
+Serving a relay: set `HONK_RELAY_SERVE=true` next to your own credentials. It sends through its direct credentials only and never forwards to another relay. Each relayed gateway and each push token is rate limited; a gateway that sends over 100 dead tokens in an hour, more than half of its pushes, is slowed down and logged, and a relay can be blocked with `UPDATE relays SET blocked = 1 WHERE id = '…'`. `/v1/info` reports `features: ["relay"]`, and every gateway reports `push: {"ios","android"}` as `direct`, `relay` or `off`; the app's Gateway page shows it when you test a gateway.
 
 ## Bot API
 
@@ -146,7 +172,7 @@ Everything except device registration needs `Authorization: Bearer <device_secre
 
 | Endpoint | Purpose |
 | --- | --- |
-| `GET /v1/info` | `{"name":"honk","version","api":2}`, plus `register_key_required` when `HONK_REGISTER_KEY` is set |
+| `GET /v1/info` | `{"name":"honk","version","api":2,"features":[…],"push":{"ios","android"}}` (`direct`, `relay` or `off`), plus `register_key_required` when `HONK_REGISTER_KEY` is set |
 | `POST /v1/devices` | `{"platform":"ios"\|"android","push_token":"…","register_key":"…"}` (the key only when the gateway asks for one) → `device`, `device_secret` |
 | `GET` / `PUT` / `DELETE /v1/devices/me` | read; update the push token; delete with all bots and messages (the app's Settings, "Delete this device's data", calls it and then clears the phone) |
 | `GET` / `POST /v1/bots` | list; create with `{"name","avatar","default_level"}` → `bot`, `token`. `avatar` is `preset:<icon>:<#rrggbb>`, an https URL, or `local:<file>` for an image the user picked in the app, which stays on the phone (the gateway stores only the name) |

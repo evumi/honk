@@ -9,12 +9,13 @@ Monorepo. `gateway/` is the Go module `github.com/evumi/honk/gateway`; `app/` is
 ## Gateway
 
 - `cd gateway && go test -race ./...` and `go vet ./...` before committing.
-- `make run` starts it on :8080 with `./data/honk.db`; with no APNs/FCM credentials, pushes are logged and skipped.
+- `make run` starts it on :8080 with `./data/honk.db`; with no APNs/FCM credentials and `HONK_RELAY_URL=off` (the Makefile sets it, so a dev gateway never reaches the official relay), pushes are skipped.
 - `cmd/honk` wires config, store, push and API. `internal/store` is SQLite through modernc (pure Go, no cgo) with one connection; the schema is `internal/store/schema.sql`, versioned with `PRAGMA user_version`. Add a new migration step for schema changes instead of editing v1 once it has shipped.
 - Timestamps are Unix milliseconds; device ids are UUIDv7; message ids are SQLite integers. A bot's public id is 8 random base62 characters starting with a letter (`bots.public_id`, v2); the integer row id stays private. Never show users a sequence number as an id. A bot token is `<bot id>:<secret>`; only sha256 hashes of tokens and device secrets are stored, so pre-v2 `<integer>:<secret>` tokens still work.
 - Pushes go through a bounded queue with workers and are retried after 2 s, 10 s and 60 s (`internal/api/pushq.go`). A pusher reports a failure worth retrying as `push.RetryableError` (APNs, FCM and any new pusher must); anything else is final. `internal/metrics` is the hand-written `/metrics` registry (`HONK_METRICS_ADDR`); new counters go through it, no new dependencies. New env vars go in `internal/config`, both READMEs and DESIGN.
 - Pushes carry the banner text and `msg_id` only; devices fetch the message (card included) from the queue. Keep APNs/FCM payloads under 4 KB.
 - `internal/widget` is the server-side card whitelist: static HTML/CSS (profile 1) plus inline classic `<script>`s (profile 2); `on*` handlers, `src`/module scripts and scripts whose text has `<!--`, `<script` or `</script` are removed. It mirrors Telegram's HTML widget limits: 32 KB raw, 4 KB zlib level 9, 1 KB data.
+- Push relay: a platform without direct credentials pushes through `push.Relay` (`internal/push/relay.go`) to a relay gateway (`HONK_RELAY_URL`, default the official one, `off` to disable); `HONK_RELAY_SERVE` (`internal/api/relay.go`) makes a gateway that has credentials the relay, using only its direct pushers, never a relay. `config.PushRoute` says direct/relay/off per platform and feeds `/v1/info` `push`. `HONK_PUSH_CONTENT` (`Notification.Bare`) strips bot name, title, body, group and id from APNs/FCM payloads; a relayed push is bare by default, so the device builds the banner from the fetched message (`BannerText.choose` in HonkKit, `Banner.choose` in `:core`; keep them in step, with their tests). Relay and client share one wire format (`relayPushRequest` / `relayRequest`); change both and `docs/DESIGN.zh-CN.md` together. The `relays` and `meta` tables are schema v3.
 - The bot API keeps Telegram's naming and `{"ok":…}` envelope; keep new methods consistent with it.
 
 ## iOS (ios/)
@@ -51,4 +52,4 @@ Monorepo. `gateway/` is the Go module `github.com/evumi/honk/gateway`; `app/` is
 - `make -C native test asan` runs the C tests; `cd native && swift test` the iOS `CardHost` (`native/swift`, with the Command Line Tools add the flags `ios/Makefile` uses); `cd android && ./gradlew :core:test` the Android `CardHost` through JNI (it builds `native/build/libhonkcard.*` with `make -C native jni`).
 - iOS links the local package `native/Package.swift` (`project.yml`); Android builds `libhonkcard.so` from `native/jni/CMakeLists.txt` (`externalNativeBuild`). Keep `CardHost.swift` and `CardHost.kt` in step, and the `honk.card.*` calls in `host.ts` and both `NshBridge`s.
 
-Docs come in pairs: update README.md and README.zh-CN.md together. The design document is docs/DESIGN.zh-CN.md; keep it in step with the code.
+Docs come in pairs: update README.md and README.zh-CN.md together (and `docs/SELF-HOSTING.md` with `docs/SELF-HOSTING.zh-CN.md`). The design document is docs/DESIGN.zh-CN.md; keep it in step with the code.

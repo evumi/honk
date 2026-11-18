@@ -20,6 +20,13 @@ services:
       HONK_APNS_SANDBOX: ${HONK_APNS_SANDBOX:-false}
       HONK_FCM_CREDENTIALS_FILE: /secrets/fcm.json
       HONK_MESSAGE_TTL: ${HONK_MESSAGE_TTL:-168h}
+      # Push relay: set HONK_RELAY_SERVE=true to push for other (self-hosted)
+      # gateways with the credentials above. HONK_PUSH_CONTENT: full or none.
+      HONK_RELAY_SERVE: ${HONK_RELAY_SERVE:-}
+      HONK_PUSH_CONTENT: ${HONK_PUSH_CONTENT:-}
+      HONK_RELAY_RATE: ${HONK_RELAY_RATE:-}
+      HONK_RELAY_BURST: ${HONK_RELAY_BURST:-}
+      HONK_RELAY_TOKEN_PER_MINUTE: ${HONK_RELAY_TOKEN_PER_MINUTE:-}
       # Optional; empty means off or the default.
       HONK_REGISTER_KEY: ${HONK_REGISTER_KEY:-}
       HONK_LOG_FORMAT: ${HONK_LOG_FORMAT:-text}

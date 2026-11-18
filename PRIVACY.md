@@ -21,6 +21,8 @@ Message history and preferences are stored locally. Device credentials are store
 
 Apple Push Notification service processes the device push token and notification payload, including the notification title/body and message identifiers. The device retrieves the HTML card and other details from your gateway. Infrastructure providers process network traffic and stored data as needed to operate the gateway.
 
+If you select a gateway that has no push credentials of its own, for example a self-hosted one, that gateway sends each push through a push relay, by default the Honk gateway at https://honk.bunship.site (the operator can change or switch this off). The relay receives the push token, platform, message identifier, bot identifier, notification level, a hashed collapse key, and the gateway's IP address and request time. By default a relayed push contains no bot name, title or body; the device fetches those from its own gateway, and until then the banner reads "New notification". A gateway operator can choose to include the bot name, title and body in relayed pushes. The relay does not store pushes: it keeps only a registry of the gateways it relays for (identifier, a hash of its key, timestamps, whether it is blocked) and in-memory rate-limit counters, and does not log push tokens.
+
 Honk Push does not include advertising or cross-app tracking features. Data is not sold or used for advertising profiling.
 
 The default gateway uses HTTPS. Messages are not end-to-end encrypted: the gateway operator can access queued message content, and Apple processes the notification payload. Keep device secrets and bot tokens private. A party holding a bot token can send notifications to that bot.
