@@ -40,7 +40,8 @@ function escText(s: string): string {
 function svgAttr(tag: string, name: string, value: string): boolean {
   if (!allowedAttr(tag, name, value)) return false;
   if (name === "href" || name === "xlink:href") return tag === "use" && /^#[\w.:-]+$/.test(value.trim());
-  return !foreignUrl(value);
+  // A CSS escape could spell url( past the check.
+  return !value.includes("\\") && !foreignUrl(value);
 }
 
 /**

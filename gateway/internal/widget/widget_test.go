@@ -13,6 +13,9 @@ func TestCleanKeepsCard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if got, _ := Clean(`<svg><rect fill="url(#g)" stroke="url( '#g' )" width="1"></rect></svg>`); !strings.Contains(got, `fill="url(#g)"`) || !strings.Contains(got, `stroke="url( &#39;#g&#39; )"`) {
+		t.Errorf("same-document url() dropped: %s", got)
+	}
 	for _, want := range []string{`style="padding:12px"`, `{{status}}`, `href="{{url}}"`, `href="https://example.com"`, `colspan="2"`, `viewBox="0 0 10 10"`, `href="#g"`, `linearGradient`} {
 		if !strings.Contains(got, want) {
 			t.Errorf("cleaned HTML lost %q:\n%s", want, got)
@@ -44,6 +47,9 @@ func TestCleanRemovesActiveContent(t *testing.T) {
 		"form":          `<form action="https://evil"><button>go</button></form>`,
 		"svg on":        `<svg onload="x()"></svg>`,
 		"foreignObject": `<svg><foreignObject><div>x</div></foreignObject></svg>`,
+		"svg fill url":  `<svg><rect fill="url(https://evil/p.svg#g)" mask="url( 'https://evil/m' )"></rect></svg>`,
+		"svg filter":    `<svg><g filter="URL(//evil/f.svg#f)"></g></svg>`,
+		"svg escape":    `<svg><path stroke="u\72l(https://evil/s)"></path></svg>`,
 	}
 	bad := []string{"<script", "evil", "onclick", "iframe", "https://evil", "javascript:", "http://plain", "@import", `\72`, "<input", "onload", "<form", "foreignobject", "foreignObject"}
 	for name, src := range cases {

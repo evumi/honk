@@ -120,6 +120,7 @@ curl https://honk.example.com/bot$TOKEN/sendMessage \
 - 带 `src` 或 `type` 不是 JavaScript 的脚本（包括 module）、`on*` 事件属性、表单控件
 - 外部链接；`a` 只允许 `https://`、`#id` 或 `{{key}}`
 - CSS 里引用外部资源的写法：`@import`、`expression()`、非 data: 的 `url()`
+- SVG 属性值里不是 `url(#id)` 的 `url()`，以及带 CSS 转义（`\`）的值
 
 渲染时客户端还会再按自己的 CSS 白名单过滤一遍。
 

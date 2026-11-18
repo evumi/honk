@@ -28,7 +28,7 @@ test("keeps the whitelist: no foreign elements, handlers, outside references or 
   const out = svgMarkup(svgOf(
     `<svg onload="x()"><script>evil()</script><style>*{}</style><foreignObject><div>html</div></foreignObject>` +
       `<image href="https://e.example/x.png"/><use href="#a"/><use href="https://e.example/s.svg#a"/><use xlink:href="#b"/>` +
-      `<a href="https://e.example">link</a><rect fill="url(https://e.example/p)" stroke="url( #ok )" width="1"/>` +
+      `<a href="https://e.example">link</a><rect fill="url(https://e.example/p)" stroke="url( #ok )" width="1"/><path mask="URL(//e.example/m)" stroke="u\\72l(https://e.example/s)"/>` +
       `<text x="1" data-x='a"b&lt;c'>1 &lt; 2 &amp; 3</text></svg>`,
   ));
   expect(out).not.toContain("onload");
@@ -41,6 +41,7 @@ test("keeps the whitelist: no foreign elements, handlers, outside references or 
   expect(out).toContain('<use xlink:href="#b"/>');
   expect(out).toContain('xmlns:xlink="http://www.w3.org/1999/xlink"');
   expect(out).toContain('<rect stroke="url( #ok )" width="1"/>');
+  expect(out).toContain("<path/>");
   expect(out).toContain('data-x="a&quot;b&lt;c"');
   expect(out).toContain(">1 &lt; 2 &amp; 3</text>");
 });
