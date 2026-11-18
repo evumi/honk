@@ -31,7 +31,8 @@ import java.util.Base64
  * Calls: honk.status, honk.chats, honk.messages, honk.markRead, honk.focus,
  * honk.refresh, honk.bot.create, honk.bot.update, honk.bot.token,
  * honk.bot.resetToken, honk.bot.delete, honk.bot.setMuted, honk.bot.setPinned,
- * honk.message.delete, honk.chat.clear, honk.device.delete, honk.notifications.open, honk.avatar.save, honk.avatar.image,
+ * honk.message.delete, honk.chat.clear, honk.device.delete, honk.devices.list, honk.devices.remove,
+ * honk.link.create, honk.link.claim, honk.notifications.open, honk.avatar.save, honk.avatar.image,
  * honk.gateway.get, honk.gateway.test, honk.gateway.set, honk.register.retry.
  * Card scripts: honk.card.open, honk.card.click, honk.card.set, honk.card.close.
  * Events: honk.changed (the store changed), honk.open { botId } (open a chat),
@@ -190,6 +191,19 @@ class NshBridge(
         }
         handle("honk.device.delete") {
             service.deleteDeviceData()
+            true
+        }
+        handle("honk.devices.list") { service.listDevices().map { HostJson.device(it) } }
+        handle("honk.devices.remove") { a ->
+            service.removeDevice(a.requireString("deviceId"))
+            true
+        }
+        handle("honk.link.create") {
+            val c = service.createLink()
+            HostJson.linkCreated(c.code, c.expiresAt)
+        }
+        handle("honk.link.claim") { a ->
+            service.claimLink(a.requireString("code"))
             true
         }
         handle("honk.notifications.open", io = false) {

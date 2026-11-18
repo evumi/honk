@@ -156,6 +156,26 @@ class HostContractTest {
         }
     }
 
+    @Test fun deviceGroupResultsEncodeAsTheSamples() {
+        for (s in samples("honk.devices.list")) {
+            val list = s.getValue("result").jsonArray
+            val out = list.map {
+                val j = it.jsonObject
+                HostJson.device(
+                    ApiClient.GroupDevice(
+                        j.getValue("id").jsonPrimitive.content, j.getValue("name").jsonPrimitive.content, j.getValue("platform").jsonPrimitive.content,
+                        j.getValue("seenAt").jsonPrimitive.long, j.getValue("current").jsonPrimitive.boolean,
+                    ),
+                )
+            }
+            assertEquals(list, json(out))
+        }
+        for (s in samples("honk.link.create")) {
+            val r = s.getValue("result").jsonObject
+            assertEquals(r, json(HostJson.linkCreated(r.getValue("code").jsonPrimitive.content, r.getValue("expiresAt").jsonPrimitive.long)))
+        }
+    }
+
     @Test fun eventsEncodeAsTheSamples() {
         val events = contract.getValue("events").jsonObject
         assertEquals(setOf("honk.changed", "honk.open", "honk.incoming", "honk.card.changed"), events.keys)

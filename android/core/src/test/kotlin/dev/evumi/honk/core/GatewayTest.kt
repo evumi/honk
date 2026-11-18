@@ -236,6 +236,35 @@ class GatewayTest {
         assertThrows(ApiException.NotRegistered::class.java) { ApiClient(FakeGateway.BASE, null, gw).deleteDevice() }
     }
 
+    @Test fun deviceGroupCalls() {
+        val gw = FakeGateway { method, path, _ ->
+            when ("$method $path") {
+                "GET v1/devices" -> FakeGateway.ok("""[{"id":"d1","name":"Pixel","platform":"android","seen_at":5,"created_at":1,"push_ok":true,"current":true},{"id":"d2","platform":"ios","seen_at":0,"current":false}]""")
+                "DELETE v1/devices/d2", "DELETE v1/devices/me", "DELETE v1/devices/me?all=true" -> FakeGateway.ok("true")
+                "POST v1/devices" -> FakeGateway.ok("""{"device":{"id":"d3","platform":"android","push_ok":true},"device_secret":"s"}""")
+                "POST v1/links" -> FakeGateway.ok("""{"expires_in":600}""")
+                "POST v1/links/claim" -> FakeGateway.ok("""{"bundle":"YnVuZGxl"}""")
+                else -> FakeGateway.fail(404, "Not Found")
+            }
+        }
+        val api = ApiClient(FakeGateway.BASE, "s", gw)
+        assertEquals(
+            listOf(ApiClient.GroupDevice("d1", "Pixel", "android", 5, true), ApiClient.GroupDevice("d2", "", "ios", 0, false)),
+            api.listDevices(),
+        )
+        api.removeDevice("d2")
+        api.deleteDevice()
+        api.deleteDevice(all = true)
+        assertEquals(600, api.createLink("l", "b"))
+        assertEquals("YnVuZGxl", api.claimLink("l"))
+        assertEquals(
+            listOf("GET v1/devices", "DELETE v1/devices/d2", "DELETE v1/devices/me", "DELETE v1/devices/me?all=true", "POST v1/links", "POST v1/links/claim"),
+            gw.requests.map { "${it.method} ${it.path}" },
+        )
+        api.registerDevice("t", name = "Pixel 8")
+        assertTrue(gw.requests.last().body!!.contains(""""name":"Pixel 8""""))
+    }
+
     @Test fun infoSaysWhetherARegisterKeyIsRequired() {
         val gw = FakeGateway { _, _, _ -> FakeGateway.ok("""{"name":"honk","version":"1","api":2,"register_key_required":true}""") }
         assertTrue(ApiClient(FakeGateway.BASE, null, gw).info().registerKeyRequired)

@@ -2,6 +2,7 @@ package dev.evumi.honk
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -13,6 +14,7 @@ import dev.evumi.honk.core.ApiException
 import dev.evumi.honk.core.Banner
 import dev.evumi.honk.core.BotTokenStore
 import dev.evumi.honk.core.CredentialStore
+import dev.evumi.honk.core.DeviceLinking
 import dev.evumi.honk.core.DeviceRegistrar
 import dev.evumi.honk.core.Gateway
 import dev.evumi.honk.core.HttpTransport
@@ -115,7 +117,7 @@ class HonkService private constructor(context: Context) {
         prefs.edit().putString(KEY_LAST_PUSH_TOKEN, pushToken).apply()
         if (registration != Registration.Registered) setRegistration(Registration.Registering)
         try {
-            val r = DeviceRegistrar(gatewayUrl, credentials, registerKey = registerKey).register(pushToken)
+            val r = DeviceRegistrar(gatewayUrl, credentials, registerKey = registerKey, deviceName = Build.MODEL).register(pushToken)
             setRegistration(Registration.Registered)
             if (r == DeviceRegistrar.Result.REGISTERED) refresh()
         } catch (e: Exception) {
@@ -226,17 +228,27 @@ class HonkService private constructor(context: Context) {
     // deleting this device's data
 
     /**
-     * Deletes the device on the gateway (its bots and queued messages go with
-     * it), then clears the phone: account data as when switching gateway, plus
-     * the avatars and every notification. When the gateway cannot be reached
-     * nothing local is touched and this throws. It does not register again:
-     * that happens when a bot is created next (`honk.bot.create`) or the app
-     * starts again (HonkApp). Blocking.
+     * Deletes everything: on the gateway this device's whole group (every
+     * device, the bots and the queued messages), then clears the phone:
+     * account data as when switching gateway, plus the avatars and every
+     * notification. When the gateway cannot be reached nothing local is
+     * touched and this throws. It does not register again: that happens when
+     * a bot is created next (`honk.bot.create`) or the app starts again
+     * (HonkApp). Blocking.
      */
-    fun deleteDeviceData() {
+    fun deleteDeviceData() = leave(all = true)
+
+    /**
+     * Takes this phone out of its device group: the gateway forgets this device
+     * (the group's bots stay for the others; with no other device it is the
+     * same as deleting everything), then the phone is cleared as above. Blocking.
+     */
+    fun leaveGroup() = leave(all = false)
+
+    private fun leave(all: Boolean) {
         if (credentials.load() != null) {
             try {
-                api.deleteDevice()
+                api.deleteDevice(all)
             } catch (e: ApiException) {
                 // A 401: the gateway had forgotten this device already.
                 if (!e.isUnauthorized) throw IllegalStateException(Gateway.describe(e), e)
@@ -248,6 +260,31 @@ class HonkService private constructor(context: Context) {
         Notifier.localAvatars(context).removeAll()
         notifier.cancelAll()
         setRegistration(Registration.NotRegistered)
+    }
+
+    // device group
+
+    /** The devices of this phone's group; none when it is not registered. Blocking. */
+    fun listDevices(): List<ApiClient.GroupDevice> = if (isRegistered) api.listDevices() else emptyList()
+
+    /** Removes a device from the group. This phone's own id leaves the group. Blocking. */
+    fun removeDevice(id: String) {
+        if (credentials.load()?.deviceId == id) leaveGroup() else api.removeDevice(id)
+        changed()
+    }
+
+    /** A pairing code for another phone, with this phone's bot tokens sealed in it. Blocking. */
+    fun createLink(): DeviceLinking.Created = DeviceLinking.create(api, store, botTokens)
+
+    /**
+     * Joins the group that made [code]: stores the tokens it holds, then
+     * refreshes (the merged bot list and queue). The gateway merges this
+     * phone's own bots into that group. Blocking.
+     */
+    fun claimLink(code: String) {
+        if (!isRegistered) retryRegistration()
+        DeviceLinking.claim(code, api, store, botTokens)
+        refresh()
     }
 
     // sync

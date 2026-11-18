@@ -65,7 +65,9 @@ object HostArgs {
         val a = Args(args)
         when (name) {
             "honk.status", "honk.chats", "honk.refresh", "honk.register.retry", "honk.notifications.open",
-            "honk.incoming.listen", "honk.gateway.get", "honk.device.delete" -> Unit
+            "honk.incoming.listen", "honk.gateway.get", "honk.device.delete", "honk.devices.list", "honk.link.create" -> Unit
+            "honk.devices.remove" -> a.requireString("deviceId")
+            "honk.link.claim" -> a.requireString("code")
             "honk.messages" -> Messages(a)
             "honk.markRead", "honk.bot.token", "honk.bot.resetToken", "honk.bot.delete", "honk.chat.clear",
             "honk.bot.setMuted", "honk.bot.setPinned" -> a.requireString("botId")
@@ -134,6 +136,13 @@ object HostJson {
     fun gatewayTestFailed(error: String): Map<String, Any?> = mapOf("ok" to false, "error" to error)
 
     fun gatewaySet(url: String, registered: Boolean): Map<String, Any?> = mapOf("url" to url, "registered" to registered)
+
+    /** An entry of `honk.devices.list`. */
+    fun device(d: ApiClient.GroupDevice): Map<String, Any?> =
+        mapOf("id" to d.id, "name" to d.name, "platform" to d.platform, "seenAt" to d.seenAt, "current" to d.current)
+
+    /** `honk.link.create`: the code in groups of four, and when it stops working (Unix milliseconds). */
+    fun linkCreated(code: String, expiresAt: Long): Map<String, Any?> = mapOf("code" to code, "expiresAt" to expiresAt)
 
     fun botCreated(b: Bot, token: String): Map<String, Any?> = mapOf("bot" to bot(b), "token" to token)
 

@@ -89,19 +89,55 @@ class ApiClient(
     data class Registration(val device: DeviceInfo, @SerialName("device_secret") val deviceSecret: String)
 
     /** [registerKey]: what a gateway with HONK_REGISTER_KEY set wants to see; sent only when not empty. */
-    fun registerDevice(pushToken: String, platform: String = "android", registerKey: String? = null): Registration {
+    fun registerDevice(pushToken: String, platform: String = "android", registerKey: String? = null, name: String? = null): Registration {
         val body = buildMap<String, Any> {
             put("platform", platform)
             put("push_token", pushToken)
+            if (!name.isNullOrEmpty()) put("name", name)
             if (!registerKey.isNullOrEmpty()) put("register_key", registerKey)
         }
         return request("POST", "v1/devices", Registration.serializer(), body = body, auth = false)
     }
 
-    /** Deletes this device on the gateway with its bots and queued messages (`DELETE /v1/devices/me`). */
-    fun deleteDevice() {
-        request("DELETE", "v1/devices/me", JsonElement.serializer())
+    /**
+     * Removes this device from its group (`DELETE /v1/devices/me`); when it is the
+     * last one the group's bots and queued messages go too. With [all] the whole
+     * group goes: every device, bot and queued message.
+     */
+    fun deleteDevice(all: Boolean = false) {
+        request("DELETE", if (all) "v1/devices/me?all=true" else "v1/devices/me", JsonElement.serializer())
     }
+
+    /** A device of the group, as `GET /v1/devices` lists it. [seenAt] is Unix milliseconds. */
+    @Serializable
+    data class GroupDevice(
+        val id: String,
+        val name: String = "",
+        val platform: String = "",
+        @SerialName("seen_at") val seenAt: Long = 0,
+        val current: Boolean = false,
+    )
+
+    fun listDevices(): List<GroupDevice> = request("GET", "v1/devices", ListSerializer(GroupDevice.serializer()))
+
+    /** Removes another device of the group (`DELETE /v1/devices/<id>`). */
+    fun removeDevice(id: String) {
+        request("DELETE", "v1/devices/$id", JsonElement.serializer())
+    }
+
+    @Serializable
+    private data class Created(@SerialName("expires_in") val expiresIn: Int)
+
+    @Serializable
+    private data class Claimed(val bundle: String)
+
+    /** Stores the sealed bundle under [linkId] for a while; returns the seconds it lives. */
+    fun createLink(linkId: String, bundle: String): Int =
+        request("POST", "v1/links", Created.serializer(), body = mapOf("link_id" to linkId, "bundle" to bundle)).expiresIn
+
+    /** Joins this device's group to the one that made the link; returns the sealed bundle. */
+    fun claimLink(linkId: String): String =
+        request("POST", "v1/links/claim", Claimed.serializer(), body = mapOf("link_id" to linkId)).bundle
 
     fun updatePushToken(token: String): DeviceInfo =
         request("PUT", "v1/devices/me", DeviceInfo.serializer(), body = mapOf("push_token" to token))
