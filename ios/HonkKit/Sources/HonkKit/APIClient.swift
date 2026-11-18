@@ -42,6 +42,28 @@ public struct APIClient: Sendable {
         public let name: String
         public let version: String
         public let api: Int
+        /// The gateway only registers devices that send its `register_key` (HONK_REGISTER_KEY).
+        public let registerKeyRequired: Bool
+
+        enum CodingKeys: String, CodingKey {
+            case name, version, api
+            case registerKeyRequired = "register_key_required"
+        }
+
+        public init(name: String, version: String, api: Int, registerKeyRequired: Bool = false) {
+            self.name = name
+            self.version = version
+            self.api = api
+            self.registerKeyRequired = registerKeyRequired
+        }
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            name = try c.decode(String.self, forKey: .name)
+            version = try c.decode(String.self, forKey: .version)
+            api = try c.decode(Int.self, forKey: .api)
+            registerKeyRequired = try c.decodeIfPresent(Bool.self, forKey: .registerKeyRequired) ?? false
+        }
     }
 
     /// What the gateway says it is; a Honk gateway answers `name` "honk".
@@ -60,8 +82,16 @@ public struct APIClient: Sendable {
         }
     }
 
-    public func registerDevice(platform: String = "ios", pushToken: String) async throws -> Registration {
-        try await request("POST", "v1/devices", body: ["platform": platform, "push_token": pushToken], auth: false)
+    /// `registerKey`: what a gateway with HONK_REGISTER_KEY set wants to see; sent only when not empty.
+    public func registerDevice(platform: String = "ios", pushToken: String, registerKey: String? = nil) async throws -> Registration {
+        var body = ["platform": platform, "push_token": pushToken]
+        if let registerKey, !registerKey.isEmpty { body["register_key"] = registerKey }
+        return try await request("POST", "v1/devices", body: body, auth: false)
+    }
+
+    /// Deletes this device on the gateway with its bots and queued messages (`DELETE /v1/devices/me`).
+    public func deleteDevice() async throws {
+        let _: Bool = try await request("DELETE", "v1/devices/me")
     }
 
     @discardableResult

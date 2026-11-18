@@ -215,6 +215,34 @@ class GatewayTest {
         assertEquals(Credentials("d", "s", "t1"), creds.value)
     }
 
+    @Test fun registerSendsTheRegisterKeyOnlyWhenSet() {
+        val gw = FakeGateway { _, _, _ -> FakeGateway.ok("""{"device":{"id":"d","platform":"android","push_ok":true},"device_secret":"sec"}""") }
+        DeviceRegistrar(FakeGateway.BASE, MemoryCredentials(), gw, registerKey = "s3cret").register("t1")
+        assertTrue(gw.requests.last().body!!.contains("\"register_key\":\"s3cret\""))
+        DeviceRegistrar(FakeGateway.BASE, MemoryCredentials(), gw).register("t1")
+        assertTrue(!gw.requests.last().body!!.contains("register_key"))
+        DeviceRegistrar(FakeGateway.BASE, MemoryCredentials(), gw, registerKey = "").register("t1")
+        assertTrue(!gw.requests.last().body!!.contains("register_key"))
+    }
+
+    @Test fun deleteDeviceCallsTheGatewayWithTheDeviceSecret() {
+        val gw = FakeGateway { method, path, _ ->
+            if (method == "DELETE" && path == "v1/devices/me") FakeGateway.ok("true") else FakeGateway.fail(404, "Not Found")
+        }
+        ApiClient(FakeGateway.BASE, "s3cret", gw).deleteDevice()
+        assertEquals("Bearer s3cret", gw.requests.single().headers["Authorization"])
+        val failing = FakeGateway { _, _, _ -> FakeGateway.fail(500, "Internal Server Error") }
+        assertThrows(ApiException.Gateway::class.java) { ApiClient(FakeGateway.BASE, "s", failing).deleteDevice() }
+        assertThrows(ApiException.NotRegistered::class.java) { ApiClient(FakeGateway.BASE, null, gw).deleteDevice() }
+    }
+
+    @Test fun infoSaysWhetherARegisterKeyIsRequired() {
+        val gw = FakeGateway { _, _, _ -> FakeGateway.ok("""{"name":"honk","version":"1","api":2,"register_key_required":true}""") }
+        assertTrue(ApiClient(FakeGateway.BASE, null, gw).info().registerKeyRequired)
+        val plain = FakeGateway { _, _, _ -> FakeGateway.ok("""{"name":"honk","version":"1","api":2}""") }
+        assertTrue(!ApiClient(FakeGateway.BASE, null, plain).info().registerKeyRequired)
+    }
+
     private var counter = 0
     private fun gwCount(): Int = ++counter
 }

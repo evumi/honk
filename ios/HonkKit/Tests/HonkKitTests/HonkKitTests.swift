@@ -268,6 +268,53 @@ final class MockGateway: URLProtocol {
         #expect(MockGateway.requests.isEmpty)
     }
 
+    @Test func registerSendsTheRegisterKeyOnlyWhenSet() async throws {
+        MockGateway.requests = []
+        MockGateway.handler = { _ in (200, #"{"ok":true,"result":{"device":{"id":"d","platform":"ios","push_ok":true},"device_secret":"sec"}}"#) }
+        let api = APIClient(baseURL: URL(string: "https://gw.test/")!, secret: nil, session: MockGateway.session())
+        func body(_ i: Int) throws -> [String: String] {
+            let data = MockGateway.requests[i].httpBody ?? MockGateway.requests[i].httpBodyStream.map { s in
+                s.open(); defer { s.close() }
+                var d = Data(); var buf = [UInt8](repeating: 0, count: 1024)
+                while s.hasBytesAvailable { let n = s.read(&buf, maxLength: buf.count); if n <= 0 { break }; d.append(buf, count: n) }
+                return d
+            } ?? Data()
+            return try JSONDecoder().decode([String: String].self, from: data)
+        }
+        _ = try await api.registerDevice(pushToken: "t", registerKey: "s3cret")
+        _ = try await api.registerDevice(pushToken: "t")
+        _ = try await api.registerDevice(pushToken: "t", registerKey: "")
+        #expect(try body(0)["register_key"] == "s3cret")
+        #expect(try body(1)["register_key"] == nil)
+        #expect(try body(2)["register_key"] == nil)
+    }
+
+    @Test func deleteDeviceCallsTheGatewayWithTheDeviceSecret() async throws {
+        MockGateway.requests = []
+        MockGateway.handler = { req in
+            req.httpMethod == "DELETE" && req.url!.path == "/v1/devices/me"
+                ? (200, #"{"ok":true,"result":true}"#)
+                : (404, #"{"ok":false,"error_code":404,"description":"Not Found"}"#)
+        }
+        let api = APIClient(baseURL: URL(string: "https://gw.test/")!, secret: "s3cret", session: MockGateway.session())
+        try await api.deleteDevice()
+        #expect(MockGateway.requests.first?.value(forHTTPHeaderField: "Authorization") == "Bearer s3cret")
+
+        MockGateway.handler = { _ in (500, #"{"ok":false,"error_code":500,"description":"Internal Server Error"}"#) }
+        let error = await #expect(throws: APIError.self) { try await api.deleteDevice() }
+        #expect(error == .gateway(code: 500, description: "Internal Server Error"))
+        let anonymous = APIClient(baseURL: URL(string: "https://gw.test/")!, secret: nil, session: MockGateway.session())
+        await #expect(throws: APIError.notRegistered) { try await anonymous.deleteDevice() }
+    }
+
+    @Test func infoSaysWhetherARegisterKeyIsRequired() async throws {
+        let api = APIClient(baseURL: URL(string: "https://gw.test/")!, secret: nil, session: MockGateway.session())
+        MockGateway.handler = { _ in (200, #"{"ok":true,"result":{"name":"honk","version":"1","api":2,"register_key_required":true}}"#) }
+        #expect(try await api.info().registerKeyRequired)
+        MockGateway.handler = { _ in (200, #"{"ok":true,"result":{"name":"honk","version":"1","api":2}}"#) }
+        #expect(try await api.info().registerKeyRequired == false)
+    }
+
     @Test func gatewayError() async throws {
         MockGateway.handler = { _ in (401, #"{"ok":false,"error_code":401,"description":"Unauthorized"}"#) }
         let api = APIClient(baseURL: URL(string: "https://gw.test/")!, secret: "bad", session: MockGateway.session())

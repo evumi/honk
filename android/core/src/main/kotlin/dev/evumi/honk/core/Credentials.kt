@@ -22,6 +22,8 @@ class DeviceRegistrar(
     private val gatewayUrl: String,
     private val credentials: CredentialStore,
     private val transport: Transport = HttpTransport(),
+    /** Sent as `register_key` when registering, for a gateway that asks for one. */
+    private val registerKey: String? = null,
 ) {
     enum class Result { UNCHANGED, UPDATED, REGISTERED }
 
@@ -41,7 +43,7 @@ class DeviceRegistrar(
                 credentials.clear()
             }
         }
-        val reg = ApiClient(gatewayUrl, null, transport).registerDevice(pushToken)
+        val reg = ApiClient(gatewayUrl, null, transport).registerDevice(pushToken, registerKey = registerKey)
         credentials.save(Credentials(reg.device.id, reg.deviceSecret, pushToken))
         return Result.REGISTERED
     }

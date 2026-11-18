@@ -65,7 +65,13 @@ class ApiClient(
 
     /** What the gateway says it is; a Honk gateway answers `name` "honk". */
     @Serializable
-    data class GatewayInfo(val name: String = "", val version: String = "", val api: Int = 0)
+    data class GatewayInfo(
+        val name: String = "",
+        val version: String = "",
+        val api: Int = 0,
+        /** The gateway only registers devices that send its `register_key` (HONK_REGISTER_KEY). */
+        @SerialName("register_key_required") val registerKeyRequired: Boolean = false,
+    )
 
     fun info(): GatewayInfo = request("GET", "v1/info", GatewayInfo.serializer(), auth = false)
 
@@ -74,8 +80,20 @@ class ApiClient(
     @Serializable
     data class Registration(val device: DeviceInfo, @SerialName("device_secret") val deviceSecret: String)
 
-    fun registerDevice(pushToken: String, platform: String = "android"): Registration =
-        request("POST", "v1/devices", Registration.serializer(), body = mapOf("platform" to platform, "push_token" to pushToken), auth = false)
+    /** [registerKey]: what a gateway with HONK_REGISTER_KEY set wants to see; sent only when not empty. */
+    fun registerDevice(pushToken: String, platform: String = "android", registerKey: String? = null): Registration {
+        val body = buildMap<String, Any> {
+            put("platform", platform)
+            put("push_token", pushToken)
+            if (!registerKey.isNullOrEmpty()) put("register_key", registerKey)
+        }
+        return request("POST", "v1/devices", Registration.serializer(), body = body, auth = false)
+    }
+
+    /** Deletes this device on the gateway with its bots and queued messages (`DELETE /v1/devices/me`). */
+    fun deleteDevice() {
+        request("DELETE", "v1/devices/me", JsonElement.serializer())
+    }
 
     fun updatePushToken(token: String): DeviceInfo =
         request("PUT", "v1/devices/me", DeviceInfo.serializer(), body = mapOf("push_token" to token))
