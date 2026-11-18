@@ -69,6 +69,7 @@ func (s *Store) migrate(ctx context.Context) error {
 		func(ctx context.Context, tx *sql.Tx) error { _, err := tx.ExecContext(ctx, schemaV1); return err },
 		migrateV2,
 		migrateV3,
+		migrateV4,
 	}
 	for ; v < len(steps); v++ {
 		if err := s.step(ctx, v+1, steps[v]); err != nil {
@@ -151,6 +152,83 @@ CREATE TABLE meta (
 	return err
 }
 
+// migrateV4 adds device groups. owners is the group; devices, bots and messages
+// point at it with owner_id, and the owner is what scopes sync, ack and the bot
+// list from here on. Every existing device becomes a group of its own, so
+// nothing changes for it. The old device_id columns of bots and messages stay
+// (SQLite cannot drop a column that has a foreign key without rebuilding the
+// table, which would cascade): bots.device_id is now only the creator, and
+// messages.device_id is no longer written. devices gains the name, the last
+// time it was seen and its ack watermark, derived from the per-message acks of
+// v1. links holds the pairing bundles.
+func migrateV4(ctx context.Context, tx *sql.Tx) error {
+	_, err := tx.ExecContext(ctx, `
+CREATE TABLE owners (
+  id         TEXT PRIMARY KEY,                -- UUIDv7, opaque
+  created_at INTEGER NOT NULL
+);
+ALTER TABLE devices ADD COLUMN owner_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE devices ADD COLUMN name TEXT NOT NULL DEFAULT '';
+ALTER TABLE devices ADD COLUMN seen_at INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE devices ADD COLUMN acked_up_to INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE bots ADD COLUMN owner_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE messages ADD COLUMN owner_id TEXT NOT NULL DEFAULT '';
+CREATE TABLE links (
+  link_hash  BLOB PRIMARY KEY,                -- sha256 of the link id
+  owner_id   TEXT NOT NULL,
+  bundle     TEXT NOT NULL,                   -- opaque to the gateway
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL
+);
+CREATE INDEX links_owner ON links(owner_id);
+UPDATE devices SET seen_at = updated_at,
+  acked_up_to = COALESCE(
+    (SELECT MIN(id) - 1 FROM messages WHERE device_id = devices.id AND acked_at IS NULL),
+    (SELECT MAX(id) FROM messages WHERE device_id = devices.id), 0);`)
+	if err != nil {
+		return err
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT id FROM devices`)
+	if err != nil {
+		return err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	now := time.Now().UnixMilli()
+	for _, id := range ids {
+		o, err := uuid.NewV7()
+		if err != nil {
+			return err
+		}
+		for _, q := range []string{
+			`INSERT INTO owners (id, created_at) VALUES (?1, ?2)`,
+			`UPDATE devices SET owner_id = ?1 WHERE id = ?3`,
+			`UPDATE bots SET owner_id = ?1 WHERE device_id = ?3`,
+			`UPDATE messages SET owner_id = ?1 WHERE device_id = ?3`,
+		} {
+			if _, err := tx.ExecContext(ctx, q, o.String(), now, id); err != nil {
+				return err
+			}
+		}
+	}
+	_, err = tx.ExecContext(ctx, `
+CREATE INDEX devices_owner ON devices(owner_id);
+CREATE INDEX bots_owner ON bots(owner_id);
+CREATE INDEX messages_owner ON messages(owner_id, id);`)
+	return err
+}
+
 // Bot ids are botIDLen characters of base62 starting with a letter, so one can
 // never be mistaken for the integer ids of v1.
 const (
@@ -219,49 +297,112 @@ func randomSecret(n int) string {
 
 // ---- devices ----
 
-// Device is a phone that receives pushes. It owns bots.
+// Device is a phone that receives pushes. Devices that were paired together
+// share an owner (the device group) and with it the bots and the queue.
 type Device struct {
 	ID        string `json:"id"`
+	OwnerID   string `json:"-"`
+	Name      string `json:"name"`
 	Platform  string `json:"platform"`
 	PushToken string `json:"-"`
 	PushOK    bool   `json:"push_ok"`
 	CreatedAt int64  `json:"created_at"`
+	SeenAt    int64  `json:"seen_at"`
+	// AckedUpTo is the device's ack watermark: it has stored every queued item
+	// up to and including this id.
+	AckedUpTo int64 `json:"-"`
 }
 
-// CreateDevice registers a device and returns it with its secret. The secret is
-// shown once; only its hash is stored.
-func (s *Store) CreateDevice(ctx context.Context, platform, pushToken string) (Device, string, error) {
-	id, err := uuid.NewV7()
-	if err != nil {
-		return Device{}, "", err
-	}
-	secret := randomSecret(32)
-	now := s.ms()
-	_, err = s.db.ExecContext(ctx,
-		`INSERT INTO devices (id, secret_hash, platform, push_token, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		id.String(), hash(secret), platform, pushToken, now, now)
-	if err != nil {
-		return Device{}, "", err
-	}
-	return Device{ID: id.String(), Platform: platform, PushToken: pushToken, PushOK: true, CreatedAt: now}, secret, nil
-}
+const devCols = `id, owner_id, name, platform, push_token, push_ok, created_at, seen_at, acked_up_to`
 
-// DeviceBySecret finds the device a secret belongs to.
-func (s *Store) DeviceBySecret(ctx context.Context, secret string) (Device, error) {
+func scanDevice(row interface{ Scan(...any) error }) (Device, error) {
 	var d Device
-	err := s.db.QueryRowContext(ctx,
-		`SELECT id, platform, push_token, push_ok, created_at FROM devices WHERE secret_hash = ?`, hash(secret)).
-		Scan(&d.ID, &d.Platform, &d.PushToken, &d.PushOK, &d.CreatedAt)
+	err := row.Scan(&d.ID, &d.OwnerID, &d.Name, &d.Platform, &d.PushToken, &d.PushOK, &d.CreatedAt, &d.SeenAt, &d.AckedUpTo)
 	if errors.Is(err, sql.ErrNoRows) {
 		return d, ErrNotFound
 	}
 	return d, err
 }
 
-// UpdatePushToken stores a new APNs/FCM token and marks it usable again.
-func (s *Store) UpdatePushToken(ctx context.Context, deviceID, token string) error {
+// CreateDevice registers a device in a new device group of its own and returns
+// it with its secret. The secret is shown once; only its hash is stored.
+func (s *Store) CreateDevice(ctx context.Context, platform, pushToken, name string) (Device, string, error) {
+	id, err := uuid.NewV7()
+	if err != nil {
+		return Device{}, "", err
+	}
+	owner, err := uuid.NewV7()
+	if err != nil {
+		return Device{}, "", err
+	}
+	secret := randomSecret(32)
+	now := s.ms()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Device{}, "", err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO owners (id, created_at) VALUES (?, ?)`, owner.String(), now); err != nil {
+		return Device{}, "", err
+	}
+	_, err = tx.ExecContext(ctx,
+		`INSERT INTO devices (id, owner_id, name, secret_hash, platform, push_token, created_at, updated_at, seen_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id.String(), owner.String(), name, hash(secret), platform, pushToken, now, now, now)
+	if err != nil {
+		return Device{}, "", err
+	}
+	if err := tx.Commit(); err != nil {
+		return Device{}, "", err
+	}
+	return Device{ID: id.String(), OwnerID: owner.String(), Name: name, Platform: platform, PushToken: pushToken, PushOK: true, CreatedAt: now, SeenAt: now}, secret, nil
+}
+
+// DeviceBySecret finds the device a secret belongs to.
+func (s *Store) DeviceBySecret(ctx context.Context, secret string) (Device, error) {
+	return scanDevice(s.db.QueryRowContext(ctx, `SELECT `+devCols+` FROM devices WHERE secret_hash = ?`, hash(secret)))
+}
+
+// TouchDevice records that the device was just seen.
+func (s *Store) TouchDevice(ctx context.Context, deviceID string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE devices SET seen_at = ? WHERE id = ?`, s.ms(), deviceID)
+	return err
+}
+
+// ListDevices returns the devices of a group, oldest first.
+func (s *Store) ListDevices(ctx context.Context, ownerID string) ([]Device, error) {
+	return s.devices(ctx, `SELECT `+devCols+` FROM devices WHERE owner_id = ? ORDER BY created_at, id`, ownerID)
+}
+
+// PushDevices returns the devices of a group that can be pushed to.
+func (s *Store) PushDevices(ctx context.Context, ownerID string) ([]Device, error) {
+	return s.devices(ctx, `SELECT `+devCols+` FROM devices WHERE owner_id = ? AND push_ok = 1 AND push_token <> '' ORDER BY created_at, id`, ownerID)
+}
+
+func (s *Store) devices(ctx context.Context, q string, args ...any) ([]Device, error) {
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Device{}
+	for rows.Next() {
+		d, err := scanDevice(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// UpdateDevice stores a new push token (which marks it usable again) and/or a
+// new name; an empty value leaves the field as it is.
+func (s *Store) UpdateDevice(ctx context.Context, deviceID, pushToken, name string) error {
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE devices SET push_token = ?, push_ok = 1, updated_at = ? WHERE id = ?`, token, s.ms(), deviceID)
+		`UPDATE devices SET push_token = CASE WHEN ? <> '' THEN ? ELSE push_token END,
+		   push_ok = CASE WHEN ? <> '' THEN 1 ELSE push_ok END,
+		   name = CASE WHEN ? <> '' THEN ? ELSE name END, updated_at = ? WHERE id = ?`,
+		pushToken, pushToken, pushToken, name, name, s.ms(), deviceID)
 	return err
 }
 
@@ -273,30 +414,113 @@ func (s *Store) MarkPushGone(ctx context.Context, deviceID, token string) error 
 	return err
 }
 
-// DeleteDevice removes a device with its bots and queued messages.
-func (s *Store) DeleteDevice(ctx context.Context, deviceID string) error {
+// DeleteDevice removes a device from its group. When it was the last one, the
+// group goes too, with its bots and queued messages; the result says so.
+func (s *Store) DeleteDevice(ctx context.Context, deviceID string) (groupGone bool, err error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	groupGone, err = deleteDevice(ctx, tx, deviceID)
+	if err != nil {
+		return false, err
+	}
+	return groupGone, tx.Commit()
+}
+
+func deleteDevice(ctx context.Context, tx *sql.Tx, deviceID string) (bool, error) {
+	var owner string
+	if err := tx.QueryRowContext(ctx, `SELECT owner_id FROM devices WHERE id = ?`, deviceID).Scan(&owner); errors.Is(err, sql.ErrNoRows) {
+		return false, ErrNotFound
+	} else if err != nil {
+		return false, err
+	}
+	var other string
+	err := tx.QueryRowContext(ctx, `SELECT id FROM devices WHERE owner_id = ? AND id <> ? ORDER BY created_at LIMIT 1`, owner, deviceID).Scan(&other)
+	if errors.Is(err, sql.ErrNoRows) {
+		return true, deleteOwner(ctx, tx, owner)
+	}
+	if err != nil {
+		return false, err
+	}
+	// bots.device_id (the creator, kept from v1) cascades; it no longer decides
+	// who may use a bot, so hand the bots to a device that stays.
+	if _, err := tx.ExecContext(ctx, `UPDATE bots SET device_id = ? WHERE device_id = ?`, other, deviceID); err != nil {
+		return false, err
+	}
+	_, err = tx.ExecContext(ctx, `DELETE FROM devices WHERE id = ?`, deviceID)
+	return false, err
+}
+
+// DeleteOwner removes a whole device group: its devices, bots and queue.
+func (s *Store) DeleteOwner(ctx context.Context, ownerID string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `DELETE FROM messages WHERE device_id = ?`, deviceID); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM devices WHERE id = ?`, deviceID); err != nil {
+	if err := deleteOwner(ctx, tx, ownerID); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
+func deleteOwner(ctx context.Context, tx *sql.Tx, ownerID string) error {
+	for _, q := range []string{
+		`DELETE FROM messages WHERE owner_id = ?`,
+		`DELETE FROM bots WHERE owner_id = ?`,
+		`DELETE FROM links WHERE owner_id = ?`,
+		`DELETE FROM devices WHERE owner_id = ?`,
+		`DELETE FROM owners WHERE id = ?`,
+	} {
+		if _, err := tx.ExecContext(ctx, q, ownerID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// GCDevices deletes devices whose push token is gone and that made no request
+// for idle (with the group, its bots and queue, when such a device was the
+// last of its group). It returns how many devices went.
+func (s *Store) GCDevices(ctx context.Context, idle time.Duration) (int, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id FROM devices WHERE push_ok = 0 AND seen_at <= ?`, s.now().Add(-idle).UnixMilli())
+	if err != nil {
+		return 0, err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, id := range ids {
+		if _, err := s.DeleteDevice(ctx, id); err != nil && !errors.Is(err, ErrNotFound) {
+			return n, err
+		}
+		n++
+	}
+	return n, nil
+}
+
 // ---- bots ----
 
 // Bot is one notification channel. ID is the short public id; Key is the
-// private row id that queued messages reference.
+// private row id that queued messages reference. OwnerID is the device group
+// that may use it.
 type Bot struct {
 	ID           string `json:"id"`
 	Key          int64  `json:"-"`
-	DeviceID     string `json:"-"`
+	OwnerID      string `json:"-"`
 	Name         string `json:"name"`
 	Avatar       string `json:"avatar"`
 	DefaultLevel string `json:"default_level"`
@@ -304,11 +528,11 @@ type Bot struct {
 	UpdatedAt    int64  `json:"updated_at"`
 }
 
-const botCols = `public_id, id, device_id, name, avatar, default_level, created_at, updated_at`
+const botCols = `public_id, id, owner_id, name, avatar, default_level, created_at, updated_at`
 
 func scanBot(row interface{ Scan(...any) error }) (Bot, error) {
 	var b Bot
-	err := row.Scan(&b.ID, &b.Key, &b.DeviceID, &b.Name, &b.Avatar, &b.DefaultLevel, &b.CreatedAt, &b.UpdatedAt)
+	err := row.Scan(&b.ID, &b.Key, &b.OwnerID, &b.Name, &b.Avatar, &b.DefaultLevel, &b.CreatedAt, &b.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return b, ErrNotFound
 	}
@@ -317,8 +541,9 @@ func scanBot(row interface{ Scan(...any) error }) (Bot, error) {
 
 func botToken(id string) string { return id + ":" + randomSecret(24) }
 
-// CreateBot adds a bot to a device and returns it with its token, shown once.
-func (s *Store) CreateBot(ctx context.Context, deviceID, name, avatar, level string) (Bot, string, error) {
+// CreateBot adds a bot to the device's group and returns it with its token,
+// shown once.
+func (s *Store) CreateBot(ctx context.Context, d Device, name, avatar, level string) (Bot, string, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return Bot{}, "", err
@@ -330,9 +555,10 @@ func (s *Store) CreateBot(ctx context.Context, deviceID, name, avatar, level str
 		return Bot{}, "", err
 	}
 	token := botToken(id)
+	// device_id is the creator, kept from v1 for its foreign key.
 	res, err := tx.ExecContext(ctx,
-		`INSERT INTO bots (public_id, device_id, token_hash, name, avatar, default_level, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, deviceID, hash(token), name, avatar, level, now, now)
+		`INSERT INTO bots (public_id, device_id, owner_id, token_hash, name, avatar, default_level, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, d.ID, d.OwnerID, hash(token), name, avatar, level, now, now)
 	if err != nil {
 		return Bot{}, "", err
 	}
@@ -343,12 +569,12 @@ func (s *Store) CreateBot(ctx context.Context, deviceID, name, avatar, level str
 	if err := tx.Commit(); err != nil {
 		return Bot{}, "", err
 	}
-	return Bot{ID: id, Key: key, DeviceID: deviceID, Name: name, Avatar: avatar, DefaultLevel: level, CreatedAt: now, UpdatedAt: now}, token, nil
+	return Bot{ID: id, Key: key, OwnerID: d.OwnerID, Name: name, Avatar: avatar, DefaultLevel: level, CreatedAt: now, UpdatedAt: now}, token, nil
 }
 
-// ListBots returns a device's bots, oldest first.
-func (s *Store) ListBots(ctx context.Context, deviceID string) ([]Bot, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT `+botCols+` FROM bots WHERE device_id = ? ORDER BY id`, deviceID)
+// ListBots returns a group's bots, oldest first.
+func (s *Store) ListBots(ctx context.Context, ownerID string) ([]Bot, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT `+botCols+` FROM bots WHERE owner_id = ? ORDER BY id`, ownerID)
 	if err != nil {
 		return nil, err
 	}
@@ -364,10 +590,10 @@ func (s *Store) ListBots(ctx context.Context, deviceID string) ([]Bot, error) {
 	return bots, rows.Err()
 }
 
-// CountBots returns how many bots a device has.
-func (s *Store) CountBots(ctx context.Context, deviceID string) (int, error) {
+// CountBots returns how many bots a group has.
+func (s *Store) CountBots(ctx context.Context, ownerID string) (int, error) {
 	var n int
-	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM bots WHERE device_id = ?`, deviceID).Scan(&n)
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM bots WHERE owner_id = ?`, ownerID).Scan(&n)
 	return n, err
 }
 
@@ -377,16 +603,16 @@ func (s *Store) Counts(ctx context.Context) (devices, bots int, err error) {
 	return
 }
 
-// GetBot returns one of a device's bots.
-func (s *Store) GetBot(ctx context.Context, deviceID string, botID string) (Bot, error) {
-	return scanBot(s.db.QueryRowContext(ctx, `SELECT `+botCols+` FROM bots WHERE public_id = ? AND device_id = ?`, botID, deviceID))
+// GetBot returns one of a group's bots.
+func (s *Store) GetBot(ctx context.Context, ownerID string, botID string) (Bot, error) {
+	return scanBot(s.db.QueryRowContext(ctx, `SELECT `+botCols+` FROM bots WHERE public_id = ? AND owner_id = ?`, botID, ownerID))
 }
 
-// BotIDByKey returns the public id of one of a device's bots by its row id:
+// BotIDByKey returns the public id of one of a group's bots by its row id:
 // the integer id clients knew before v2.
-func (s *Store) BotIDByKey(ctx context.Context, deviceID string, key int64) (string, error) {
+func (s *Store) BotIDByKey(ctx context.Context, ownerID string, key int64) (string, error) {
 	var id string
-	err := s.db.QueryRowContext(ctx, `SELECT public_id FROM bots WHERE id = ? AND device_id = ?`, key, deviceID).Scan(&id)
+	err := s.db.QueryRowContext(ctx, `SELECT public_id FROM bots WHERE id = ? AND owner_id = ?`, key, ownerID).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", ErrNotFound
 	}
@@ -401,8 +627,8 @@ type BotPatch struct {
 }
 
 // UpdateBot changes a bot's name, avatar or default level.
-func (s *Store) UpdateBot(ctx context.Context, deviceID string, botID string, p BotPatch) (Bot, error) {
-	b, err := s.GetBot(ctx, deviceID, botID)
+func (s *Store) UpdateBot(ctx context.Context, ownerID string, botID string, p BotPatch) (Bot, error) {
+	b, err := s.GetBot(ctx, ownerID, botID)
 	if err != nil {
 		return b, err
 	}
@@ -417,16 +643,16 @@ func (s *Store) UpdateBot(ctx context.Context, deviceID string, botID string, p 
 	}
 	b.UpdatedAt = s.ms()
 	_, err = s.db.ExecContext(ctx,
-		`UPDATE bots SET name = ?, avatar = ?, default_level = ?, updated_at = ? WHERE public_id = ? AND device_id = ?`,
-		b.Name, b.Avatar, b.DefaultLevel, b.UpdatedAt, botID, deviceID)
+		`UPDATE bots SET name = ?, avatar = ?, default_level = ?, updated_at = ? WHERE public_id = ? AND owner_id = ?`,
+		b.Name, b.Avatar, b.DefaultLevel, b.UpdatedAt, botID, ownerID)
 	return b, err
 }
 
 // ResetBotToken replaces a bot's token; the old one stops working at once.
-func (s *Store) ResetBotToken(ctx context.Context, deviceID string, botID string) (string, error) {
+func (s *Store) ResetBotToken(ctx context.Context, ownerID string, botID string) (string, error) {
 	token := botToken(botID)
 	res, err := s.db.ExecContext(ctx,
-		`UPDATE bots SET token_hash = ?, updated_at = ? WHERE public_id = ? AND device_id = ?`, hash(token), s.ms(), botID, deviceID)
+		`UPDATE bots SET token_hash = ?, updated_at = ? WHERE public_id = ? AND owner_id = ?`, hash(token), s.ms(), botID, ownerID)
 	if err != nil {
 		return "", err
 	}
@@ -437,8 +663,8 @@ func (s *Store) ResetBotToken(ctx context.Context, deviceID string, botID string
 }
 
 // DeleteBot removes a bot and its queued messages.
-func (s *Store) DeleteBot(ctx context.Context, deviceID string, botID string) error {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM bots WHERE public_id = ? AND device_id = ?`, botID, deviceID)
+func (s *Store) DeleteBot(ctx context.Context, ownerID string, botID string) error {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM bots WHERE public_id = ? AND owner_id = ?`, botID, ownerID)
 	if err != nil {
 		return err
 	}
@@ -448,23 +674,12 @@ func (s *Store) DeleteBot(ctx context.Context, deviceID string, botID string) er
 	return nil
 }
 
-// BotByToken resolves a bot token to the bot and the device it pushes to.
-func (s *Store) BotByToken(ctx context.Context, token string) (Bot, Device, error) {
-	var b Bot
-	var d Device
+// BotByToken resolves a bot token to the bot. Its OwnerID names the device
+// group that gets the pushes (see PushDevices).
+func (s *Store) BotByToken(ctx context.Context, token string) (Bot, error) {
 	// Reject malformed tokens before touching the database.
 	if i := strings.IndexByte(token, ':'); i <= 0 || i == len(token)-1 {
-		return b, d, ErrNotFound
+		return Bot{}, ErrNotFound
 	}
-	err := s.db.QueryRowContext(ctx, `
-		SELECT b.public_id, b.id, b.device_id, b.name, b.avatar, b.default_level, b.created_at, b.updated_at,
-		       d.id, d.platform, d.push_token, d.push_ok, d.created_at
-		FROM bots b JOIN devices d ON d.id = b.device_id
-		WHERE b.token_hash = ?`, hash(token)).
-		Scan(&b.ID, &b.Key, &b.DeviceID, &b.Name, &b.Avatar, &b.DefaultLevel, &b.CreatedAt, &b.UpdatedAt,
-			&d.ID, &d.Platform, &d.PushToken, &d.PushOK, &d.CreatedAt)
-	if errors.Is(err, sql.ErrNoRows) {
-		return b, d, ErrNotFound
-	}
-	return b, d, err
+	return scanBot(s.db.QueryRowContext(ctx, `SELECT `+botCols+` FROM bots WHERE token_hash = ?`, hash(token)))
 }

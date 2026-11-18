@@ -29,7 +29,7 @@ const (
 
 // botAPI serves /bot<token>/<method> with GET query, form or JSON parameters.
 func (s *Server) botAPI(w http.ResponseWriter, r *http.Request) {
-	bot, dev, good := s.authBot(w, r)
+	bot, good := s.authBot(w, r)
 	if !good {
 		return
 	}
@@ -42,19 +42,18 @@ func (s *Server) botAPI(w http.ResponseWriter, r *http.Request) {
 	case "getme":
 		ok(w, bot)
 	case "sendmessage":
-		s.sendMessage(w, r, bot, dev, p)
+		s.sendMessage(w, r, bot, p)
 	case "editmessagedata":
-		s.changeMessage(w, r, bot, dev, p, store.KindEdit)
+		s.changeMessage(w, r, bot, p, store.KindEdit)
 	case "deletemessage":
-		s.changeMessage(w, r, bot, dev, p, store.KindDelete)
+		s.changeMessage(w, r, bot, p, store.KindDelete)
 	default:
 		s.fail(w, r, errNotFound)
 	}
 }
 
-func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request, bot store.Bot, dev store.Device, p url.Values) {
+func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request, bot store.Bot, p url.Values) {
 	m := store.Message{
-		DeviceID:   dev.ID,
 		Title:      strings.TrimSpace(p.Get("title")),
 		Body:       strings.TrimSpace(p.Get("body")),
 		Data:       p.Get("data"),
@@ -97,14 +96,14 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request, bot store.B
 		return
 	}
 	s.m.messages.Inc(store.KindMessage)
-	s.notify(dev, push.Notification{
+	s.notifyOwner(r.Context(), bot.OwnerID, push.Notification{
 		Kind: store.KindMessage, MessageID: m.ID, BotID: bot.ID, BotName: bot.Name,
 		Title: m.Title, Body: m.Body, Group: m.Group, Level: m.Level, CollapseID: m.CollapseID,
 	})
 	ok(w, m)
 }
 
-func (s *Server) changeMessage(w http.ResponseWriter, r *http.Request, bot store.Bot, dev store.Device, p url.Values, kind string) {
+func (s *Server) changeMessage(w http.ResponseWriter, r *http.Request, bot store.Bot, p url.Values, kind string) {
 	var t store.Target
 	if v := p.Get("message_id"); v != "" {
 		id, err := strconv.ParseInt(v, 10, 64)
@@ -135,16 +134,16 @@ func (s *Server) changeMessage(w http.ResponseWriter, r *http.Request, bot store
 			s.fail(w, r, badRequest(fmt.Sprintf("data is longer than %d bytes", widget.MaxData)))
 			return
 		}
-		m, err = s.store.EditData(r.Context(), bot, dev.ID, t, data, s.opts.MessageTTL)
+		m, err = s.store.EditData(r.Context(), bot, t, data, s.opts.MessageTTL)
 	} else {
-		m, err = s.store.DeleteMessage(r.Context(), bot, dev.ID, t, s.opts.MessageTTL)
+		m, err = s.store.DeleteMessage(r.Context(), bot, t, s.opts.MessageTTL)
 	}
 	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
 	s.m.messages.Inc(kind)
-	s.notify(dev, push.Notification{
+	s.notifyOwner(r.Context(), bot.OwnerID, push.Notification{
 		Kind: kind, MessageID: m.ID, TargetID: m.TargetID, BotID: bot.ID, BotName: bot.Name, CollapseID: m.CollapseID,
 	})
 	ok(w, true)

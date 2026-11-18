@@ -413,7 +413,7 @@ func TestInfoReportsFeaturesAndPushModes(t *testing.T) {
 		Push     map[string]string `json:"push"`
 		API      int               `json:"api"`
 	}](t, e.do("GET", "/v1/info", "", nil))
-	if len(info.Features) != 1 || info.Features[0] != "relay" || info.Push["ios"] != "direct" || info.Push["android"] != "off" || info.API != 2 {
+	if len(info.Features) != 2 || info.Features[0] != "link" || info.Features[1] != "relay" || info.Push["ios"] != "direct" || info.Push["android"] != "off" || info.API != 2 {
 		t.Errorf("info = %+v", info)
 	}
 	plain := setup(t)
@@ -422,7 +422,7 @@ func TestInfoReportsFeaturesAndPushModes(t *testing.T) {
 		Push     map[string]string `json:"push"`
 		API      int               `json:"api"`
 	}](t, plain.do("GET", "/v1/info", "", nil))
-	if info.Features == nil || len(info.Features) != 0 || info.Push["ios"] != "direct" {
+	if len(info.Features) != 1 || info.Features[0] != "link" || info.Push["ios"] != "direct" {
 		t.Errorf("plain info = %+v", info)
 	}
 }

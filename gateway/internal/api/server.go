@@ -33,8 +33,15 @@ type Options struct {
 	// from filling the database. Defaults 10 and 5.
 	RegisterPerHour float64
 	RegisterBurst   int
-	// MaxBotsPerDevice caps the bots one device can own. Default 100.
+	// MaxBotsPerDevice caps the bots one device group can own (the name is
+	// from before groups). Default 100.
 	MaxBotsPerDevice int
+	// ClaimPerHour and ClaimBurst limit pairing-code claims (POST
+	// /v1/links/claim) per client IP, which stops guessing. Defaults 10 and 5.
+	ClaimPerHour float64
+	ClaimBurst   int
+	// LinkTTL is how long a pairing link lives. Default 10 minutes.
+	LinkTTL time.Duration
 	// PushQueue and PushWorkers size the push queue (defaults 1024 and 16).
 	PushQueue   int
 	PushWorkers int
@@ -85,6 +92,7 @@ type Server struct {
 	mu         sync.Mutex
 	limiters   map[string]*limiter // per bot: sends
 	registrars map[string]*limiter // per client IP: device registrations
+	claimers   map[string]*limiter // per client IP: pairing claims
 
 	rs relayState
 	pq pushQueue
@@ -101,6 +109,15 @@ func New(st *store.Store, p push.Pusher, log *slog.Logger, opts Options) *Server
 	}
 	if opts.MaxBotsPerDevice <= 0 {
 		opts.MaxBotsPerDevice = 100
+	}
+	if opts.ClaimPerHour <= 0 {
+		opts.ClaimPerHour = 10
+	}
+	if opts.ClaimBurst <= 0 {
+		opts.ClaimBurst = 5
+	}
+	if opts.LinkTTL <= 0 {
+		opts.LinkTTL = 10 * time.Minute
 	}
 	if opts.PushQueue <= 0 {
 		opts.PushQueue = 1024
@@ -123,7 +140,7 @@ func New(st *store.Store, p push.Pusher, log *slog.Logger, opts Options) *Server
 	if opts.RelayGoneLimit <= 0 {
 		opts.RelayGoneLimit = 100
 	}
-	s := &Server{store: st, pusher: p, log: log, opts: opts, limiters: map[string]*limiter{}, registrars: map[string]*limiter{}}
+	s := &Server{store: st, pusher: p, log: log, opts: opts, limiters: map[string]*limiter{}, registrars: map[string]*limiter{}, claimers: map[string]*limiter{}}
 	s.rs = relayState{relays: map[string]*relayEntry{}, tokens: map[string]*limiter{}, byIP: map[string]*limiter{}}
 	s.initMetrics()
 	s.startPushQueue()
@@ -152,8 +169,9 @@ func (s *Server) Handler() http.Handler {
 				info["register_key_required"] = true
 			}
 			// features: what this gateway can do beyond the base API, for the
-			// app to look at ("relay": it pushes for other gateways).
-			features := []string{}
+			// app to look at ("relay": it pushes for other gateways; "link": device groups and
+			// pairing).
+			features := []string{"link"}
 			if s.opts.RelayServe {
 				features = append(features, "relay")
 			}
@@ -168,9 +186,13 @@ func (s *Server) Handler() http.Handler {
 		}
 		r.Group(func(r chi.Router) {
 			r.Use(s.deviceAuth)
+			r.Get("/devices", s.listDevices)
 			r.Get("/devices/me", s.getDevice)
 			r.Put("/devices/me", s.updateDevice)
 			r.Delete("/devices/me", s.deleteDevice)
+			r.Delete("/devices/{id}", s.removeDevice)
+			r.Post("/links", s.createLink)
+			r.Post("/links/claim", s.claimLink)
 			r.Get("/bots", s.listBots)
 			r.Post("/bots", s.createBot)
 			r.Get("/bots/{id}", s.getBot)
@@ -290,6 +312,20 @@ func (s *Server) allowRegistration(r *http.Request) bool {
 	return l.Allow()
 }
 
+// allowClaim takes a pairing claim from the client IP's bucket.
+func (s *Server) allowClaim(r *http.Request) bool {
+	ip := clientIP(r)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	l, found := s.claimers[ip]
+	if !found {
+		l = &limiter{Limiter: rate.NewLimiter(rate.Limit(s.opts.ClaimPerHour/3600), s.opts.ClaimBurst)}
+		s.claimers[ip] = l
+	}
+	l.last = time.Now()
+	return l.Allow()
+}
+
 // forgetBot drops a deleted bot's limiter.
 func (s *Server) forgetBot(botID string) {
 	s.mu.Lock()
@@ -313,6 +349,12 @@ func (s *Server) PruneLimiters(idle time.Duration) int {
 	for ip, l := range s.registrars {
 		if l.last.Before(cutoff) {
 			delete(s.registrars, ip)
+			n++
+		}
+	}
+	for ip, l := range s.claimers {
+		if l.last.Before(cutoff) {
+			delete(s.claimers, ip)
 			n++
 		}
 	}

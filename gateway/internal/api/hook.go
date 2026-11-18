@@ -15,28 +15,28 @@ import (
 
 // authBot resolves the bot token in the first path segment ("bot<token>"). On
 // failure it has already answered.
-func (s *Server) authBot(w http.ResponseWriter, r *http.Request) (store.Bot, store.Device, bool) {
+func (s *Server) authBot(w http.ResponseWriter, r *http.Request) (store.Bot, bool) {
 	seg := chi.URLParam(r, "bot")
 	if !strings.HasPrefix(seg, "bot") {
 		s.fail(w, r, errNotFound)
-		return store.Bot{}, store.Device{}, false
+		return store.Bot{}, false
 	}
-	bot, dev, err := s.store.BotByToken(r.Context(), strings.TrimPrefix(seg, "bot"))
+	bot, err := s.store.BotByToken(r.Context(), strings.TrimPrefix(seg, "bot"))
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			err = errUnauthorized
 		}
 		s.fail(w, r, err)
-		return store.Bot{}, store.Device{}, false
+		return store.Bot{}, false
 	}
-	return bot, dev, true
+	return bot, true
 }
 
 // hook serves /bot<token>/hook/<kind>[/rest...]: the payload of another tool
 // (Slack, Alertmanager, GitHub, ...) is converted to sendMessage parameters
 // and goes through the same validation, rate limit and delivery.
 func (s *Server) hook(w http.ResponseWriter, r *http.Request) {
-	bot, dev, good := s.authBot(w, r)
+	bot, good := s.authBot(w, r)
 	if !good {
 		return
 	}
@@ -76,5 +76,5 @@ func (s *Server) hook(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, badRequest(err.Error()))
 		return
 	}
-	s.sendMessage(w, r, bot, dev, p)
+	s.sendMessage(w, r, bot, p)
 }

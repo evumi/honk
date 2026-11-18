@@ -108,7 +108,7 @@ func (s *Server) enqueue(j pushJob) bool {
 	}
 }
 
-// notify queues a push to the device: the message is already stored, so the
+// notify queues a push to one device (see notifyOwner for a group): the message is already stored, so the
 // bot API answers at once and a slow APNs/FCM never holds it up. A failed
 // push is retried (see runPush); the device still gets the message by /sync.
 // A token APNs/FCM reports gone is recorded so later pushes skip it.
@@ -126,6 +126,18 @@ func (s *Server) notify(d store.Device, n push.Notification) {
 	}
 	n.Platform, n.Token = d.Platform, d.PushToken
 	s.enqueue(pushJob{dev: d, n: n})
+}
+
+// notifyOwner pushes to every device of the group that can take a push.
+func (s *Server) notifyOwner(ctx context.Context, ownerID string, n push.Notification) {
+	ds, err := s.store.PushDevices(ctx, ownerID)
+	if err != nil {
+		s.log.Error("list push devices", "err", err)
+		return
+	}
+	for _, d := range ds {
+		s.notify(d, n)
+	}
 }
 
 func (s *Server) runPush(j pushJob) {

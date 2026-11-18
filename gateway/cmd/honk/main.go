@@ -131,7 +131,7 @@ func run(log *slog.Logger) error {
 		}()
 	}
 
-	go cleanup(ctx, st, srv, cfg.AckedKeep, log)
+	go cleanup(ctx, st, srv, cfg.AckedKeep, cfg.DeviceGC, log)
 
 	errc := make(chan error, 1)
 	go func() {
@@ -156,9 +156,10 @@ func run(log *slog.Logger) error {
 	return err
 }
 
-// cleanup drops expired and long-acked queue items and idle rate limiters
+// cleanup drops expired and long-acked queue items, abandoned devices (see
+// HONK_DEVICE_GC) and idle rate limiters
 // once at start, then hourly.
-func cleanup(ctx context.Context, st *store.Store, srv *api.Server, ackedKeep time.Duration, log *slog.Logger) {
+func cleanup(ctx context.Context, st *store.Store, srv *api.Server, ackedKeep, deviceGC time.Duration, log *slog.Logger) {
 	t := time.NewTicker(time.Hour)
 	defer t.Stop()
 	for {
@@ -168,6 +169,15 @@ func cleanup(ctx context.Context, st *store.Store, srv *api.Server, ackedKeep ti
 			}
 		} else if n > 0 {
 			log.Info("cleanup", "deleted", n)
+		}
+		if deviceGC > 0 {
+			if n, err := st.GCDevices(ctx, deviceGC); err != nil {
+				if ctx.Err() == nil {
+					log.Error("device gc", "err", err)
+				}
+			} else if n > 0 {
+				log.Info("device gc", "deleted", n)
+			}
 		}
 		srv.PruneLimiters(time.Hour)
 		select {

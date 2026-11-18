@@ -15,12 +15,13 @@ type Config struct {
 	Addr       string        // HONK_ADDR, default ":8080"
 	DBPath     string        // HONK_DB, default "./data/honk.db"
 	MessageTTL time.Duration // HONK_MESSAGE_TTL, default 168h (7 days)
-	AckedKeep  time.Duration // HONK_ACKED_KEEP, default 24h: acked rows kept this long
+	AckedKeep  time.Duration // HONK_ACKED_KEEP, default 24h: items every device of a group has acked are kept this long
+	DeviceGC   time.Duration // HONK_DEVICE_GC, default 2160h (90 days): devices with a dead push token and no request for this long are deleted
 	SendRate   float64       // HONK_SEND_RATE, messages per second per bot, default 5
 	SendBurst  int           // HONK_SEND_BURST, default 20
 
 	RegisterPerHour  float64 // HONK_REGISTER_PER_HOUR: device registrations per client IP, default 10
-	MaxBotsPerDevice int     // HONK_MAX_BOTS_PER_DEVICE, default 100
+	MaxBotsPerDevice int     // HONK_MAX_BOTS_PER_DEVICE, default 100; counted per device group
 
 	MetricsAddr string // HONK_METRICS_ADDR: listen address of /metrics; empty (default) turns it off
 	RegisterKey string // HONK_REGISTER_KEY: when set, device registration must send the same register_key
@@ -128,6 +129,9 @@ func Load() (Config, error) {
 		return c, err
 	}
 	if c.AckedKeep, err = duration("HONK_ACKED_KEEP", 24*time.Hour); err != nil {
+		return c, err
+	}
+	if c.DeviceGC, err = duration("HONK_DEVICE_GC", 2160*time.Hour); err != nil {
 		return c, err
 	}
 	if v := os.Getenv("HONK_SEND_RATE"); v != "" {

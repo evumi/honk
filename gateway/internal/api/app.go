@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
@@ -19,6 +20,8 @@ type ctxKey struct{}
 
 const (
 	maxBotName   = 64
+	maxDevName   = 64
+	seenEvery    = time.Hour
 	maxAvatar    = 512
 	maxPushToken = 4096
 	syncLimit    = 100
@@ -41,6 +44,13 @@ func (s *Server) deviceAuth(next http.Handler) http.Handler {
 			s.fail(w, r, err)
 			return
 		}
+		// seen_at is written at most once an hour.
+		if now := time.Now().UnixMilli(); now-d.SeenAt > seenEvery.Milliseconds() {
+			if err := s.store.TouchDevice(r.Context(), d.ID); err != nil {
+				s.log.Warn("touch device", "err", err)
+			}
+			d.SeenAt = now
+		}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxKey{}, d)))
 	})
 }
@@ -61,6 +71,7 @@ func (s *Server) registerDevice(w http.ResponseWriter, r *http.Request) {
 		Platform  string `json:"platform"`
 		PushToken string `json:"push_token"`
 		Key       string `json:"register_key"`
+		Name      string `json:"name"`
 	}
 	if err := decode(r, &in); err != nil {
 		s.fail(w, r, err)
@@ -82,12 +93,26 @@ func (s *Server) registerDevice(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	d, secret, err := s.store.CreateDevice(r.Context(), in.Platform, in.PushToken)
+	name, err := deviceName(in.Name)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	d, secret, err := s.store.CreateDevice(r.Context(), in.Platform, in.PushToken, name)
 	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
 	ok(w, map[string]any{"device": d, "device_secret": secret})
+}
+
+// deviceName trims and checks the optional name a device gives itself.
+func deviceName(v string) (string, error) {
+	v = strings.TrimSpace(v)
+	if utf8.RuneCountInString(v) > maxDevName {
+		return "", badRequest(fmt.Sprintf("name is longer than %d characters", maxDevName))
+	}
+	return v, nil
 }
 
 func checkPushToken(t string) error {
@@ -102,26 +127,94 @@ func (s *Server) getDevice(w http.ResponseWriter, r *http.Request) { ok(w, devic
 func (s *Server) updateDevice(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		PushToken string `json:"push_token"`
+		Name      string `json:"name"`
 	}
 	if err := decode(r, &in); err != nil {
 		s.fail(w, r, err)
 		return
 	}
-	if err := checkPushToken(in.PushToken); err != nil {
+	if in.PushToken != "" || in.Name == "" {
+		if err := checkPushToken(in.PushToken); err != nil {
+			s.fail(w, r, err)
+			return
+		}
+	}
+	name, err := deviceName(in.Name)
+	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
 	d := device(r)
-	if err := s.store.UpdatePushToken(r.Context(), d.ID, in.PushToken); err != nil {
+	if err := s.store.UpdateDevice(r.Context(), d.ID, in.PushToken, name); err != nil {
 		s.fail(w, r, err)
 		return
 	}
-	d.PushToken, d.PushOK = in.PushToken, true
+	if in.PushToken != "" {
+		d.PushToken, d.PushOK = in.PushToken, true
+	}
+	if name != "" {
+		d.Name = name
+	}
 	ok(w, d)
 }
 
+// deleteDevice (DELETE /v1/devices/me) removes this device from its group;
+// the last device takes the group, its bots and the queue with it. With
+// ?all=true the whole group goes: every device, bot and queued message.
 func (s *Server) deleteDevice(w http.ResponseWriter, r *http.Request) {
-	if err := s.store.DeleteDevice(r.Context(), device(r).ID); err != nil {
+	d := device(r)
+	var err error
+	if v := r.URL.Query().Get("all"); v == "true" || v == "1" {
+		err = s.store.DeleteOwner(r.Context(), d.OwnerID)
+	} else {
+		_, err = s.store.DeleteDevice(r.Context(), d.ID)
+	}
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	ok(w, true)
+}
+
+// deviceView is what the device list shows of a device.
+type deviceView struct {
+	store.Device
+	Current bool `json:"current"`
+}
+
+// listDevices (GET /v1/devices) lists the devices of the caller's group.
+func (s *Server) listDevices(w http.ResponseWriter, r *http.Request) {
+	me := device(r)
+	ds, err := s.store.ListDevices(r.Context(), me.OwnerID)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	out := make([]deviceView, len(ds))
+	for i, d := range ds {
+		out[i] = deviceView{Device: d, Current: d.ID == me.ID}
+	}
+	ok(w, out)
+}
+
+// removeDevice (DELETE /v1/devices/{id}) removes one device of the caller's group.
+func (s *Server) removeDevice(w http.ResponseWriter, r *http.Request) {
+	me := device(r)
+	id := chi.URLParam(r, "id")
+	ds, err := s.store.ListDevices(r.Context(), me.OwnerID)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	found := false
+	for _, d := range ds {
+		found = found || d.ID == id
+	}
+	if !found {
+		s.fail(w, r, errNotFound)
+		return
+	}
+	if _, err := s.store.DeleteDevice(r.Context(), id); err != nil {
 		s.fail(w, r, err)
 		return
 	}
@@ -131,7 +224,7 @@ func (s *Server) deleteDevice(w http.ResponseWriter, r *http.Request) {
 // ---- bots ----
 
 // botID reads the {id} of /v1/bots/{id}. The integer id a client knew
-// before v2 still names the device's own bot: an app whose local rename to the
+// before v2 still names the group's own bot: an app whose local rename to the
 // short id is still pending (offline at the first sync) can delete or edit it.
 func (s *Server) botID(r *http.Request) (string, error) {
 	id := chi.URLParam(r, "id")
@@ -142,7 +235,7 @@ func (s *Server) botID(r *http.Request) (string, error) {
 	if err != nil || key == 0 {
 		return "", errNotFound
 	}
-	public, err := s.store.BotIDByKey(r.Context(), device(r).ID, int64(key))
+	public, err := s.store.BotIDByKey(r.Context(), device(r).OwnerID, int64(key))
 	if err == nil {
 		s.log.Info("integer bot id", "path", r.URL.Path, "bot", public)
 	}
@@ -170,7 +263,7 @@ func checkBotFields(name, avatar, lvl *string) error {
 }
 
 func (s *Server) listBots(w http.ResponseWriter, r *http.Request) {
-	bots, err := s.store.ListBots(r.Context(), device(r).ID)
+	bots, err := s.store.ListBots(r.Context(), device(r).OwnerID)
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -192,14 +285,14 @@ func (s *Server) createBot(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	if n, err := s.store.CountBots(r.Context(), device(r).ID); err != nil {
+	if n, err := s.store.CountBots(r.Context(), device(r).OwnerID); err != nil {
 		s.fail(w, r, err)
 		return
 	} else if n >= s.opts.MaxBotsPerDevice {
-		s.fail(w, r, badRequest(fmt.Sprintf("a device can have at most %d bots", s.opts.MaxBotsPerDevice)))
+		s.fail(w, r, badRequest(fmt.Sprintf("a device group can have at most %d bots", s.opts.MaxBotsPerDevice)))
 		return
 	}
-	b, token, err := s.store.CreateBot(r.Context(), device(r).ID, in.Name, in.Avatar, in.DefaultLevel)
+	b, token, err := s.store.CreateBot(r.Context(), device(r), in.Name, in.Avatar, in.DefaultLevel)
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -211,7 +304,7 @@ func (s *Server) getBot(w http.ResponseWriter, r *http.Request) {
 	id, err := s.botID(r)
 	if err == nil {
 		var b store.Bot
-		if b, err = s.store.GetBot(r.Context(), device(r).ID, id); err == nil {
+		if b, err = s.store.GetBot(r.Context(), device(r).OwnerID, id); err == nil {
 			ok(w, b)
 			return
 		}
@@ -238,7 +331,7 @@ func (s *Server) updateBot(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	b, err := s.store.UpdateBot(r.Context(), device(r).ID, id, store.BotPatch{Name: in.Name, Avatar: in.Avatar, DefaultLevel: in.DefaultLevel})
+	b, err := s.store.UpdateBot(r.Context(), device(r).OwnerID, id, store.BotPatch{Name: in.Name, Avatar: in.Avatar, DefaultLevel: in.DefaultLevel})
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -249,7 +342,7 @@ func (s *Server) updateBot(w http.ResponseWriter, r *http.Request) {
 func (s *Server) deleteBot(w http.ResponseWriter, r *http.Request) {
 	id, err := s.botID(r)
 	if err == nil {
-		if err = s.store.DeleteBot(r.Context(), device(r).ID, id); err == nil {
+		if err = s.store.DeleteBot(r.Context(), device(r).OwnerID, id); err == nil {
 			s.forgetBot(id)
 			ok(w, true)
 			return
@@ -262,7 +355,7 @@ func (s *Server) resetBotToken(w http.ResponseWriter, r *http.Request) {
 	id, err := s.botID(r)
 	if err == nil {
 		var token string
-		if token, err = s.store.ResetBotToken(r.Context(), device(r).ID, id); err == nil {
+		if token, err = s.store.ResetBotToken(r.Context(), device(r).OwnerID, id); err == nil {
 			ok(w, map[string]any{"token": token})
 			return
 		}
@@ -278,7 +371,7 @@ func (s *Server) getMessage(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, errNotFound)
 		return
 	}
-	m, err := s.store.GetMessage(r.Context(), device(r).ID, id)
+	m, err := s.store.GetMessage(r.Context(), device(r).OwnerID, id)
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -305,7 +398,7 @@ func (s *Server) sync(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = l
 	}
-	msgs, err := s.store.Sync(r.Context(), device(r).ID, cursor, limit)
+	msgs, err := s.store.Sync(r.Context(), device(r).OwnerID, cursor, limit)
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -329,7 +422,7 @@ func (s *Server) ack(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, badRequest("up_to must be a positive message id"))
 		return
 	}
-	n, err := s.store.Ack(r.Context(), device(r).ID, in.UpTo)
+	n, err := s.store.Ack(r.Context(), device(r), in.UpTo)
 	if err != nil {
 		s.fail(w, r, err)
 		return
