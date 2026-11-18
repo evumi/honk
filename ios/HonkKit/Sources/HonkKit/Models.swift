@@ -181,3 +181,20 @@ public struct PushInfo: Equatable, Sendable {
         }
     }
 }
+
+/// How notifications are grouped in Notification Center: one thread per bot,
+/// or per bot and message group when the sender sets `group`.
+public enum NotificationThread {
+    /// `bot-<id>`, or `bot-<id>:<group>` for a message with a group.
+    public static func identifier(botID: String, group: String) -> String {
+        group.isEmpty ? "bot-\(botID)" : "bot-\(botID):\(group)"
+    }
+
+    /// The group in the thread id the gateway put in the push (`thread-id`,
+    /// `b<bot>:<group>`; just `b<bot>` without a group). The extension uses it
+    /// when it could not fetch the message to read the group from.
+    public static func group(fromAPNsThread thread: String, botID: String) -> String {
+        let prefix = "b\(botID):"
+        return thread.hasPrefix(prefix) ? String(thread.dropFirst(prefix.count)) : ""
+    }
+}

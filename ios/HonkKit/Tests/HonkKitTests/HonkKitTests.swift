@@ -173,6 +173,17 @@ func tempStore() throws -> LocalStore {
         #expect(PushInfo(userInfo: ["aps": [String: Any]()]) == nil)
     }
 
+    @Test func notificationThreads() {
+        #expect(NotificationThread.identifier(botID: "aZ3kQ9xT", group: "") == "bot-aZ3kQ9xT")
+        #expect(NotificationThread.identifier(botID: "aZ3kQ9xT", group: "prod") == "bot-aZ3kQ9xT:prod")
+        // The gateway's thread-id: b<bot>:<group>, or b<bot> without a group.
+        #expect(NotificationThread.group(fromAPNsThread: "baZ3kQ9xT:prod", botID: "aZ3kQ9xT") == "prod")
+        #expect(NotificationThread.group(fromAPNsThread: "baZ3kQ9xT:a:b", botID: "aZ3kQ9xT") == "a:b")
+        #expect(NotificationThread.group(fromAPNsThread: "baZ3kQ9xT", botID: "aZ3kQ9xT") == "")
+        #expect(NotificationThread.group(fromAPNsThread: "", botID: "aZ3kQ9xT") == "")
+        #expect(NotificationThread.group(fromAPNsThread: "bOther:prod", botID: "aZ3kQ9xT") == "")
+    }
+
     @Test func avatar() {
         #expect(Avatar("preset:box:#1c1c1e") == .preset(icon: "box", color: "#1c1c1e"))
         #expect(Avatar("https://e.com/a.png") == .image(URL(string: "https://e.com/a.png")!))

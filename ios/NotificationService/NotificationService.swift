@@ -69,7 +69,11 @@ final class NotificationService: UNNotificationServiceExtension {
             if #available(iOS 15.0, *) { content.interruptionLevel = .passive }
         }
         content.badge = NSNumber(value: (try? store.unreadTotal()) ?? 0)
-        content.threadIdentifier = "bot-\(info.botID)"
+        // One thread per bot, and per message group when the message has one.
+        // The group comes from the fetched message; the push's own thread id
+        // (b<bot>:<group>) says it when the fetch failed. Read it before replacing it.
+        let group = message?.group ?? NotificationThread.group(fromAPNsThread: content.threadIdentifier, botID: info.botID)
+        content.threadIdentifier = NotificationThread.identifier(botID: info.botID, group: group)
         ChangeSignal.post()
 
         // The avatar: the message's own icon, else the bot's.
