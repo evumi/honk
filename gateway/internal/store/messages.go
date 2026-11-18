@@ -32,6 +32,10 @@ type Message struct {
 	URL        string `json:"url,omitempty"`
 	Copy       string `json:"copy,omitempty"`
 	Icon       string `json:"icon,omitempty"`
+	OpenMode   string `json:"open,omitempty"`       // "url": tapping the notification opens URL
+	Image      string `json:"image,omitempty"`      // https image for the notification and the bubble
+	ParseMode  string `json:"parse_mode,omitempty"` // "Markdown": Body is Markdown
+	Silent     bool   `json:"silent,omitempty"`     // stored and counted, but no banner
 	CollapseID string `json:"id,omitempty"`
 	CreatedAt  int64  `json:"date"`
 	ExpiresAt  int64  `json:"-"`
@@ -39,13 +43,13 @@ type Message struct {
 
 // msgSelect reads messages with their bot's public id.
 const msgSelect = `SELECT m.id, b.public_id, m.bot_id, m.owner_id, m.kind, m.target_id, m.title, m.body, m.html, m.data, m.level,
-	m.group_key, m.url, m.copy_text, m.icon, m.collapse_id, m.created_at, m.expires_at
+	m.group_key, m.url, m.copy_text, m.icon, m.open_mode, m.image, m.parse_mode, m.silent, m.collapse_id, m.created_at, m.expires_at
 	FROM messages m JOIN bots b ON b.id = m.bot_id`
 
 func scanMessage(row interface{ Scan(...any) error }) (Message, error) {
 	var m Message
 	err := row.Scan(&m.ID, &m.BotID, &m.BotKey, &m.OwnerID, &m.Kind, &m.TargetID, &m.Title, &m.Body, &m.HTML, &m.Data,
-		&m.Level, &m.Group, &m.URL, &m.Copy, &m.Icon, &m.CollapseID, &m.CreatedAt, &m.ExpiresAt)
+		&m.Level, &m.Group, &m.URL, &m.Copy, &m.Icon, &m.OpenMode, &m.Image, &m.ParseMode, &m.Silent, &m.CollapseID, &m.CreatedAt, &m.ExpiresAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return m, ErrNotFound
 	}
@@ -54,10 +58,10 @@ func scanMessage(row interface{ Scan(...any) error }) (Message, error) {
 
 func insert(ctx context.Context, tx *sql.Tx, m *Message) error {
 	res, err := tx.ExecContext(ctx, `
-		INSERT INTO messages (bot_id, owner_id, device_id, kind, target_id, title, body, html, data, level, group_key, url, copy_text, icon, collapse_id, created_at, expires_at)
-		VALUES (?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		INSERT INTO messages (bot_id, owner_id, device_id, kind, target_id, title, body, html, data, level, group_key, url, copy_text, icon, open_mode, image, parse_mode, silent, collapse_id, created_at, expires_at)
+		VALUES (?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		m.BotKey, m.OwnerID, m.Kind, m.TargetID, m.Title, m.Body, m.HTML, m.Data, m.Level, m.Group, m.URL, m.Copy, m.Icon,
-		m.CollapseID, m.CreatedAt, m.ExpiresAt)
+		m.OpenMode, m.Image, m.ParseMode, m.Silent, m.CollapseID, m.CreatedAt, m.ExpiresAt)
 	if err != nil {
 		return err
 	}

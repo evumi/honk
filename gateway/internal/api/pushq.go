@@ -145,6 +145,11 @@ func (s *Server) runPush(j pushJob) {
 	defer cancel()
 	d, n := j.dev, j.n
 	route := s.route(n.Platform)
+	if !n.Expires.IsZero() && !time.Now().Before(n.Expires) {
+		// The message's ttl ran out (waiting in the queue or between retries).
+		s.m.pushDropped.Inc("expired")
+		return
+	}
 	if j.attempt > 0 {
 		want, err := s.store.PushStillWanted(ctx, d.ID, d.PushToken, n.MessageID)
 		if err == nil && !want {

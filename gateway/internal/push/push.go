@@ -61,10 +61,34 @@ type Notification struct {
 	// generic banner until the extension fetches the message, FCM carries only
 	// ids. A relayed push is bare when it arrived without them.
 	Bare bool
+	// Quiet sends a message as a silent push: the device stores it without a
+	// banner.
+	Quiet bool
+	// Expires is when APNs/FCM may stop trying to reach an offline device
+	// (the message's ttl); zero means a day from the push. It is a time, not
+	// a duration, so a retried push does not outlive its message.
+	Expires time.Time
+}
+
+// pushTTL is how long APNs/FCM keep the push: until Expires, a day when it
+// is not set, and at most FCM's four weeks.
+func (n Notification) pushTTL() time.Duration {
+	const maxTTL = 28 * 24 * time.Hour
+	if n.Expires.IsZero() {
+		return 24 * time.Hour
+	}
+	d := time.Until(n.Expires)
+	if d < time.Second {
+		d = time.Second
+	}
+	if d > maxTTL {
+		d = maxTTL
+	}
+	return d
 }
 
 // Silent reports whether the push should not show anything by itself.
-func (n Notification) Silent() bool { return n.Kind != "message" }
+func (n Notification) Silent() bool { return n.Kind != "message" || n.Quiet }
 
 // Pusher sends one notification.
 type Pusher interface {

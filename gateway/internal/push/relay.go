@@ -235,12 +235,20 @@ type relayRequest struct {
 	Title       string `json:"title,omitempty"`
 	Body        string `json:"body,omitempty"`
 	Group       string `json:"group,omitempty"`
+	// Silent sends a message as a silent push (no banner); TTL is how many
+	// seconds APNs/FCM may keep the push for an offline device (0: their default).
+	Silent bool `json:"silent,omitempty"`
+	TTL    int  `json:"ttl,omitempty"`
 }
 
 func (r *Relay) request(n Notification) relayRequest {
 	q := relayRequest{
 		Platform: n.Platform, Token: n.Token, Kind: n.Kind, MsgID: n.MessageID, TargetID: n.TargetID,
 		BotID: n.BotID, Level: n.Level, CollapseKey: CollapseKeyFor(n.BotID, n.CollapseID),
+	}
+	q.Silent = n.Quiet
+	if !n.Expires.IsZero() {
+		q.TTL = int(n.pushTTL() / time.Second)
 	}
 	if !r.Bare && !n.Silent() {
 		q.BotName = n.BotName

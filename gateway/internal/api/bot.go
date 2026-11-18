@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
@@ -68,6 +69,15 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request, bot store.B
 		s.fail(w, r, err)
 		return
 	}
+	var ttl time.Duration
+	if m.OpenMode, m.Image, m.ParseMode, m.Silent, ttl, err = sendOptions(p, s.opts.MessageTTL); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	if m.OpenMode == "url" && m.URL == "" {
+		s.fail(w, r, badRequest("open=url needs a url"))
+		return
+	}
 	if err := checkMessage(m); err != nil {
 		s.fail(w, r, err)
 		return
@@ -90,15 +100,27 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request, bot store.B
 		})
 		return
 	}
-	m, err = s.store.AddMessage(r.Context(), bot, m, s.opts.MessageTTL)
+	// The push expires with an explicit ttl; otherwise APNs/FCM keep their default.
+	var pushExpires time.Time
+	if ttl > 0 {
+		pushExpires = time.Now().Add(ttl)
+	} else {
+		ttl = s.opts.MessageTTL
+	}
+	m, err = s.store.AddMessage(r.Context(), bot, m, ttl)
 	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
+	banner := m.Body
+	if m.ParseMode == "Markdown" {
+		banner = StripMarkdown(m.Body)
+	}
 	s.m.messages.Inc(store.KindMessage)
 	s.notifyOwner(r.Context(), bot.OwnerID, push.Notification{
 		Kind: store.KindMessage, MessageID: m.ID, BotID: bot.ID, BotName: bot.Name,
-		Title: m.Title, Body: m.Body, Group: m.Group, Level: m.Level, CollapseID: m.CollapseID,
+		Title: m.Title, Body: banner, Group: m.Group, Level: m.Level, CollapseID: m.CollapseID,
+		Quiet: m.Silent, Expires: pushExpires,
 	})
 	ok(w, m)
 }
@@ -147,6 +169,47 @@ func (s *Server) changeMessage(w http.ResponseWriter, r *http.Request, bot store
 		Kind: kind, MessageID: m.ID, TargetID: m.TargetID, BotID: bot.ID, BotName: bot.Name, CollapseID: m.CollapseID,
 	})
 	ok(w, true)
+}
+
+// minTTL is the shortest ttl a sender can ask for, in seconds.
+const minTTL = 60
+
+// sendOptions reads open, image, parse_mode, silent and ttl. A zero ttl means
+// the gateway default (HONK_MESSAGE_TTL).
+func sendOptions(p url.Values, maxTTL time.Duration) (open, image, parseMode string, silent bool, ttl time.Duration, err error) {
+	switch strings.ToLower(p.Get("open")) {
+	case "", "chat":
+	case "url":
+		open = "url"
+	default:
+		return "", "", "", false, 0, badRequest("open must be chat or url")
+	}
+	image = p.Get("image")
+	if err = checkURL("image", image, true); err != nil {
+		return
+	}
+	switch strings.ToLower(p.Get("parse_mode")) {
+	case "":
+	case "markdown":
+		parseMode = "Markdown"
+	default:
+		return "", "", "", false, 0, badRequest("parse_mode must be Markdown")
+	}
+	switch strings.ToLower(p.Get("silent")) {
+	case "", "false", "0":
+	case "true", "1":
+		silent = true
+	default:
+		return "", "", "", false, 0, badRequest("silent must be true or false")
+	}
+	if v := p.Get("ttl"); v != "" {
+		secs, perr := strconv.ParseInt(v, 10, 64)
+		if perr != nil || secs < minTTL || time.Duration(secs)*time.Second > maxTTL {
+			return "", "", "", false, 0, badRequest(fmt.Sprintf("ttl must be between %d and %d seconds", minTTL, int64(maxTTL/time.Second)))
+		}
+		ttl = time.Duration(secs) * time.Second
+	}
+	return
 }
 
 func level(v, def string) (string, error) {

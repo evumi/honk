@@ -288,3 +288,66 @@ func TestRelaysAndMeta(t *testing.T) {
 		t.Errorf("block missing: %v", err)
 	}
 }
+
+// A database from before the send options gets their columns on upgrade, with
+// defaults, and its queued messages keep working.
+func TestMigrateSendOptions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "honk.db")
+	db, err := sql.Open("sqlite", "file:"+path+"?_pragma=foreign_keys(1)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{
+		schemaV1,
+		"PRAGMA user_version = 1",
+		`INSERT INTO devices (id, secret_hash, platform, push_token, created_at, updated_at) VALUES ('dev', x'00', 'ios', 'tok', 1, 1)`,
+		`INSERT INTO bots (device_id, token_hash, name, created_at, updated_at) VALUES ('dev', x'01', 'a', 1, 1)`,
+		`INSERT INTO messages (bot_id, device_id, kind, body, created_at, expires_at) VALUES (1, 'dev', 'message', 'hi', 1, 9999999999999)`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	if _, err := db.Exec(`UPDATE devices SET secret_hash = ?`, hash("dev-secret")); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	dev, err := s.DeviceBySecret(ctx, "dev-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	items, err := s.Sync(ctx, dev.OwnerID, 0, 10)
+	if err != nil || len(items) != 1 || items[0].Body != "hi" || items[0].OpenMode != "" || items[0].Image != "" || items[0].Silent {
+		t.Fatalf("queued message = %+v, %v", items, err)
+	}
+	var v int
+	s.db.QueryRow("PRAGMA user_version").Scan(&v)
+	if v != 5 {
+		t.Errorf("user_version = %d, want 5", v)
+	}
+}
+
+func TestSendOptionsStored(t *testing.T) {
+	s, _ := open(t)
+	ctx := context.Background()
+	d, _, _ := s.CreateDevice(ctx, "ios", "tok", "")
+	b, _, _ := s.CreateBot(ctx, d, "部署", "", "active")
+	m, err := s.AddMessage(ctx, b, Message{Body: "x", OpenMode: "url", Image: "https://a/i.png", ParseMode: "Markdown", Silent: true}, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetMessage(ctx, d.OwnerID, m.ID)
+	if err != nil || got.OpenMode != "url" || got.Image != "https://a/i.png" || got.ParseMode != "Markdown" || !got.Silent {
+		t.Errorf("got = %+v, %v", got, err)
+	}
+	if got.ExpiresAt-got.CreatedAt != time.Minute.Milliseconds() {
+		t.Errorf("expires %d after creation", got.ExpiresAt-got.CreatedAt)
+	}
+}

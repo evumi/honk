@@ -95,6 +95,53 @@ func TestRelayChainFullContent(t *testing.T) {
 	}
 }
 
+func TestRelayCarriesSilentAndExpiry(t *testing.T) {
+	for _, bare := range []bool{true, false} {
+		r := newRelayEnv(t, bare, Options{})
+		r.send(map[string]any{"body": "x", "silent": true, "ttl": 600})
+		n := r.apns.last(t)
+		if !n.Quiet || !n.Silent() || n.Kind != "message" || n.Expires.IsZero() ||
+			time.Until(n.Expires) < 9*time.Minute || time.Until(n.Expires) > 10*time.Minute {
+			t.Errorf("bare=%v: relayed silent push = %+v", bare, n)
+		}
+		// Without the options the relayed push is an ordinary one with the default expiry.
+		r.send(map[string]any{"body": "y"})
+		if n := r.apns.last(t); n.Quiet || !n.Expires.IsZero() {
+			t.Errorf("bare=%v: plain relayed push = %+v", bare, n)
+		}
+	}
+}
+
+func TestRelayRejectsBadExpiryAndSilentEdits(t *testing.T) {
+	r := newRelayEnv(t, true, Options{})
+	r.send(map[string]any{"body": "x"}) // registers the home gateway
+	key, _ := r.home.s.store.GetMeta(context.Background(), "relay_key")
+	for name, body := range map[string]string{
+		"negative ttl": `{"platform":"ios","token":"t","kind":"message","msg_id":1,"bot_id":"aZ3kQ9xT","ttl":-1}`,
+		"huge ttl":     `{"platform":"ios","token":"t","kind":"message","msg_id":1,"bot_id":"aZ3kQ9xT","ttl":99999999}`,
+		"silent edit":  `{"platform":"ios","token":"t","kind":"edit","msg_id":1,"bot_id":"aZ3kQ9xT","silent":true}`,
+	} {
+		req, _ := http.NewRequest("POST", r.relay.srv.URL+"/v1/relay/push", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+key)
+		req.Header.Set("Content-Type", "application/json")
+		if got := r.relay.send(req); got.OK || got.ErrorCode != 400 {
+			t.Errorf("%s: ok=%v code=%d %s", name, got.OK, got.ErrorCode, got.Description)
+		}
+	}
+}
+
+func TestExpiredPushIsDropped(t *testing.T) {
+	e := setup(t)
+	_, token := e.register("ios")
+	before := len(e.pusher.sent)
+	e.s.runPush(pushJob{dev: store.Device{ID: "d", Platform: "ios", PushToken: "t"}, n: push.Notification{
+		Platform: "ios", Kind: "message", MessageID: 1, BotID: "aZ3kQ9xT", Expires: time.Now().Add(-time.Second)}})
+	if len(e.pusher.sent) != before {
+		t.Errorf("an expired push was sent: %+v", e.pusher.sent)
+	}
+	_ = token
+}
+
 func TestRelayEditAndDeleteAreSilent(t *testing.T) {
 	r := newRelayEnv(t, false, Options{})
 	r.send(map[string]any{"body": "x", "id": "k"})

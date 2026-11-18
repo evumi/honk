@@ -70,6 +70,7 @@ func (s *Store) migrate(ctx context.Context) error {
 		migrateV2,
 		migrateV3,
 		migrateV4,
+		migrateSendOptions,
 	}
 	for ; v < len(steps); v++ {
 		if err := s.step(ctx, v+1, steps[v]); err != nil {
@@ -93,6 +94,22 @@ func (s *Store) step(ctx context.Context, version int, f func(context.Context, *
 		return err
 	}
 	return tx.Commit()
+}
+
+// migrateSendOptions (v3) adds the sendMessage options open, image,
+// parse_mode and silent to the queue.
+func migrateSendOptions(ctx context.Context, tx *sql.Tx) error {
+	for _, q := range []string{
+		`ALTER TABLE messages ADD COLUMN open_mode TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE messages ADD COLUMN image TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE messages ADD COLUMN parse_mode TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE messages ADD COLUMN silent INTEGER NOT NULL DEFAULT 0`,
+	} {
+		if _, err := tx.ExecContext(ctx, q); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // migrateV2 gives every bot a short random public id. The integer row id stays

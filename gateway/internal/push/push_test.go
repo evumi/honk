@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestAPNsPayload(t *testing.T) {
@@ -158,5 +159,23 @@ func TestBarePayloadsStayUnder4KB(t *testing.T) {
 		if len(fcm) > 4096 {
 			t.Errorf("bare=%v: FCM message %d bytes", bare, len(fcm))
 		}
+	}
+}
+
+func TestPushTTLAndQuiet(t *testing.T) {
+	raw, _ := apnsPayload(Notification{Kind: "message", MessageID: 7, BotID: "Kx3", Body: "x", Quiet: true})
+	if !strings.Contains(string(raw), `"content-available":1`) || strings.Contains(string(raw), "alert") || !strings.Contains(string(raw), `"kind":"message"`) {
+		t.Errorf("quiet payload = %s", raw)
+	}
+	m := fcmMessage(Notification{Kind: "message", MessageID: 7, BotID: "Kx3", Body: "x", Quiet: true, Expires: time.Now().Add(10 * time.Minute)})["message"].(map[string]any)
+	data := m["data"].(map[string]string)
+	if _, has := data["body"]; has || data["silent"] != "1" || m["android"].(map[string]any)["ttl"] != "599s" && m["android"].(map[string]any)["ttl"] != "600s" {
+		t.Errorf("quiet fcm = %+v", m)
+	}
+	if got := (Notification{}).pushTTL(); got != 24*time.Hour {
+		t.Errorf("default ttl = %v", got)
+	}
+	if got := (Notification{Expires: time.Now().Add(90 * 24 * time.Hour)}).pushTTL(); got != 28*24*time.Hour {
+		t.Errorf("capped ttl = %v", got)
 	}
 }

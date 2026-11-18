@@ -97,7 +97,7 @@ func (a *APNs) Push(ctx context.Context, n Notification) error {
 		DeviceToken: n.Token,
 		Topic:       a.topic,
 		Payload:     payload,
-		Expiration:  time.Now().Add(24 * time.Hour),
+		Expiration:  time.Now().Add(n.pushTTL()),
 		Priority:    apns2.PriorityHigh,
 		PushType:    apns2.PushTypeAlert,
 		CollapseID:  n.key(),
