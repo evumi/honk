@@ -36,7 +36,7 @@ docker compose logs honk      # the log says how each platform pushes
 curl http://127.0.0.1:8080/v1/info
 ```
 
-`/healthz` answers `ok`; the image has a health check. The repository's `gateway/docker-compose.yml` is the variant for a gateway that has its own APNs and FCM credentials (section 6).
+`/healthz` answers `ok`; the image has a health check. `/` is the gateway's landing page and `/docs` its API docs, with your address in the examples; `HONK_SITE=false` turns both off. The repository's `gateway/docker-compose.yml` is the variant for a gateway that has its own APNs and FCM credentials (section 6).
 
 ## 3. Reverse proxy and TLS
 

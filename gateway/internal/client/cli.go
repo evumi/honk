@@ -37,6 +37,7 @@ Usage:
   honk delete [flags]                 delete a message (--id or --message-id)
   honk me                             show the bot behind the token
   honk preview card.html [flags]      send a card; with --watch, again on every save
+  honk version                        print the version
 
 Connection (all commands except serve):
   HONK_URL, HONK_TOKEN                gateway address and bot token; or --server, --token;

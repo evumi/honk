@@ -36,7 +36,7 @@ docker compose logs honk      # 日志里写明每个平台怎么推送
 curl http://127.0.0.1:8080/v1/info
 ```
 
-`/healthz` 返回 `ok`，镜像带健康检查。仓库里的 `gateway/docker-compose.yml` 是给自己有 APNs 和 FCM 凭据的网关用的（第 6 节）。
+`/healthz` 返回 `ok`，镜像带健康检查。`/` 是网关首页，`/docs` 是 API 文档，示例里填的就是你的地址；`HONK_SITE=false` 关掉这两个页面。仓库里的 `gateway/docker-compose.yml` 是给自己有 APNs 和 FCM 凭据的网关用的（第 6 节）。
 
 ## 3. 反向代理和 TLS
 

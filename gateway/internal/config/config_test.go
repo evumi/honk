@@ -12,11 +12,12 @@ func TestLoadOps(t *testing.T) {
 	t.Setenv("HONK_REGISTER_KEY", "k")
 	t.Setenv("HONK_LOG_FORMAT", "json")
 	t.Setenv("HONK_LOG_LEVEL", "debug")
+	t.Setenv("HONK_SITE", "false")
 	c, err := Load()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.PushQueue != 8 || c.PushWorkers != 2 || c.MetricsAddr != "127.0.0.1:9100" || c.RegisterKey != "k" || c.LogFormat != "json" || c.LogLevel != "debug" {
+	if c.PushQueue != 8 || c.PushWorkers != 2 || c.MetricsAddr != "127.0.0.1:9100" || c.RegisterKey != "k" || c.LogFormat != "json" || c.LogLevel != "debug" || c.Site {
 		t.Errorf("config = %+v", c)
 	}
 }
@@ -26,10 +27,10 @@ func TestLoadDefaultsAndErrors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.PushQueue != 1024 || c.PushWorkers != 16 || c.MetricsAddr != "" || c.LogFormat != "text" || c.LogLevel != "info" || c.DeviceGC != 2160*time.Hour {
+	if c.PushQueue != 1024 || c.PushWorkers != 16 || c.MetricsAddr != "" || c.LogFormat != "text" || c.LogLevel != "info" || c.DeviceGC != 2160*time.Hour || !c.Site || c.SendRate != 10 || c.SendBurst != 60 {
 		t.Errorf("defaults = %+v", c)
 	}
-	for k, v := range map[string]string{"HONK_PUSH_QUEUE": "0", "HONK_PUSH_WORKERS": "x", "HONK_LOG_FORMAT": "xml", "HONK_LOG_LEVEL": "loud", "HONK_DEVICE_GC": "-1h"} {
+	for k, v := range map[string]string{"HONK_PUSH_QUEUE": "0", "HONK_PUSH_WORKERS": "x", "HONK_LOG_FORMAT": "xml", "HONK_LOG_LEVEL": "loud", "HONK_DEVICE_GC": "-1h", "HONK_SITE": "maybe"} {
 		t.Run(k, func(t *testing.T) {
 			t.Setenv(k, v)
 			if _, err := Load(); err == nil {

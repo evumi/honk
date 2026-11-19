@@ -1,0 +1,430 @@
+<!doctype html>
+<html lang="zh-CN" data-lang="zh" data-title-zh="Honk · 以机器人为单位的推送网关" data-title-en="Honk · A push gateway built around bots">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Honk · 以机器人为单位的推送网关</title>
+<meta name="description" content="Honk: one HTTP request becomes a push on your phone. Each bot is its own channel, messages can carry Telegram-style HTML cards, and content can be end-to-end encrypted.">
+<meta name="theme-color" content="#fbfaf9" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1d1d1c" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preload" href="/assets/fonts/onest-latin-wght.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/site.css">
+<script src="/assets/site.js"></script>
+<script src="/assets/landing.js" defer></script>
+</head>
+<body>
+<svg class="sprite" aria-hidden="true">
+  <symbol id="logo" viewBox="0 0 100 100"><rect width="100" height="100" rx="22" fill="#1c1c1e"/><rect x="27" y="27" width="12" height="48" rx="6" fill="#fff"/><rect x="57" y="27" width="12" height="48" rx="6" fill="#fff"/><rect x="27" y="45" width="42" height="11" rx="5.5" fill="#fff"/><circle cx="74" cy="27" r="11" fill="#ff5a36" stroke="#1c1c1e" stroke-width="4"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-terminal" viewBox="0 0 24 24"><path d="m4 17 6-6-6-6"/><path d="M12 19h8"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M9 17H7A5 5 0 0 1 7 7h2"/><path d="M15 7h2a5 5 0 1 1 0 10h-2"/><path d="M8 12h8"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2m-7.07-17.07 1.41 1.41m11.32 11.32 1.41 1.41M2 12h2m16 0h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
+  <symbol id="i-lang" viewBox="0 0 24 24"><path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/></symbol>
+  <symbol id="i-github" viewBox="0 0 24 24"><path d="M12 .5C5.65.5.5 5.65.5 12a11.5 11.5 0 0 0 7.86 10.92c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.52-1.33-1.28-1.69-1.28-1.69-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.19 1.76 1.19 1.03 1.76 2.69 1.25 3.35.96.1-.75.4-1.25.73-1.54-2.55-.29-5.24-1.28-5.24-5.68 0-1.25.45-2.28 1.19-3.08-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.8 1.19 1.83 1.19 3.08 0 4.41-2.69 5.39-5.25 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5Z"/></symbol>
+  <symbol id="i-apple" viewBox="0 0 24 24"><path d="M16.37 12.6c-.02-2.2 1.8-3.26 1.88-3.31-1.03-1.5-2.62-1.7-3.18-1.73-1.35-.14-2.64.8-3.33.8-.69 0-1.74-.78-2.86-.76-1.47.02-2.83.86-3.59 2.17-1.53 2.66-.39 6.6 1.1 8.76.73 1.06 1.6 2.24 2.73 2.2 1.1-.04 1.51-.71 2.84-.71 1.32 0 1.7.71 2.86.69 1.18-.02 1.93-1.07 2.65-2.13.84-1.22 1.18-2.41 1.2-2.47-.03-.01-2.3-.88-2.3-3.51ZM14.2 6.13c.6-.73 1.01-1.75.9-2.76-.87.04-1.92.58-2.54 1.31-.56.64-1.05 1.67-.92 2.66.97.08 1.96-.49 2.56-1.21Z"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M5 3.5v17a1 1 0 0 0 1.5.86l14.2-8.5a1 1 0 0 0 0-1.72L6.5 2.64A1 1 0 0 0 5 3.5Z"/></symbol>
+  <symbol id="i-server" viewBox="0 0 24 24"><rect width="20" height="8" x="2" y="2" rx="2"/><rect width="20" height="8" x="2" y="14" rx="2"/><path d="M6 6h.01M6 18h.01"/></symbol>
+  <symbol id="i-relay" viewBox="0 0 24 24"><path d="M4.9 16.1C1 12.2 1 5.8 4.9 1.9"/><path d="M7.8 4.7a6.14 6.14 0 0 0-.8 7.5"/><circle cx="12" cy="9" r="2"/><path d="M16.2 4.8c2 2 2.26 5.11.8 7.47"/><path d="M19.1 1.9a9.96 9.96 0 0 1 0 14.1"/><path d="M9.5 18h5"/><path d="m8 22 4-11 4 11"/></symbol>
+  <symbol id="i-activity" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
+  <symbol id="i-db" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></symbol>
+  <symbol id="i-branch" viewBox="0 0 24 24"><path d="M6 3v12"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></symbol>
+  <symbol id="i-rocket" viewBox="0 0 24 24"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4M12 17h.01"/></symbol>
+</svg>
+<a class="skip" href="#top"><span class="zh">跳到正文</span><span class="en">Skip to content</span></a>
+
+<a class="announce" href="#features">
+  <b><span class="zh">新</span><span class="en">New</span></b>：<span class="zh">卡片脚本、卡片请求与端到端加密已上线</span><span class="en">card scripts, widget queries and end-to-end encryption</span><span class="arr" aria-hidden="true">→</span>
+</a>
+
+<div class="nav-shell" data-autohide>
+  <nav class="nav" aria-label="Honk">
+    <a class="brand" href="#top"><svg class="logo" aria-hidden="true"><use href="#logo"/></svg>Honk<small>Gateway</small></a>
+    <div class="nav-links">
+      <a href="#features"><span class="zh">功能</span><span class="en">Features</span></a>
+      <a href="#connect"><span class="zh">接入</span><span class="en">Connect</span></a>
+      <a href="#journey"><span class="zh">投递</span><span class="en">Delivery</span></a>
+      <a href="#selfhost"><span class="zh">自托管</span><span class="en">Self-host</span></a>
+      <a href="/docs"><span class="zh">API 文档</span><span class="en">API docs</span></a>
+    </div>
+    <div class="nav-cta">
+      <button type="button" class="icon-btn lang-btn" aria-label="切换语言 / Switch language"><svg class="i" aria-hidden="true"><use href="#i-lang"/></svg><span class="zh">EN</span><span class="en">中文</span></button>
+      <button type="button" class="icon-btn theme-btn" aria-label="切换主题 / Toggle theme"><svg class="i sun" aria-hidden="true"><use href="#i-sun"/></svg><svg class="i moon" aria-hidden="true"><use href="#i-moon"/></svg></button>
+      <a class="btn btn-line nav-docs" href="/docs"><span class="zh">文档</span><span class="en">Docs</span></a>
+      <a class="btn btn-dark" href="https://apps.apple.com/app/id6835855786" rel="noopener"><span class="zh">下载 App</span><span class="en">Get the app</span></a>
+    </div>
+  </nav>
+</div>
+
+<main id="top">
+<div class="frame">
+  <section class="hero">
+    <div class="hero-dots l" aria-hidden="true"></div>
+    <div class="hero-dots r" aria-hidden="true"></div>
+    <div class="wrap hero-inner">
+      <span class="eyebrow"><i data-info="version">api 2</i><span class="zh">以机器人为单位的推送网关</span><span class="en">A push gateway built around bots</span></span>
+      <h1>
+        <span class="zh"><span class="word">一个 HTTP 请求，</span><br><span class="word d1">推到你的</span> <span class="word d2 hl">手机上</span></span>
+        <span class="en"><span class="word">One HTTP request,</span><br><span class="word d1">a push on</span> <span class="word d2 hl">your phone</span></span>
+      </h1>
+      <p class="hero-sub">
+        <span class="zh">每个机器人都是一个独立频道。消息可以带一张 Telegram 格式的 HTML 卡片，内容可以端到端加密。iOS 走 APNs，Android 走 FCM，网关是一个 Go 二进制加一个 SQLite 文件。</span>
+        <span class="en">Each bot is its own channel. A message can carry a Telegram-style HTML card, and its content can be end-to-end encrypted. iOS through APNs, Android through FCM; the gateway is one Go binary and one SQLite file.</span>
+      </p>
+      <div class="hero-ctas">
+        <a class="btn btn-dark" href="/docs#quickstart"><span class="zh">发送第一条推送</span><span class="en">Send your first push</span><svg class="i" aria-hidden="true"><use href="#i-arrow"/></svg></a>
+        <a class="btn btn-accent" href="#connect"><svg class="i" aria-hidden="true"><use href="#i-link"/></svg><span class="zh">接入已有工具</span><span class="en">Connect your tools</span></a>
+      </div>
+
+      <div class="console" id="console">
+        <div class="console-card">
+          <div class="tabs" role="tablist" aria-label="Demo">
+            <button type="button" class="tab" role="tab" aria-selected="true"><svg class="i" aria-hidden="true"><use href="#i-terminal"/></svg>curl</button>
+            <button type="button" class="tab" role="tab" aria-selected="false" tabindex="-1"><svg class="i" aria-hidden="true"><use href="#i-terminal"/></svg>honk CLI</button>
+            <button type="button" class="tab" role="tab" aria-selected="false" tabindex="-1"><svg class="i" aria-hidden="true"><use href="#i-terminal"/></svg>Alertmanager</button>
+          </div>
+          <div class="query">
+            <span class="prompt" aria-hidden="true">$</span>
+            <div class="query-text" aria-live="polite">curl $HONK/bot$TOKEN/sendMessage -d title=备份 -d body="夜间备份完成，共 12.4 GB"</div>
+            <button type="button" class="run" aria-label="Run"><svg class="i" aria-hidden="true"><use href="#i-arrow"/></svg></button>
+          </div>
+          <!-- Every answer sits in the same grid cell, so the card keeps the height of the tallest. -->
+          <div class="answers">
+            <div class="answer show">
+              <div class="notif">
+                <span class="av c-blue"><svg class="i" aria-hidden="true"><use href="#i-db"/></svg></span>
+                <div class="min0">
+                  <div class="notif-top"><b><span class="zh">备份机器人</span><span class="en">Backups</span></b><time><span class="zh">现在</span><span class="en">now</span></time></div>
+                  <div class="notif-title"><span class="zh">备份</span><span class="en">Backup</span></div>
+                  <div class="notif-body"><span class="zh">夜间备份完成，共 12.4 GB</span><span class="en">nightly backup finished, 12.4 GB</span></div>
+                </div>
+              </div>
+              <div class="meta"><span class="badge-ok"><svg class="i" aria-hidden="true"><use href="#i-check"/></svg>200 OK</span><span>message_id <b>1042</b></span><span>level <b>active</b></span></div>
+            </div>
+            <div class="answer" aria-hidden="true">
+              <div class="notif">
+                <span class="av c-green"><svg class="i" aria-hidden="true"><use href="#i-rocket"/></svg></span>
+                <div class="min0">
+                  <div class="notif-top"><b><span class="zh">部署</span><span class="en">Deploys</span></b><time><span class="zh">现在</span><span class="en">now</span></time></div>
+                  <div class="notif-title"><span class="zh">部署</span><span class="en">Deploy</span></div>
+                  <div class="notif-body"><span class="zh">api v1.8.2 已上线 · 卡片 2.1 KB</span><span class="en">api v1.8.2 is live · card 2.1 KB</span></div>
+                </div>
+              </div>
+              <div class="meta"><span class="badge-ok"><svg class="i" aria-hidden="true"><use href="#i-check"/></svg>200 OK</span><span>id <b>deploy-api</b></span><span><span class="zh">同 id 原地替换</span><span class="en">same id replaces</span></span></div>
+            </div>
+            <div class="answer" aria-hidden="true">
+              <div class="notif">
+                <span class="av c-red"><svg class="i" aria-hidden="true"><use href="#i-alert"/></svg></span>
+                <div class="min0">
+                  <div class="notif-top"><b><span class="zh">告警</span><span class="en">Alerts</span></b><time><span class="zh">现在</span><span class="en">now</span></time></div>
+                  <div class="notif-title">[FIRING:1] HighLatency</div>
+                  <div class="notif-body">p99 1.8s · api-gateway · critical</div>
+                </div>
+              </div>
+              <div class="meta"><span class="badge-ok"><svg class="i" aria-hidden="true"><use href="#i-check"/></svg>200 OK</span><span>level <b>timeSensitive</b></span><span><span class="zh">恢复后原地变为 resolved</span><span class="en">turns resolved in place</span></span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="rule"></div>
+  <section class="tight">
+    <div class="wrap">
+      <div class="proof">
+        <div class="proof-label"><span><span class="zh">把 webhook 地址填进去，<b>已有的工具</b>就能推送</span><span class="en">Paste the webhook URL and <b>the tools you already run</b> can push</span></span></div>
+        <div class="marquee">
+          <div class="marquee-track">
+            <span class="src"><em>Sl</em>Slack</span><span class="src"><em>Am</em>Alertmanager</span><span class="src"><em>Gf</em>Grafana</span><span class="src"><em>Gh</em>GitHub</span><span class="src"><em>GA</em>GitHub Actions</span><span class="src"><em>B</em>Bark</span><span class="src"><em>{}</em>JSON</span><span class="src"><em>$</em>curl</span><span class="src"><em>Py</em>Python</span><span class="src"><em>Js</em>Node</span><span class="src"><em>Go</em>Go</span>
+            <span class="src" aria-hidden="true"><em>Sl</em>Slack</span><span class="src" aria-hidden="true"><em>Am</em>Alertmanager</span><span class="src" aria-hidden="true"><em>Gf</em>Grafana</span><span class="src" aria-hidden="true"><em>Gh</em>GitHub</span><span class="src" aria-hidden="true"><em>GA</em>GitHub Actions</span><span class="src" aria-hidden="true"><em>B</em>Bark</span><span class="src" aria-hidden="true"><em>{}</em>JSON</span><span class="src" aria-hidden="true"><em>$</em>curl</span><span class="src" aria-hidden="true"><em>Py</em>Python</span><span class="src" aria-hidden="true"><em>Js</em>Node</span><span class="src" aria-hidden="true"><em>Go</em>Go</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="rule"></div>
+  <section id="connect">
+    <div class="wrap split">
+      <div class="reveal">
+        <h2 class="h2"><span class="zh">一个令牌，<br><span class="hl">任何能发 HTTP 的地方</span></span><span class="en">One token,<br><span class="hl">anything that speaks HTTP</span></span></h2>
+        <p class="lede">
+          <span class="zh">在 App 里新建机器人，拿到 <code>&lt;bot id&gt;:&lt;secret&gt;</code> 形式的令牌。接口沿用 Telegram Bot API 的命名和 <code>{"ok":…}</code> 信封，参数可以放在查询串、表单或 JSON 里。也可以直接用网关自带的 <code>honk</code> 命令行。</span>
+          <span class="en">Create a bot in the app and get its token, <code>&lt;bot id&gt;:&lt;secret&gt;</code>. The API keeps Telegram's Bot API naming and <code>{"ok":…}</code> envelope; parameters go in the query string, a form or JSON. Or use the <code>honk</code> command line that ships in the same binary.</span>
+        </p>
+        <div class="chips mt22">
+          <a class="chip" href="/docs#sendMessage">sendMessage</a><a class="chip" href="/docs#editMessageData">editMessageData</a><a class="chip" href="/docs#deleteMessage">deleteMessage</a><a class="chip" href="/docs#hooks">hook/&lt;kind&gt;</a><a class="chip" href="/docs#cli">honk send</a>
+        </div>
+      </div>
+      <div class="framed reveal">
+        <div class="term">
+          <div class="term-bar">
+            <div class="lights" aria-hidden="true"><i></i><i></i><i></i></div>
+            <div class="tabs" role="tablist" data-tabs aria-label="Examples">
+              <button type="button" class="tab" role="tab" aria-selected="true" aria-controls="ex-curl">curl</button>
+              <button type="button" class="tab" role="tab" aria-selected="false" tabindex="-1" aria-controls="ex-cli">CLI</button>
+              <button type="button" class="tab" role="tab" aria-selected="false" tabindex="-1" aria-controls="ex-gha">GitHub Actions</button>
+              <button type="button" class="tab" role="tab" aria-selected="false" tabindex="-1" aria-controls="ex-am">Alertmanager</button>
+            </div>
+          </div>
+<pre class="term-body" id="ex-curl" role="tabpanel"><span class="k">curl</span> <span class="origin">https://honk.example.com</span>/bot$HONK_TOKEN/sendMessage \
+  -H <span class="s">"Content-Type: application/json"</span> \
+  -d <span class="s">'{
+    "title": "Backup",
+    "body": "nightly backup finished, 12.4 GB",
+    "level": "passive",
+    "group": "backups"
+  }'</span>
+
+<span class="c"># {"ok":true,"result":{"message_id":1042,…}}</span></pre>
+<pre class="term-body" id="ex-cli" role="tabpanel" hidden><span class="k">curl</span> -fsSL <span class="origin">https://honk.example.com</span>/install.sh | <span class="k">sh</span>
+<span class="k">export</span> HONK_URL=<span class="s"><span class="origin">https://honk.example.com</span></span>
+<span class="k">export</span> HONK_TOKEN=<span class="s">aZ3kQ9xT:Gw2K7mx…</span>
+
+<span class="k">honk</span> send <span class="s">"backup finished"</span> --title Backup --level passive
+make 2>&amp;1 | tail -5 | <span class="k">honk</span> send --title <span class="s">"Build log"</span>
+<span class="k">honk</span> send <span class="s">"api v1.8.2 is live"</span> --html @card.html --id deploy-api
+<span class="k">honk</span> edit --id deploy-api --data <span class="s">'{"status":"rolled back"}'</span>
+<span class="k">honk</span> preview card.html --data data.json --watch</pre>
+<pre class="term-body" id="ex-gha" role="tabpanel" hidden><span class="c"># .github/workflows/ci.yml</span>
+- <span class="k">uses</span>: evumi/honk@v1
+  <span class="k">if</span>: failure()
+  <span class="k">with</span>:
+    url: <span class="s">${{ secrets.HONK_URL }}</span>
+    token: <span class="s">${{ secrets.HONK_TOKEN }}</span>
+    title: <span class="s">"${{ github.repository }}: build failed"</span>
+    id: <span class="s">ci-${{ github.workflow }}</span>
+    level: <span class="s">timeSensitive</span></pre>
+<pre class="term-body" id="ex-am" role="tabpanel" hidden><span class="c"># alertmanager.yml</span>
+<span class="k">receivers</span>:
+  - name: <span class="s">phone</span>
+    <span class="k">webhook_configs</span>:
+      - url: <span class="s"><span class="origin">https://honk.example.com</span>/bot&lt;token&gt;/hook/alertmanager</span>
+        send_resolved: <span class="s">true</span>
+
+<span class="c"># firing → timeSensitive; resolved replaces it in place</span></pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="rule"></div>
+  <section id="features">
+    <div class="wrap">
+      <div class="grid2">
+        <article class="pcard reveal">
+          <div class="card">
+            <div class="pcard-head"><h3><span class="zh">机器人即频道</span><span class="en">Bots are channels</span></h3><a class="btn btn-accent sm" href="/docs#bots"><span class="zh">了解</span><span class="en">Learn</span> <span class="arr">↗</span></a></div>
+            <p><span class="zh">每个机器人在手机上是一个独立会话，有自己的头像、默认级别和通知分组。静音、置顶、已读都在手机本地。</span><span class="en">Each bot is a chat of its own on the phone, with its own avatar, default level and notification group. Muting, pinning and read state stay on the phone.</span></p>
+            <div class="chips"><span class="chip">passive</span><span class="chip">active</span><span class="chip">timeSensitive</span><span class="chip">silent</span><span class="chip">Markdown</span></div>
+            <div class="viz">
+              <div class="chat-row"><span class="av c-red"><svg class="i" aria-hidden="true"><use href="#i-alert"/></svg></span><div class="min0"><b><span class="zh">告警</span><span class="en">Alerts</span></b><span>[FIRING:1] HighLatency · p99 1.8s</span></div><small>09:41<i>3</i></small></div>
+              <div class="chat-row"><span class="av c-green"><svg class="i" aria-hidden="true"><use href="#i-rocket"/></svg></span><div class="min0"><b><span class="zh">部署</span><span class="en">Deploys</span></b><span><span class="zh">api v1.8.2 已上线</span><span class="en">api v1.8.2 is live</span></span></div><small>09:12<i>1</i></small></div>
+              <div class="chat-row"><span class="av c-blue"><svg class="i" aria-hidden="true"><use href="#i-db"/></svg></span><div class="min0"><b><span class="zh">备份</span><span class="en">Backups</span></b><span><span class="zh">夜间备份完成，共 12.4 GB</span><span class="en">nightly backup finished, 12.4 GB</span></span></div><small>03:00<i class="mute">7</i></small></div>
+            </div>
+          </div>
+        </article>
+        <article class="pcard reveal">
+          <div class="card">
+            <div class="pcard-head"><h3><span class="zh">HTML 卡片</span><span class="en">HTML cards</span></h3><a class="btn btn-accent sm" href="/docs#cards"><span class="zh">了解</span><span class="en">Learn</span> <span class="arr">↗</span></a></div>
+            <p><span class="zh">消息可以带一张 Telegram HTML widget 格式的卡片：样式、内联 SVG、<code>{{key}}</code> 数据占位，以及在沙箱里运行的内联脚本。<code>editMessageData</code> 静默更新卡片。</span><span class="en">A message can carry a card in Telegram's HTML widget format: styles, inline SVG, <code>{{key}}</code> data placeholders and inline scripts run in a sandbox. <code>editMessageData</code> updates it silently.</span></p>
+            <div class="chips"><span class="chip">&lt;style&gt;</span><span class="chip">&lt;svg&gt;</span><span class="chip">&lt;script&gt;</span><span class="chip">{{data}}</span><span class="chip">request()</span></div>
+            <div class="viz">
+              <div class="mini-card">
+                <div class="mc-top"><b>api · v1.8.2</b><span class="pill">live</span></div>
+                <div class="mc-steps" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+                <div class="mc-foot"><span>build · test · canary · prod</span><span>4m 12s</span></div>
+                <div class="mc-btns"><span><span class="zh">查看日志</span><span class="en">Logs</span></span><span><span class="zh">回滚</span><span class="en">Roll back</span></span></div>
+              </div>
+            </div>
+          </div>
+        </article>
+        <article class="pcard reveal">
+          <div class="card">
+            <div class="pcard-head"><h3><span class="zh">端到端加密</span><span class="en">End-to-end encryption</span></h3><a class="btn btn-accent sm" href="/docs#e2e"><span class="zh">了解</span><span class="en">Learn</span> <span class="arr">↗</span></a></div>
+            <p><span class="zh">按机器人开启。发送方用 AES-256-GCM 封装内容，网关只存密文，推送里也没有标题、正文和机器人名，横幅在手机解密后生成。</span><span class="en">Turned on per bot. The sender seals the content with AES-256-GCM; the gateway stores only ciphertext, and pushes carry no title, body or bot name: the banner is built on the phone after decrypting.</span></p>
+            <div class="chips"><span class="chip">AES-256-GCM</span><span class="chip">AAD = bot id</span><span class="chip">honk send --key</span></div>
+            <div class="viz">
+              <div class="cipher"><b>ciphertext</b> = Qm9zS1x0aW5nIHRoZSBnYXRld2F5IGNhbid0IHJlYWQgdGhpcy4u…mR2KzYwM3JkZw</div>
+              <div class="sees">
+                <div><span><span class="zh">网关能看到</span><span class="en">The gateway sees</span></span><div class="tags"><code>level</code><code>group</code><code>id</code><code>ttl</code><code>silent</code></div></div>
+                <div class="no"><span><span class="zh">网关看不到</span><span class="en">It never sees</span></span><div class="tags"><code>title</code><code>body</code><code>html</code><code>data</code><code>url</code></div></div>
+              </div>
+            </div>
+          </div>
+        </article>
+        <article class="pcard reveal">
+          <div class="card">
+            <div class="pcard-head"><h3><span class="zh">多设备组</span><span class="en">Device groups</span></h3><a class="btn btn-accent sm" href="/docs#groups"><span class="zh">了解</span><span class="en">Learn</span> <span class="arr">↗</span></a></div>
+            <p><span class="zh">用 26 位配对码把几台手机连成一组，共享机器人和队列。每条消息推给组里每台设备，各自有游标和确认水位，慢的那台也不会丢消息。</span><span class="en">A 26-character pairing code joins phones into a group that shares bots and the queue. Every message goes to every device, each with its own cursor and ack watermark, so a slow phone never loses one.</span></p>
+            <div class="chips"><span class="chip">HKDF-SHA256</span><span class="chip">/v1/links</span><span class="chip">/v1/sync</span><span class="chip">/v1/ack</span></div>
+            <div class="viz">
+              <div class="dev-row"><span><i class="dot"></i>iPhone 17 Pro</span><span class="mono">acked 1042</span><div class="bar"><i class="w100"></i></div></div>
+              <div class="dev-row"><span><i class="dot"></i>iPad Air</span><span class="mono">acked 1039</span><div class="bar"><i class="w82"></i></div></div>
+              <div class="pair"><span><span class="zh">配对码</span><span class="en">Pairing code</span></span><b>7KQ2 M9XA P4TD …</b></div>
+            </div>
+          </div>
+        </article>
+      </div>
+      <div class="also">
+        <b><span class="zh">还有</span><span class="en">Also</span></b>
+        <span class="chip"><span class="zh">同 id 原地替换</span><span class="en">replace by id</span></span>
+        <span class="chip"><span class="zh">撤回消息</span><span class="en">delete messages</span></span>
+        <span class="chip"><span class="zh">通知图片</span><span class="en">notification images</span></span>
+        <span class="chip"><span class="zh">复制 / 打开链接按钮</span><span class="en">copy and open-link buttons</span></span>
+        <span class="chip">dry_run</span>
+        <span class="chip">setWebhook · getUpdates</span>
+        <span class="chip"><span class="zh">导出 / 导入</span><span class="en">export / import</span></span>
+        <span class="chip">Prometheus /metrics</span>
+      </div>
+    </div>
+  </section>
+
+  <div class="rule"></div>
+  <section id="journey">
+    <div class="wrap">
+      <div class="reveal section-head">
+        <h2 class="h2"><span class="zh">一条消息的旅程，<span class="hl">推送里只有横幅</span></span><span class="en">A message's journey: <span class="hl">the push carries only the banner</span></span></h2>
+        <p class="lede"><span class="zh">网关把消息放进短期队列，推送只带横幅文字和 <code>msg_id</code>。手机上的通知扩展再去拉完整消息（卡片在内），所以卡片不受 APNs/FCM 4 KB 载荷的限制。</span><span class="en">The gateway queues the message and the push carries only the banner text and the <code>msg_id</code>. The notification extension on the phone fetches the whole message, card included, so cards are not bound by the 4 KB APNs/FCM payload.</span></p>
+      </div>
+      <div class="pipe">
+        <div class="pcard stat">
+          <div class="card">
+            <div class="stat-num">0<small><span class="zh">字节</span><span class="en">bytes</span></small></div>
+            <p><span class="zh">加密机器人的消息内容，网关、推送中继、Apple 和 Google 能读到的字节数。</span><span class="en">of an encrypted bot's message content readable by the gateway, a push relay, Apple or Google.</span></p>
+          </div>
+        </div>
+        <div class="pcard">
+          <div class="card trace">
+            <div class="trace-box">
+              <div class="trace-top"><span class="mono">POST /bot&lt;token&gt;/sendMessage</span><span class="ok">queued</span></div>
+              <ol class="steps">
+                <li class="step"><time>0 ms</time><span class="bullet"></span><span><span class="zh">校验参数、限流（每个机器人 10/s）</span><span class="en">validate, rate limit (10/s per bot)</span></span><span class="tag">validate</span></li>
+                <li class="step"><time>2 ms</time><span class="bullet"></span><span><span class="zh">按白名单清洗卡片 HTML</span><span class="en">clean the card through the whitelist</span></span><span class="tag">sanitize</span></li>
+                <li class="step"><time>3 ms</time><span class="bullet"></span><span><span class="zh">写入 SQLite 队列，得到 message_id</span><span class="en">into the SQLite queue, message_id assigned</span></span><span class="tag">queue</span></li>
+                <li class="step"><time>4 ms</time><span class="bullet"></span><span><span class="zh">推给组内每台设备（APNs / FCM）</span><span class="en">push to every device of the group (APNs / FCM)</span></span><span class="tag">push</span></li>
+                <li class="step"><time>~200 ms</time><span class="bullet"></span><span><span class="zh">通知扩展拉取 GET /v1/messages/:id</span><span class="en">the extension fetches GET /v1/messages/:id</span></span><span class="tag">fetch</span></li>
+                <li class="step"><time></time><span class="bullet"></span><span><span class="zh">解密、渲染卡片、存进本地</span><span class="en">decrypt, render the card, store locally</span></span><span class="tag">open</span></li>
+                <li class="step hollow"><time></time><span class="bullet"></span><span><span class="zh">App 打开时 /v1/sync 补齐，再 /v1/ack</span><span class="en">when the app opens: /v1/sync, then /v1/ack</span></span><span class="tag">ack</span></li>
+              </ol>
+              <div class="trace-foot"><span><span class="zh">推送失败按 2 s、10 s、60 s 重试</span><span class="en">failed pushes retry after 2 s, 10 s, 60 s</span></span><span class="mono sample">ttl 7d</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="grid3">
+        <div class="pcard feat reveal"><div class="card"><h3><span class="zh">不丢消息</span><span class="en">Nothing lost</span></h3><p><span class="zh">推送只是提醒，消息在队列里保留 7 天。推送失败会重试，没收到的设备打开 App 时从 <code>/v1/sync</code> 补齐。</span><span class="en">A push is only a nudge; the message stays queued for 7 days. Failed pushes are retried, and a device that missed one catches up from <code>/v1/sync</code>.</span></p></div></div>
+        <div class="pcard feat reveal"><div class="card"><h3><span class="zh">原地更新</span><span class="en">Updates in place</span></h3><p><span class="zh">同一个 <code>id</code> 的新消息替换旧的，<code>editMessageData</code> 只改卡片数据，<code>deleteMessage</code> 连通知一起撤回。</span><span class="en">A message with the same <code>id</code> replaces the last one, <code>editMessageData</code> changes only the card's data, and <code>deleteMessage</code> takes back the notification too.</span></p></div></div>
+        <div class="pcard feat reveal"><div class="card"><h3><span class="zh">卡片会说话</span><span class="en">Cards talk back</span></h3><p><span class="zh">带 <code>allow_queries</code> 的卡片可以 <code>request()</code>，网关把它交给机器人（webhook 或 <code>getUpdates</code>），等 <code>answerWidgetQuery</code> 的回答。</span><span class="en">A card sent with <code>allow_queries</code> can call <code>request()</code>; the gateway hands it to the bot (webhook or <code>getUpdates</code>) and waits for <code>answerWidgetQuery</code>.</span></p></div></div>
+      </div>
+    </div>
+  </section>
+
+  <div class="rule"></div>
+  <section id="selfhost" class="selfhost-head">
+    <div class="wrap trust-head reveal">
+      <h2 class="h2"><span class="zh">一个二进制，<span class="hl">一个 SQLite 文件</span></span><span class="en">One binary, <span class="hl">one SQLite file</span></span></h2>
+      <a class="btn btn-accent" href="https://github.com/evumi/honk/blob/main/docs/SELF-HOSTING.md" rel="noopener"><span class="zh">自托管指南</span><span class="en">Self-hosting guide</span> <span class="arr">↗</span></a>
+    </div>
+  </section>
+  <div class="rule"></div>
+  <section class="selfhost-body">
+    <div class="wrap">
+      <div class="grid3 flush">
+        <article class="tcard reveal"><div class="card"><span class="tile" aria-hidden="true"><svg class="i"><use href="#i-server"/></svg></span><h3><span class="zh">随处部署</span><span class="en">Runs anywhere</span></h3><p><span class="zh">纯 Go、无 cgo 的 SQLite，<code>docker compose up</code> 就能跑。这个页面和 API 文档也打包在同一个二进制里。</span><span class="en">Pure Go with cgo-free SQLite; <code>docker compose up</code> and it runs. This page and the API docs are in the same binary.</span></p></div></article>
+        <article class="tcard reveal"><div class="card"><span class="tile" aria-hidden="true"><svg class="i"><use href="#i-relay"/></svg></span><h3><span class="zh">不需要推送证书</span><span class="en">No push credentials needed</span></h3><p><span class="zh">没有 APNs/FCM 凭据的网关会经官方推送中继发送，中继默认只拿到推送令牌和 id，看不到横幅文字。</span><span class="en">A gateway without APNs/FCM credentials pushes through the official relay, which by default gets only the push token and ids, never the banner text.</span></p></div></article>
+        <article class="tcard reveal"><div class="card"><span class="tile" aria-hidden="true"><svg class="i"><use href="#i-activity"/></svg></span><h3><span class="zh">看得见</span><span class="en">Observable</span></h3><p><span class="zh"><code>/healthz</code>、Prometheus <code>/metrics</code>（消息、推送结果、重试、队列长度），日志里的令牌自动隐去。</span><span class="en"><code>/healthz</code>, Prometheus <code>/metrics</code> (messages, push results, retries, queue length), and bot tokens hidden in logs.</span></p></div></article>
+      </div>
+      <div class="pcard status reveal" id="status">
+        <div class="card">
+          <div class="status-head"><span class="dot" aria-hidden="true"></span><div><b><span class="zh">这个网关</span><span class="en">This gateway</span></b><small class="host">honk.example.com</small></div></div>
+          <dl class="kv">
+            <div><dt><span class="zh">版本</span><span class="en">Version</span></dt><dd data-info="version">—</dd></div>
+            <div><dt>API</dt><dd data-info="api">—</dd></div>
+            <div><dt><span class="zh">iOS 推送</span><span class="en">iOS push</span></dt><dd data-info="ios">—</dd></div>
+            <div><dt><span class="zh">Android 推送</span><span class="en">Android push</span></dt><dd data-info="android">—</dd></div>
+            <div><dt><span class="zh">功能</span><span class="en">Features</span></dt><dd data-info="features">—</dd></div>
+            <div><dt><span class="zh">设备注册</span><span class="en">Registration</span></dt><dd data-info="register">—</dd></div>
+          </dl>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="rule"></div>
+  <section id="download">
+    <div class="wrap">
+      <div class="cta reveal">
+        <div class="cta-in">
+          <div class="cta-dots" aria-hidden="true"></div>
+          <div class="cta-copy">
+            <h2><span class="zh">装上 App，<br>建一个机器人</span><span class="en">Get the app,<br>make a bot</span></h2>
+            <p><span class="zh">在 App 的设置里把网关地址指向这里，新建机器人，复制令牌，第一条推送一分钟内就能到。</span><span class="en">Point the app's gateway setting here, create a bot, copy its token: your first push lands within a minute.</span></p>
+          </div>
+          <div class="cta-box">
+            <div class="card">
+              <svg class="logo" aria-hidden="true"><use href="#logo"/></svg>
+              <b>Honk</b>
+              <small><span class="zh">iOS 与 iPadOS · Android 即将上线</span><span class="en">iOS and iPadOS · Android coming soon</span></small>
+              <div class="stores">
+                <a class="store" href="https://apps.apple.com/app/id6835855786" rel="noopener"><svg class="i fill" aria-hidden="true"><use href="#i-apple"/></svg><span><small><span class="zh">前往</span><span class="en">Download on the</span></small><b>App Store</b></span></a>
+                <span class="store soon" aria-disabled="true" data-store="google-play"><svg class="i fill" aria-hidden="true"><use href="#i-play"/></svg><span><small><span class="zh">即将上线</span><span class="en">Coming soon</span></small><b>Google Play</b></span></span>
+              </div>
+              <a class="btn btn-dark mt" href="/docs#quickstart"><span class="zh">阅读 API 文档</span><span class="en">Read the API docs</span></a>
+              <a class="link" href="https://github.com/evumi/honk" rel="noopener"><span class="zh">在 GitHub 上查看源码</span><span class="en">Source on GitHub</span></a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+</main>
+
+<footer class="foot">
+  <div class="foot-frame">
+    <div class="foot-content">
+      <div class="foot-intro">
+        <div>
+          <a class="brand" href="#top"><svg class="logo" aria-hidden="true"><use href="#logo"/></svg>Honk</a>
+          <p><span class="zh">以机器人为单位的推送网关。<br>一个 HTTP 请求，推到你的手机上。</span><span class="en">A push gateway built around bots.<br>One HTTP request, a push on your phone.</span></p>
+          <div class="foot-stores">
+            <a class="store" href="https://apps.apple.com/app/id6835855786" rel="noopener"><svg class="i fill" aria-hidden="true"><use href="#i-apple"/></svg><span><small><span class="zh">前往</span><span class="en">Download on the</span></small><b>App Store</b></span></a>
+            <span class="store soon" aria-disabled="true" data-store="google-play"><svg class="i fill" aria-hidden="true"><use href="#i-play"/></svg><span><small><span class="zh">即将上线</span><span class="en">Coming soon</span></small><b>Google Play</b></span></span>
+          </div>
+          <div class="foot-social">
+            <a href="https://github.com/evumi/honk" rel="noopener" aria-label="Honk on GitHub"><svg class="i fill" aria-hidden="true"><use href="#i-github"/></svg></a>
+            <span class="divider"></span>
+            <span><span class="zh">由 Evumi 打造</span><span class="en">Built by Evumi</span></span>
+          </div>
+        </div>
+        <a class="foot-host" href="#selfhost"><svg class="i" aria-hidden="true"><use href="#i-shield"/></svg><span><span class="zh">你的网关，你的数据</span><span class="en">Your gateway, your data</span><br><small><span class="zh">自托管，端到端加密</span><span class="en">self-hosted, end-to-end encrypted</span></small></span></a>
+      </div>
+      <nav class="foot-cols" aria-label="Footer">
+        <div><h3><span class="zh">产品</span><span class="en">Product</span></h3><a href="#features"><span class="zh">功能</span><span class="en">Features</span></a><a href="#journey"><span class="zh">投递</span><span class="en">Delivery</span></a><a href="#selfhost"><span class="zh">自托管</span><span class="en">Self-host</span></a><a href="#download"><span class="zh">下载</span><span class="en">Download</span></a></div>
+        <div><h3><span class="zh">文档</span><span class="en">Docs</span></h3><a href="/docs#quickstart"><span class="zh">快速上手</span><span class="en">Quick start</span></a><a href="/docs#sendMessage">Bot API</a><a href="/docs#cards"><span class="zh">卡片</span><span class="en">Cards</span></a><a href="/docs#app-api">App API</a></div>
+        <div><h3><span class="zh">接入</span><span class="en">Connect</span></h3><a href="/docs#hooks">Slack</a><a href="/docs#hooks">Alertmanager</a><a href="/docs#hooks">GitHub</a><a href="/docs#cli"><span class="zh">命令行</span><span class="en">Command line</span></a></div>
+        <div><h3><span class="zh">项目</span><span class="en">Project</span></h3><a href="https://github.com/evumi/honk" rel="noopener">GitHub</a><a href="https://github.com/evumi/honk/releases" rel="noopener">Releases</a><a href="https://github.com/evumi/honk/blob/main/docs/CARDS.md" rel="noopener"><span class="zh">卡片指南</span><span class="en">Card cookbook</span></a><a href="/assets/fonts/OFL.txt"><span class="zh">字体许可</span><span class="en">Font licenses</span></a></div>
+      </nav>
+    </div>
+  </div>
+  <div class="foot-legal">
+    <div class="foot-frame">
+      <span>© 2026 Honk</span>
+      <span class="made"><span class="zh">为想第一时间知道的人而做</span><span class="en">Made for people who want to know first</span> <span aria-hidden="true">♥</span></span>
+      <a href="https://github.com/evumi/honk" rel="noopener">GitHub</a>
+    </div>
+  </div>
+  <div class="foot-wordmark">
+    <span class="word-dots" aria-hidden="true">honk</span>
+    <a class="foot-connect" href="/docs"><svg class="i" aria-hidden="true"><use href="#i-link"/></svg><span class="zh">阅读 API 文档</span><span class="en">Read the API docs</span></a>
+  </div>
+</footer>
+</body>
+</html>

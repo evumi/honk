@@ -69,6 +69,8 @@ docker run -p 8080:8080 -v honk-data:/data \
   -e HONK_FCM_CREDENTIALS_FILE=/secrets/fcm.json honk
 ```
 
+网关自带首页（`/`）和 API 文档（`/docs`），中英双语、浅色和深色，示例里的地址自动填成当前网关。它们是打包进二进制的静态文件（`gateway/internal/web/site`，手写的 HTML、CSS 和 JavaScript，无构建步骤），不从其他域加载任何东西。
+
 ### 环境变量
 
 | 变量 | 默认值 | 说明 |
@@ -78,7 +80,7 @@ docker run -p 8080:8080 -v honk-data:/data \
 | `HONK_MESSAGE_TTL` | `168h` | 消息在队列里保存多久 |
 | `HONK_ACKED_KEEP` | `24h` | 设备组里每台设备都已 ack 的消息再保留多久（从创建时算起） |
 | `HONK_DEVICE_GC` | `2160h` | push token 已失效、且这么久没有任何请求的设备会被删除；它是组里最后一台时，bot 和队列一并删除；`0` 或 `off` 表示不回收 |
-| `HONK_SEND_RATE` / `HONK_SEND_BURST` | `5` / `20` | 每个 bot 每秒最多发几条 / 突发上限 |
+| `HONK_SEND_RATE` / `HONK_SEND_BURST` | `10` / `60` | 每个 bot 每秒最多发几条 / 突发上限（一阵告警或一串 CI 事件能放进突发里） |
 | `HONK_TRUSTED_PROXIES` | 回环 + 私有网段 | 逗号分隔的 CIDR：来自这些反向代理的 `X-Forwarded-For` / `X-Real-IP` 才会用来做按 IP 的限流（取不在列表里的最右一个地址；IPv6 客户端按 /64 计）；`none` 表示不信任任何代理，只看 TCP 对端 |
 | `HONK_REGISTER_PER_HOUR` | `10` | 每个 IP 每小时最多注册几台设备（突发 5） |
 | `HONK_MAX_BOTS_PER_DEVICE` | `100` | 每个设备组最多几个 bot（名字沿用分组之前的叫法）；会超出上限的配对会被拒绝 |
@@ -97,6 +99,7 @@ docker run -p 8080:8080 -v honk-data:/data \
 | `HONK_METRICS_ADDR` | | 例如 `127.0.0.1:9100`：在单独的端口提供 Prometheus 文本格式的 `/metrics`；留空就不开 |
 | `HONK_LOG_FORMAT` | `text` | 设成 `json` 输出结构化日志 |
 | `HONK_LOG_LEVEL` | `info` | 设成 `debug` 会再记录每个请求（路径里的 bot token 不会出现在日志里） |
+| `HONK_SITE` | `true` | 在 `/` 提供首页、在 `/docs` 提供 API 文档（`false`：两者都是 404） |
 
 `/metrics` 有 `honk_messages_total{kind}`、`honk_pushes_total{platform,route,result}`（`route` 为 `direct` 或 `relay`；结果是 `ok`、`retry`、`token_gone`、`failed`）、中继上的 `honk_relay_requests_total{result}` 和 `honk_relay_pushes_total{platform}`、`honk_push_retries_total`、`honk_push_dropped_total{reason}`、`honk_http_requests_total{class}`，以及量表 `honk_devices`、`honk_bots`、`honk_push_queue_length`。
 
@@ -235,7 +238,16 @@ App 把内联 SVG（`svg`、`g`、各种图形、`text`/`tspan`、渐变、`symb
 
 ## 命令行
 
-网关的二进制同时是发送端工具。不带参数的 `honk`（或 `honk serve`）和以前一样运行网关；其他子命令以某个 bot 的身份访问网关：
+网关的二进制同时是发送端工具。不带参数的 `honk`（或 `honk serve`）和以前一样运行网关；其他子命令以某个 bot 的身份访问网关。
+
+每个 `v*` 版本都会为 Linux、macOS 和 Windows（amd64 与 arm64）发布预编译的 `honk`（`.github/workflows/gateway-release.yml`）。macOS 和 Linux 上：
+
+```bash
+curl -fsSL https://honk.example.com/install.sh | sh
+```
+
+每个网关都在 `/install.sh` 提供这个脚本（即 `gateway/internal/web/site/install.sh`）。它从最新的 GitHub Release 下载 `honk_<os>_<arch>.tar.gz`，用 `honk_checksums.txt` 校验后装到 `/usr/local/bin`；不可写时装到已在 `PATH` 里的 `~/.local/bin` 或 `~/bin`（都不在时会提示该改哪个 shell 配置文件）；再运行一次就是升级。默认取最新的、带有命令行文件的版本。`HONK_VERSION=v1.2.3` 指定版本，`HONK_INSTALL_DIR` 指定目录，`HONK_DOWNLOAD_URL` 指定镜像目录（放某一个版本的文件，不能和 `HONK_VERSION` 同时用）。Windows 从 Releases 页面下载 `honk_windows_amd64.zip` 解压即可。其他方式：`docker run --rm -e HONK_URL -e HONK_TOKEN ghcr.io/evumi/honk-gateway send …`（镜像的入口就是 `honk`）、`go install github.com/evumi/honk/gateway/cmd/honk@latest`（Go 1.26），或在 `gateway/` 里 `make build`（得到 `bin/honk`）。`honk version` 显示版本。
+
 
 ```bash
 export HONK_URL=https://honk.example.com HONK_TOKEN=aZ3kQ9xT:Gw2K7mx…

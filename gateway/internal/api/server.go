@@ -84,6 +84,17 @@ type Options struct {
 	// WebhookAllowPrivate lets bots set webhooks on loopback, private and
 	// link-local addresses (HONK_WEBHOOK_ALLOW_PRIVATE); off, they are refused.
 	WebhookAllowPrivate bool
+
+	// Site serves the landing page and the API docs (internal/web) at the
+	// paths it names. nil (HONK_SITE=false): those paths are 404.
+	Site Site
+}
+
+// Site is a handler for the gateway's own pages and the route patterns it
+// answers; internal/web's *Site is one.
+type Site interface {
+	http.Handler
+	Routes() []string
 }
 
 // limiter is a token bucket with the time it was last used, so idle ones can be dropped.
@@ -177,6 +188,14 @@ func (s *Server) Handler() http.Handler {
 	})
 
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) { ok(w, "ok") })
+
+	// The landing page and the docs. Static routes win over /{bot}/{method}.
+	if s.opts.Site != nil {
+		for _, p := range s.opts.Site.Routes() {
+			r.Get(p, s.opts.Site.ServeHTTP)
+			r.Head(p, s.opts.Site.ServeHTTP)
+		}
+	}
 
 	r.Route("/v1", func(r chi.Router) {
 		// Lets the app check that an address is a Honk gateway before switching to it.
