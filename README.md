@@ -57,6 +57,8 @@ make run        # works without push credentials (relay off): pushes are skipped
 make test
 ```
 
+The gateway also serves its own landing page at `/` and API docs at `/docs` (Chinese and English, light and dark), with the gateway's address filled into every example. They are static files embedded in the binary (`gateway/internal/web/site`, hand-written HTML, CSS and JavaScript, no build step) and load nothing from other origins.
+
 See `gateway/Dockerfile` for the container. Settings:
 
 | Variable | Default | Meaning |
@@ -66,7 +68,7 @@ See `gateway/Dockerfile` for the container. Settings:
 | `HONK_MESSAGE_TTL` | `168h` | how long a message stays queued |
 | `HONK_ACKED_KEEP` | `24h` | how long a message that every device of the group has acked is kept (counted from its creation) |
 | `HONK_DEVICE_GC` | `2160h` | a device whose push token is gone and that made no request for this long is deleted, with the group's bots and queue if it was the last; `0` or `off` never deletes |
-| `HONK_SEND_RATE` / `HONK_SEND_BURST` | `5` / `20` | per-bot messages per second / burst |
+| `HONK_SEND_RATE` / `HONK_SEND_BURST` | `10` / `60` | per-bot messages per second / burst (an alert storm or a burst of CI events fits in the burst) |
 | `HONK_TRUSTED_PROXIES` | loopback + private ranges | comma-separated CIDRs of reverse proxies whose `X-Forwarded-For` / `X-Real-IP` are believed for per-IP limits (the right-most address not in the list is the client; IPv6 clients are keyed by /64); `none` trusts no one, so only the TCP peer counts |
 | `HONK_REGISTER_PER_HOUR` | `10` | device registrations per client IP per hour (burst 5) |
 | `HONK_MAX_BOTS_PER_DEVICE` | `100` | bots one device group can own (the name is from before groups); a pairing that would exceed it is refused |
@@ -85,6 +87,7 @@ See `gateway/Dockerfile` for the container. Settings:
 | `HONK_METRICS_ADDR` | | e.g. `127.0.0.1:9100`: serves Prometheus text at `/metrics` on its own listener; off when empty |
 | `HONK_LOG_FORMAT` | `text` | `json` for structured logs |
 | `HONK_LOG_LEVEL` | `info` | `debug` also logs every request (the bot token in the path is hidden) |
+| `HONK_SITE` | `true` | serve the landing page at `/` and the API docs at `/docs` (`false`: both are 404) |
 
 `/metrics` has `honk_messages_total{kind}`, `honk_pushes_total{platform,route,result}` (`route` `direct` or `relay`; `ok`, `retry`, `token_gone`, `failed`), `honk_relay_requests_total{result}` and `honk_relay_pushes_total{platform}` on a relay, `honk_push_retries_total`, `honk_push_dropped_total{reason}`, `honk_http_requests_total{class}`, and the gauges `honk_devices`, `honk_bots` and `honk_push_queue_length`.
 
@@ -154,7 +157,16 @@ Cards can carry inline scripts, as Telegram's HTML widgets do (card profile 2). 
 
 ## Command line
 
-The gateway binary is also a sender tool. `honk` with no arguments (or `honk serve`) runs the gateway exactly as before; the other subcommands talk to a gateway as one bot:
+The gateway binary is also a sender tool. `honk` with no arguments (or `honk serve`) runs the gateway exactly as before; the other subcommands talk to a gateway as one bot.
+
+Every `v*` release has `honk` prebuilt for Linux, macOS and Windows (amd64 and arm64, `.github/workflows/gateway-release.yml`). On macOS and Linux:
+
+```bash
+curl -fsSL https://honk.example.com/install.sh | sh
+```
+
+Every gateway serves the script at `/install.sh` (it is `gateway/internal/web/site/install.sh`). It downloads `honk_<os>_<arch>.tar.gz` from the latest GitHub Release, checks it against `honk_checksums.txt` and installs to `/usr/local/bin`, or, when that is not writable, to `~/.local/bin` or `~/bin` if one is on `PATH` (otherwise it says which shell file to add it to); run it again to upgrade. By default it takes the newest release that has the command line in it. `HONK_VERSION=v1.2.3` picks a release, `HONK_INSTALL_DIR` the directory, `HONK_DOWNLOAD_URL` a mirror directory holding one release's files (instead of `HONK_VERSION`). On Windows, unzip `honk_windows_amd64.zip` from the releases page. Other ways: `docker run --rm -e HONK_URL -e HONK_TOKEN ghcr.io/evumi/honk-gateway send …` (the image's entrypoint is `honk`), `go install github.com/evumi/honk/gateway/cmd/honk@latest` (Go 1.26), or `make build` in `gateway/` (`bin/honk`). `honk version` prints the version.
+
 
 ```bash
 export HONK_URL=https://honk.example.com HONK_TOKEN=aZ3kQ9xT:Gw2K7mx…

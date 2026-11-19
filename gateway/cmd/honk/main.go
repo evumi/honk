@@ -15,9 +15,18 @@ import (
 	"github.com/evumi/honk/gateway/internal/config"
 	"github.com/evumi/honk/gateway/internal/push"
 	"github.com/evumi/honk/gateway/internal/store"
+	"github.com/evumi/honk/gateway/internal/web"
 )
 
 var version = "dev"
+
+// site is the landing page and API docs, or nil when HONK_SITE turns them off.
+func site(on bool) api.Site {
+	if !on {
+		return nil
+	}
+	return web.New()
+}
 
 func main() {
 	if handled, code := cli(os.Args[1:]); handled { // honk send, honk preview, ...
@@ -110,6 +119,7 @@ func run(log *slog.Logger) error {
 		RelayAPNs: direct.APNs, RelayFCM: direct.FCM,
 		WebhookAllowPrivate: cfg.WebhookAllowPrivate,
 		TrustedProxies:      cfg.TrustedProxies,
+		Site:                site(cfg.Site),
 	})
 	httpSrv := &http.Server{
 		Addr:              cfg.Addr,

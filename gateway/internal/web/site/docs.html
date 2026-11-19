@@ -1,0 +1,617 @@
+<!doctype html>
+<html lang="zh-CN" data-lang="zh" data-title-zh="API 文档 · Honk" data-title-en="API docs · Honk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>API 文档 · Honk</title>
+<meta name="description" content="Honk gateway API reference: the Telegram-style Bot API, webhook adapters, cards, end-to-end encryption, the honk command line and the app API.">
+<meta name="theme-color" content="#fbfaf9" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1d1d1c" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/assets/site.css">
+<script src="/assets/site.js"></script>
+<script src="/assets/docs.js" defer></script>
+</head>
+<body>
+<svg class="sprite" aria-hidden="true">
+  <symbol id="logo" viewBox="0 0 100 100"><rect width="100" height="100" rx="22" fill="#1c1c1e"/><rect x="27" y="27" width="12" height="48" rx="6" fill="#fff"/><rect x="57" y="27" width="12" height="48" rx="6" fill="#fff"/><rect x="27" y="45" width="42" height="11" rx="5.5" fill="#fff"/><circle cx="74" cy="27" r="11" fill="#ff5a36" stroke="#1c1c1e" stroke-width="4"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2m-7.07-17.07 1.41 1.41m11.32 11.32 1.41 1.41M2 12h2m16 0h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
+  <symbol id="i-lang" viewBox="0 0 24 24"><path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-github" viewBox="0 0 24 24"><path d="M12 .5C5.65.5.5 5.65.5 12a11.5 11.5 0 0 0 7.86 10.92c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.52-1.33-1.28-1.69-1.28-1.69-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.19 1.76 1.19 1.03 1.76 2.69 1.25 3.35.96.1-.75.4-1.25.73-1.54-2.55-.29-5.24-1.28-5.24-5.68 0-1.25.45-2.28 1.19-3.08-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.8 1.19 1.83 1.19 3.08 0 4.41-2.69 5.39-5.25 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5Z"/></symbol>
+  <symbol id="i-apple" viewBox="0 0 24 24"><path d="M16.37 12.6c-.02-2.2 1.8-3.26 1.88-3.31-1.03-1.5-2.62-1.7-3.18-1.73-1.35-.14-2.64.8-3.33.8-.69 0-1.74-.78-2.86-.76-1.47.02-2.83.86-3.59 2.17-1.53 2.66-.39 6.6 1.1 8.76.73 1.06 1.6 2.24 2.73 2.2 1.1-.04 1.51-.71 2.84-.71 1.32 0 1.7.71 2.86.69 1.18-.02 1.93-1.07 2.65-2.13.84-1.22 1.18-2.41 1.2-2.47-.03-.01-2.3-.88-2.3-3.51ZM14.2 6.13c.6-.73 1.01-1.75.9-2.76-.87.04-1.92.58-2.54 1.31-.56.64-1.05 1.67-.92 2.66.97.08 1.96-.49 2.56-1.21Z"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M5 3.5v17a1 1 0 0 0 1.5.86l14.2-8.5a1 1 0 0 0 0-1.72L6.5 2.64A1 1 0 0 0 5 3.5Z"/></symbol>
+</svg>
+<a class="skip" href="#doc"><span class="zh">跳到正文</span><span class="en">Skip to content</span></a>
+
+<div class="nav-shell">
+  <nav class="nav solid" aria-label="Honk">
+    <a class="brand" href="/"><svg class="logo" aria-hidden="true"><use href="#logo"/></svg>Honk<small><span class="zh">文档</span><span class="en">Docs</span></small></a>
+    <div class="nav-links">
+      <a href="/"><span class="zh">首页</span><span class="en">Home</span></a>
+      <a href="#quickstart"><span class="zh">快速上手</span><span class="en">Quick start</span></a>
+      <a href="#sendMessage">Bot API</a>
+      <a href="#hooks"><span class="zh">接入</span><span class="en">Connect</span></a>
+      <a href="#app-api">App API</a>
+    </div>
+    <div class="nav-cta">
+      <button type="button" class="icon-btn lang-btn" aria-label="切换语言 / Switch language"><svg class="i" aria-hidden="true"><use href="#i-lang"/></svg><span class="zh">EN</span><span class="en">中文</span></button>
+      <button type="button" class="icon-btn theme-btn" aria-label="切换主题 / Toggle theme"><svg class="i sun" aria-hidden="true"><use href="#i-sun"/></svg><svg class="i moon" aria-hidden="true"><use href="#i-moon"/></svg></button>
+      <a class="icon-btn nav-docs" href="https://github.com/evumi/honk" rel="noopener" aria-label="GitHub"><svg class="i fill" aria-hidden="true"><use href="#i-github"/></svg></a>
+      <a class="btn btn-dark" href="https://apps.apple.com/app/id6835855786" rel="noopener"><span class="zh">下载 App</span><span class="en">Get the app</span></a>
+    </div>
+  </nav>
+</div>
+
+<div class="docs">
+  <aside class="docs-side">
+    <label class="search"><span class="sr"><span class="zh">搜索文档</span><span class="en">Search the docs</span></span><svg class="i" aria-hidden="true"><use href="#i-search"/></svg><input type="search" id="docs-q" autocomplete="off" spellcheck="false" placeholder="搜索方法、参数…" data-ph-zh="搜索方法、参数…" data-ph-en="Search methods, parameters…"></label>
+    <select class="docs-jump" id="docs-jump" aria-label="Jump to"></select>
+    <nav class="docs-nav" id="docs-nav" aria-label="Docs">
+      <div class="grp"><span><span class="zh">开始</span><span class="en">Getting started</span></span>
+        <a href="#overview"><span><span class="zh">工作原理</span><span class="en">How it works</span></span></a>
+        <a href="#quickstart"><span><span class="zh">快速上手</span><span class="en">Quick start</span></span></a>
+        <a href="#conventions"><span><span class="zh">令牌与响应</span><span class="en">Tokens and responses</span></span></a>
+        <a href="#errors"><span><span class="zh">错误与限流</span><span class="en">Errors and limits</span></span></a>
+      </div>
+      <div class="grp"><span>Bot API</span>
+        <a href="#sendMessage" data-k="send message title body html data level group id url copy icon image ttl silent parse_mode markdown open dry_run allow_queries ciphertext"><span>sendMessage</span></a>
+        <a href="#editMessageData" data-k="edit data card update"><span>editMessageData</span></a>
+        <a href="#deleteMessage" data-k="delete remove recall"><span>deleteMessage</span></a>
+        <a href="#getMe" data-k="bot me"><span>getMe</span></a>
+        <a href="#setWebhook" data-k="webhook url secret_token widget query"><span>setWebhook</span></a>
+        <a href="#deleteWebhook" data-k="webhook remove"><span>deleteWebhook</span></a>
+        <a href="#getWebhookInfo" data-k="webhook info pending"><span>getWebhookInfo</span></a>
+        <a href="#getUpdates" data-k="updates long poll offset timeout widget_query"><span>getUpdates</span></a>
+        <a href="#answerWidgetQuery" data-k="answer widget query request"><span>answerWidgetQuery</span></a>
+      </div>
+      <div class="grp"><span><span class="zh">指南</span><span class="en">Guides</span></span>
+        <a href="#bots" data-k="level passive active timesensitive notification"><span><span class="zh">机器人与通知</span><span class="en">Bots and notifications</span></span></a>
+        <a href="#cards" data-k="html widget card style svg script css whitelist"><span><span class="zh">HTML 卡片</span><span class="en">HTML cards</span></span></a>
+        <a href="#e2e" data-k="encryption aes gcm ciphertext key"><span><span class="zh">端到端加密</span><span class="en">End-to-end encryption</span></span></a>
+        <a href="#groups" data-k="device group pairing link"><span><span class="zh">设备组</span><span class="en">Device groups</span></span></a>
+        <a href="#hooks" data-k="hook webhook slack alertmanager grafana github bark json actions"><span><span class="zh">接入已有工具</span><span class="en">Connect existing tools</span></span></a>
+        <a href="#cli" data-k="cli command line honk send preview install curl script release download"><span><span class="zh">命令行</span><span class="en">Command line</span></span></a>
+      </div>
+      <div class="grp"><span><span class="zh">App API 与部署</span><span class="en">App API and hosting</span></span>
+        <a href="#app-api" data-k="devices bots sync ack messages links queries info"><span>App API</span></a>
+        <a href="#selfhost" data-k="docker deploy env config self-host"><span><span class="zh">自托管</span><span class="en">Self-hosting</span></span></a>
+      </div>
+      <p class="empty" hidden><span class="zh">没有匹配的条目</span><span class="en">Nothing matches</span></p>
+    </nav>
+  </aside>
+
+  <main class="doc" id="doc">
+    <header class="doc-hero">
+      <span class="eyebrow"><i>api 2</i><span class="zh">Honk 网关参考</span><span class="en">Honk gateway reference</span></span>
+      <h1><span class="zh">API 文档</span><span class="en">API docs</span></h1>
+      <p><span class="zh">发送方用 Bot API（<code>/bot&lt;token&gt;/&lt;method&gt;</code>），沿用 Telegram 的命名和响应信封；手机 App 用 App API（<code>/v1</code>）。下面的示例都已填好这个网关的地址。</span><span class="en">Senders use the Bot API (<code>/bot&lt;token&gt;/&lt;method&gt;</code>), with Telegram's naming and response envelope; the phone apps use the App API (<code>/v1</code>). Every example below already has this gateway's address in it.</span></p>
+      <div class="base-url"><span><span class="zh">网关地址</span><span class="en">Gateway</span></span><code class="origin">https://honk.example.com</code></div>
+    </header>
+
+    <!-- ============ Getting started ============ -->
+    <section class="doc-sec" id="overview">
+      <h2><span class="zh">工作原理</span><span class="en">How it works</span></h2>
+      <ol>
+        <li><span class="zh">App 注册自己的 APNs/FCM 推送令牌，得到 <code>device_secret</code>。</span><span class="en">The app registers its APNs/FCM push token and gets a <code>device_secret</code>.</span></li>
+        <li><span class="zh">App 新建机器人，得到令牌 <code>&lt;bot id&gt;:&lt;secret&gt;</code>，例如 <code>aZ3kQ9xT:Gw2K7mx…</code>。机器人 id 是 8 位以字母开头的随机 base62 字符。</span><span class="en">The app creates a bot and gets its token, <code>&lt;bot id&gt;:&lt;secret&gt;</code>, for example <code>aZ3kQ9xT:Gw2K7mx…</code>. A bot id is 8 random base62 characters starting with a letter.</span></li>
+        <li><span class="zh">发送方调用 <code>/bot&lt;token&gt;/sendMessage</code>。网关把消息放进队列，推送只带横幅文字和 <code>msg_id</code>。</span><span class="en">A sender calls <code>/bot&lt;token&gt;/sendMessage</code>. The gateway queues the message and pushes only the banner text and the <code>msg_id</code>.</span></li>
+        <li><span class="zh">手机上的通知扩展（iOS）或 FCM 服务（Android）拉取 <code>GET /v1/messages/:id</code>（含卡片）并存到本地。</span><span class="en">On the phone the Notification Service Extension (iOS) or FCM service (Android) fetches <code>GET /v1/messages/:id</code>, card included, and stores it.</span></li>
+        <li><span class="zh">App 打开时调用 <code>GET /v1/sync</code> 补齐漏掉的，再 <code>POST /v1/ack</code>。</span><span class="en">When the app opens it calls <code>GET /v1/sync</code> for anything missed, then <code>POST /v1/ack</code>.</span></li>
+      </ol>
+      <p><span class="zh">队列里的消息 7 天后过期（<code>HONK_MESSAGE_TTL</code>）；组里所有设备都确认过的消息，在创建一天后删除（<code>HONK_ACKED_KEEP</code>）。推送失败（网络错误、超时、5xx、带 <code>retry_after</code> 的 429）会在 2 s、10 s、60 s 后重试，共四次。</span><span class="en">Queued messages expire after 7 days (<code>HONK_MESSAGE_TTL</code>); a message every device of the group has acked is deleted a day after it was created (<code>HONK_ACKED_KEEP</code>). A push that fails for a reason that may pass (network error, timeout, 5xx, 429 with <code>retry_after</code>) is retried after 2 s, 10 s and 60 s, four attempts in all.</span></p>
+    </section>
+
+    <section class="doc-sec" id="quickstart">
+      <h2><span class="zh">快速上手</span><span class="en">Quick start</span></h2>
+      <ol>
+        <li><span class="zh">安装 Honk App（<a href="https://apps.apple.com/app/id6835855786" rel="noopener">App Store</a>；Google Play 即将上线），在 设置 → 网关 里填入</span><span class="en">Install the Honk app (<a href="https://apps.apple.com/app/id6835855786" rel="noopener">App Store</a>; Google Play coming soon) and set Settings → Gateway to</span> <code class="origin">https://honk.example.com</code><span class="zh">。</span><span class="en">.</span></li>
+        <li><span class="zh">新建一个机器人，复制它的令牌。</span><span class="en">Create a bot and copy its token.</span></li>
+        <li><span class="zh">发一条消息：</span><span class="en">Send a message:</span></li>
+      </ol>
+      <div class="code">
+        <div class="code-bar">
+          <div class="tabs" role="tablist" data-tabs aria-label="Quick start">
+            <button type="button" class="tab" role="tab" aria-selected="true" aria-controls="qs-curl">curl</button>
+            <button type="button" class="tab" role="tab" aria-selected="false" tabindex="-1" aria-controls="qs-cli">honk</button>
+            <button type="button" class="tab" role="tab" aria-selected="false" tabindex="-1" aria-controls="qs-py">Python</button>
+            <button type="button" class="tab" role="tab" aria-selected="false" tabindex="-1" aria-controls="qs-js">Node</button>
+          </div>
+          <button type="button" class="copy"><svg class="i" aria-hidden="true"><use href="#i-copy"/></svg><span class="zh">复制</span><span class="en">Copy</span></button>
+        </div>
+<pre id="qs-curl" role="tabpanel"><span class="k">export</span> HONK_TOKEN=aZ3kQ9xT:Gw2K7mx…
+
+<span class="k">curl</span> <span class="origin">https://honk.example.com</span>/bot$HONK_TOKEN/sendMessage \
+  -d title=Hello -d body=<span class="s">"first push from the gateway"</span></pre>
+<pre id="qs-cli" role="tabpanel" hidden><span class="c"># install the command line (macOS, Linux); Windows and more: see Command line</span>
+<span class="k">curl</span> -fsSL <span class="origin">https://honk.example.com</span>/install.sh | <span class="k">sh</span>
+
+<span class="k">export</span> HONK_URL=<span class="origin">https://honk.example.com</span>
+<span class="k">export</span> HONK_TOKEN=aZ3kQ9xT:Gw2K7mx…
+
+<span class="k">honk</span> send <span class="s">"first push from the gateway"</span> --title Hello</pre>
+<pre id="qs-py" role="tabpanel" hidden><span class="k">import</span> os, json, urllib.request
+
+url, token = <span class="s">"<span class="origin">https://honk.example.com</span>"</span>, os.environ[<span class="s">"HONK_TOKEN"</span>]
+body = json.dumps({<span class="s">"title"</span>: <span class="s">"Hello"</span>, <span class="s">"body"</span>: <span class="s">"first push from the gateway"</span>}).encode()
+req = urllib.request.Request(f<span class="s">"{url}/bot{token}/sendMessage"</span>, body, {<span class="s">"Content-Type"</span>: <span class="s">"application/json"</span>})
+print(urllib.request.urlopen(req).read().decode())</pre>
+<pre id="qs-js" role="tabpanel" hidden><span class="k">const</span> res = <span class="k">await</span> fetch(`<span class="origin">https://honk.example.com</span>/bot${process.env.HONK_TOKEN}/sendMessage`, {
+  method: <span class="s">"POST"</span>,
+  headers: { <span class="s">"Content-Type"</span>: <span class="s">"application/json"</span> },
+  body: JSON.stringify({ title: <span class="s">"Hello"</span>, body: <span class="s">"first push from the gateway"</span> }),
+});
+console.log(<span class="k">await</span> res.json());</pre>
+      </div>
+    </section>
+
+    <section class="doc-sec" id="conventions">
+      <h2><span class="zh">令牌与响应</span><span class="en">Tokens and responses</span></h2>
+      <p><span class="zh">令牌就在路径里：<code>/bot&lt;token&gt;/&lt;method&gt;</code>。方法名不区分大小写，GET 和 POST 都可以；参数放在查询串、<code>application/x-www-form-urlencoded</code>、<code>multipart/form-data</code> 或 JSON 里（JSON 中不是字符串的值，例如 <code>data</code> 对象，按它的 JSON 文本处理）。请求体最大 128 KB。</span><span class="en">The token is in the path: <code>/bot&lt;token&gt;/&lt;method&gt;</code>. Method names are case-insensitive and both GET and POST work; parameters go in the query string, <code>application/x-www-form-urlencoded</code>, <code>multipart/form-data</code> or JSON (a JSON value that is not a string, such as a <code>data</code> object, is taken as its JSON text). Bodies are at most 128 KB.</span></p>
+      <p><span class="zh">每个响应都是 Telegram 的信封：</span><span class="en">Every response uses Telegram's envelope:</span></p>
+      <div class="code"><div class="code-bar"><span class="label">JSON</span><button type="button" class="copy"><svg class="i" aria-hidden="true"><use href="#i-copy"/></svg><span class="zh">复制</span><span class="en">Copy</span></button></div>
+<pre>{<span class="s">"ok"</span>: <span class="n">true</span>, <span class="s">"result"</span>: …}
+{<span class="s">"ok"</span>: <span class="n">false</span>, <span class="s">"error_code"</span>: <span class="n">400</span>, <span class="s">"description"</span>: <span class="s">"body is required"</span>}</pre></div>
+      <p><span class="zh">时间戳是 Unix 毫秒；<code>message_id</code> 是整数，机器人 id 是短字符串。令牌泄露时在 App 的机器人设置里重置，旧令牌立刻失效。旧网关（schema v1）发的 <code>4:Gw2K7mx…</code> 这类整数 id 令牌在重置前仍然可用。</span><span class="en">Timestamps are Unix milliseconds; <code>message_id</code> is an integer and a bot id a short string. If a token leaks, reset it in the app's bot settings: the old one stops working at once. Tokens with integer ids from older gateways (schema v1), like <code>4:Gw2K7mx…</code>, keep working until they are reset.</span></p>
+    </section>
+
+    <section class="doc-sec" id="errors">
+      <h2><span class="zh">错误与限流</span><span class="en">Errors and limits</span></h2>
+      <div class="tbl"><table>
+        <thead><tr><th><span class="zh">状态码</span><span class="en">Status</span></th><th><span class="zh">含义</span><span class="en">Meaning</span></th></tr></thead>
+        <tbody>
+          <tr><td>400</td><td><span class="zh">参数不对，<code>description</code> 说明是哪个（例如 <code>title is longer than 256 characters</code>）；加密机器人收到明文也是 400</span><span class="en">a parameter is wrong and <code>description</code> says which (<code>title is longer than 256 characters</code>); plaintext for an encrypted bot is also a 400</span></td></tr>
+          <tr><td>401</td><td><span class="zh">令牌无效或已重置</span><span class="en">the token is unknown or was reset</span></td></tr>
+          <tr><td>404</td><td><span class="zh">未知的方法，或要编辑、删除的消息不存在</span><span class="en">unknown method, or the message to edit or delete is not there</span></td></tr>
+          <tr><td>409</td><td><span class="zh">设置了 webhook 时调用 <code>getUpdates</code></span><span class="en"><code>getUpdates</code> while a webhook is set</span></td></tr>
+          <tr><td>429</td><td><span class="zh">超过该机器人的发送速率</span><span class="en">over the bot's send rate</span></td></tr>
+        </tbody>
+      </table></div>
+      <h3><span class="zh">限制</span><span class="en">Limits</span></h3>
+      <div class="tbl"><table>
+        <thead><tr><th><span class="zh">项</span><span class="en">What</span></th><th><span class="zh">上限</span><span class="en">Limit</span></th></tr></thead>
+        <tbody>
+          <tr><td><span class="zh">发送速率</span><span class="en">send rate</span></td><td><span class="zh">每个机器人每秒 10 条，突发 60（<code>HONK_SEND_RATE</code> / <code>HONK_SEND_BURST</code>）；sendMessage、editMessageData、deleteMessage 和 webhook 适配器共用</span><span class="en">10 per second per bot, burst 60 (<code>HONK_SEND_RATE</code> / <code>HONK_SEND_BURST</code>), shared by sendMessage, editMessageData, deleteMessage and the webhook adapters</span></td></tr>
+          <tr><td>title</td><td><span class="zh">256 字符</span><span class="en">256 characters</span></td></tr>
+          <tr><td>body / copy</td><td><span class="zh">4096 字符</span><span class="en">4096 characters</span></td></tr>
+          <tr><td>html</td><td><span class="zh">清洗后 32 KB，zlib 压缩后 4 KB</span><span class="en">32 KB after cleaning, 4 KB after zlib</span></td></tr>
+          <tr><td>data</td><td>1 KB</td></tr>
+          <tr><td>group</td><td>64 bytes</td></tr>
+          <tr><td>id</td><td>128 bytes</td></tr>
+          <tr><td>url / icon / image</td><td><span class="zh">2048 字符；icon 和 image 只接受 https</span><span class="en">2048 characters; icon and image https only</span></td></tr>
+          <tr><td>ciphertext</td><td>64 KB</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <!-- ============ Bot API ============ -->
+    <section class="doc-sec" id="sendMessage">
+      <h2>sendMessage</h2>
+      <div class="op-line"><span class="verb any">GET · POST</span><code>/bot&lt;token&gt;/sendMessage</code></div>
+      <p><span class="zh">发一条消息给机器人所在设备组的每台设备。成功时返回存好的消息对象。</span><span class="en">Sends a message to every device of the bot's group. Returns the stored message.</span></p>
+      <h3><span class="zh">参数</span><span class="en">Parameters</span></h3>
+      <div class="tbl"><table>
+        <thead><tr><th><span class="zh">名称</span><span class="en">Name</span></th><th><span class="zh">类型</span><span class="en">Type</span></th><th><span class="zh">说明</span><span class="en">Description</span></th></tr></thead>
+        <tbody>
+          <tr><td>body<span class="req">*</span></td><td class="t">string</td><td><span class="zh">正文，也是横幅文字和不支持卡片时的回退内容。发 <code>ciphertext</code> 时不需要</span><span class="en">the text, also the banner and the fallback for clients without cards. Not needed with <code>ciphertext</code></span></td></tr>
+          <tr><td>title</td><td class="t">string</td><td><span class="zh">标题</span><span class="en">title</span></td></tr>
+          <tr><td>html</td><td class="t">string</td><td><span class="zh">卡片 HTML，见 <a href="#cards">HTML 卡片</a></span><span class="en">card HTML, see <a href="#cards">HTML cards</a></span></td></tr>
+          <tr><td>data</td><td class="t">JSON string</td><td><span class="zh">填进卡片 <code>{{key}}</code> 占位符的数据，脚本里是 <code>TelegramWidget.chatData</code></span><span class="en">fills the card's <code>{{key}}</code> placeholders; <code>TelegramWidget.chatData</code> in scripts</span></td></tr>
+          <tr><td>level</td><td class="t">enum</td><td><code>passive</code> | <code>active</code> | <code>timeSensitive</code><span class="zh">，默认用机器人的 default_level</span><span class="en">; defaults to the bot's default_level</span></td></tr>
+          <tr><td>group</td><td class="t">string</td><td><span class="zh">通知分组</span><span class="en">notification group</span></td></tr>
+          <tr><td>id</td><td class="t">string</td><td><span class="zh">同一机器人下相同 <code>id</code> 的新消息替换旧消息；也可用于编辑和删除</span><span class="en">a later message of the bot with the same <code>id</code> replaces this one; also names it for edits and deletes</span></td></tr>
+          <tr><td>url</td><td class="t">http(s) URL</td><td><span class="zh">通知上出现"打开链接"按钮</span><span class="en">adds an "Open link" button to the notification</span></td></tr>
+          <tr><td>open</td><td class="t">enum</td><td><code>chat</code><span class="zh">（默认）或 </span><span class="en"> (default) or </span><code>url</code><span class="zh">：点通知直接打开 <code>url</code>（需要 <code>url</code>）</span><span class="en">: tapping the notification opens <code>url</code> (needs <code>url</code>)</span></td></tr>
+          <tr><td>copy</td><td class="t">string</td><td><span class="zh">通知上出现"复制"按钮，复制这段文字</span><span class="en">adds a "Copy" button that copies this text</span></td></tr>
+          <tr><td>icon</td><td class="t">https URL</td><td><span class="zh">这条消息的图标</span><span class="en">icon for this message</span></td></tr>
+          <tr><td>image</td><td class="t">https URL</td><td><span class="zh">附在通知上，并显示在聊天里正文上方；设备下载（5 MB，10 s）</span><span class="en">attached to the notification and shown above the text in the chat; the device downloads it (5 MB, 10 s)</span></td></tr>
+          <tr><td>parse_mode</td><td class="t">enum</td><td><code>Markdown</code><span class="zh">：正文按 Markdown 显示（粗体、斜体、代码、代码块、链接、列表），横幅去掉标记</span><span class="en">: the body is rendered as Markdown (bold, italic, code, fenced blocks, links, lists); the banner drops the marks</span></td></tr>
+          <tr><td>silent</td><td class="t">bool</td><td><span class="zh"><code>true</code>：不弹横幅，只进聊天、未读数和角标</span><span class="en"><code>true</code>: no banner; the message only reaches the chat, unread count and badge</span></td></tr>
+          <tr><td>ttl</td><td class="t">int</td><td><span class="zh">秒，60 到 <code>HONK_MESSAGE_TTL</code>：在队列里保留多久，也是 APNs/FCM 的过期时间</span><span class="en">seconds, 60 up to <code>HONK_MESSAGE_TTL</code>: how long it stays queued; also the APNs/FCM expiry</span></td></tr>
+          <tr><td>allow_queries</td><td class="t">bool</td><td><span class="zh">允许卡片调用 <code>request()</code>，见 <a href="#getUpdates">getUpdates</a></span><span class="en">lets the card call <code>request()</code>; see <a href="#getUpdates">getUpdates</a></span></td></tr>
+          <tr><td>ciphertext</td><td class="t">base64url</td><td><span class="zh">端到端加密的内容，见 <a href="#e2e">端到端加密</a>。此时 <code>title</code>、<code>body</code>、<code>html</code>、<code>data</code>、<code>url</code>、<code>copy</code>、<code>icon</code> 不能出现</span><span class="en">end-to-end encrypted content, see <a href="#e2e">End-to-end encryption</a>; <code>title</code>, <code>body</code>, <code>html</code>, <code>data</code>, <code>url</code>, <code>copy</code> and <code>icon</code> are refused next to it</span></td></tr>
+          <tr><td>dry_run</td><td class="t">bool</td><td><span class="zh">只校验，不入队也不推送；计入限流</span><span class="en">validate only: nothing is queued or pushed; counts against the rate limit</span></td></tr>
+        </tbody>
+      </table></div>
+      <h3><span class="zh">示例</span><span class="en">Example</span></h3>
+      <div class="code">
+        <div class="code-bar">
+          <div class="tabs" role="tablist" data-tabs aria-label="sendMessage">
+            <button type="button" class="tab" role="tab" aria-selected="true" aria-controls="sm-req"><span class="zh">请求</span><span class="en">Request</span></button>
+            <button type="button" class="tab" role="tab" aria-selected="false" tabindex="-1" aria-controls="sm-res"><span class="zh">响应</span><span class="en">Response</span></button>
+            <button type="button" class="tab" role="tab" aria-selected="false" tabindex="-1" aria-controls="sm-dry">dry_run</button>
+          </div>
+          <button type="button" class="copy"><svg class="i" aria-hidden="true"><use href="#i-copy"/></svg><span class="zh">复制</span><span class="en">Copy</span></button>
+        </div>
+<pre id="sm-req" role="tabpanel"><span class="k">curl</span> <span class="origin">https://honk.example.com</span>/bot$HONK_TOKEN/sendMessage \
+  -H <span class="s">"Content-Type: application/json"</span> \
+  -d <span class="s">'{
+    "title": "Deploy",
+    "body": "api v1.8.2 is **live**",
+    "parse_mode": "Markdown",
+    "html": "&lt;b&gt;{{service}}&lt;/b&gt; is {{status}}",
+    "data": {"service": "api", "status": "live"},
+    "id": "deploy-api",
+    "url": "https://ci.example.com/runs/812",
+    "level": "active"
+  }'</span></pre>
+<pre id="sm-res" role="tabpanel" hidden>{
+  <span class="s">"ok"</span>: <span class="n">true</span>,
+  <span class="s">"result"</span>: {
+    <span class="s">"message_id"</span>: <span class="n">1042</span>,
+    <span class="s">"bot_id"</span>: <span class="s">"aZ3kQ9xT"</span>,
+    <span class="s">"kind"</span>: <span class="s">"message"</span>,
+    <span class="s">"title"</span>: <span class="s">"Deploy"</span>,
+    <span class="s">"body"</span>: <span class="s">"api v1.8.2 is **live**"</span>,
+    <span class="s">"html"</span>: <span class="s">"&lt;b&gt;{{service}}&lt;/b&gt; is {{status}}"</span>,
+    <span class="s">"data"</span>: <span class="s">"{\"service\":\"api\",\"status\":\"live\"}"</span>,
+    <span class="s">"level"</span>: <span class="s">"active"</span>,
+    <span class="s">"url"</span>: <span class="s">"https://ci.example.com/runs/812"</span>,
+    <span class="s">"parse_mode"</span>: <span class="s">"Markdown"</span>,
+    <span class="s">"id"</span>: <span class="s">"deploy-api"</span>,
+    <span class="s">"date"</span>: <span class="n">1763539200000</span>
+  }
+}</pre>
+<pre id="sm-dry" role="tabpanel" hidden><span class="c"># -d dry_run=true: the cleaned card, its sizes, and what the whitelist removed</span>
+{
+  <span class="s">"ok"</span>: <span class="n">true</span>,
+  <span class="s">"result"</span>: {
+    <span class="s">"dry_run"</span>: <span class="n">true</span>,
+    <span class="s">"level"</span>: <span class="s">"active"</span>,
+    <span class="s">"html"</span>: <span class="s">"&lt;div&gt;…&lt;/div&gt;"</span>,
+    <span class="s">"input_size"</span>: <span class="n">2304</span>,
+    <span class="s">"raw_size"</span>: <span class="n">2210</span>,
+    <span class="s">"compressed_size"</span>: <span class="n">812</span>,
+    <span class="s">"removed"</span>: [<span class="s">"onclick on &lt;div&gt;"</span>, <span class="s">"&lt;iframe&gt;"</span>]
+  }
+}</pre>
+      </div>
+      <p><span class="zh">没有 <code>parse_mode</code> 时，正文里的 <code>https://</code> 链接也可以点。通知上总有"标为已读"，有 <code>copy</code> 时有"复制"，有 <code>url</code> 时有"打开链接"。</span><span class="en">Without <code>parse_mode</code>, <code>https://</code> links in the body can still be tapped. Notifications always have "Mark as read", plus "Copy" with <code>copy</code> and "Open link" with <code>url</code>.</span></p>
+    </section>
+
+    <section class="doc-sec" id="editMessageData">
+      <h2>editMessageData</h2>
+      <div class="op-line"><span class="verb any">GET · POST</span><code>/bot&lt;token&gt;/editMessageData</code></div>
+      <p><span class="zh">静默更新一条消息卡片的 <code>data</code>，不弹通知。返回 <code>true</code>。</span><span class="en">Silently replaces a message card's <code>data</code>; no notification. Returns <code>true</code>.</span></p>
+      <div class="tbl"><table>
+        <thead><tr><th><span class="zh">名称</span><span class="en">Name</span></th><th><span class="zh">类型</span><span class="en">Type</span></th><th><span class="zh">说明</span><span class="en">Description</span></th></tr></thead>
+        <tbody>
+          <tr><td>message_id</td><td class="t">int</td><td><span class="zh">要改的消息；或者用 <code>id</code></span><span class="en">the message to change; or use <code>id</code></span></td></tr>
+          <tr><td>id</td><td class="t">string</td><td><span class="zh">发送时给的 <code>id</code></span><span class="en">the <code>id</code> it was sent with</span></td></tr>
+          <tr><td>data</td><td class="t">JSON string</td><td><span class="zh">新数据，1 KB 以内</span><span class="en">the new data, at most 1 KB</span></td></tr>
+          <tr><td>ciphertext</td><td class="t">base64url</td><td><span class="zh">加密机器人用：明文是 <code>{"data":"…"}</code></span><span class="en">for an encrypted bot: the plaintext is <code>{"data":"…"}</code></span></td></tr>
+        </tbody>
+      </table></div>
+      <div class="code"><div class="code-bar"><span class="label">curl</span><button type="button" class="copy"><svg class="i" aria-hidden="true"><use href="#i-copy"/></svg><span class="zh">复制</span><span class="en">Copy</span></button></div>
+<pre><span class="k">curl</span> <span class="origin">https://honk.example.com</span>/bot$HONK_TOKEN/editMessageData \
+  -d id=deploy-api --data-urlencode <span class="s">'data={"service":"api","status":"rolled back"}'</span></pre></div>
+    </section>
+
+    <section class="doc-sec" id="deleteMessage">
+      <h2>deleteMessage</h2>
+      <div class="op-line"><span class="verb any">GET · POST</span><code>/bot&lt;token&gt;/deleteMessage</code></div>
+      <p><span class="zh">删除消息和它的通知。参数 <code>message_id</code> 或 <code>id</code>。返回 <code>true</code>。消息可能已经不在队列里了，手机会对本地副本执行删除。</span><span class="en">Removes the message and its notification. Takes <code>message_id</code> or <code>id</code>; returns <code>true</code>. The message may already have left the queue: the phone applies the delete to its local copy.</span></p>
+      <div class="code"><div class="code-bar"><span class="label">curl</span><button type="button" class="copy"><svg class="i" aria-hidden="true"><use href="#i-copy"/></svg><span class="zh">复制</span><span class="en">Copy</span></button></div>
+<pre><span class="k">curl</span> <span class="origin">https://honk.example.com</span>/bot$HONK_TOKEN/deleteMessage -d message_id=1042</pre></div>
+    </section>
+
+    <section class="doc-sec" id="getMe">
+      <h2>getMe</h2>
+      <div class="op-line"><span class="verb any">GET · POST</span><code>/bot&lt;token&gt;/getMe</code></div>
+      <p><span class="zh">返回令牌对应的机器人。</span><span class="en">Returns the bot behind the token.</span></p>
+      <div class="code"><div class="code-bar"><span class="label"><span class="zh">响应</span><span class="en">Response</span></span><button type="button" class="copy"><svg class="i" aria-hidden="true"><use href="#i-copy"/></svg><span class="zh">复制</span><span class="en">Copy</span></button></div>
+<pre>{
+  <span class="s">"ok"</span>: <span class="n">true</span>,
+  <span class="s">"result"</span>: {
+    <span class="s">"id"</span>: <span class="s">"aZ3kQ9xT"</span>,
+    <span class="s">"name"</span>: <span class="s">"Deploys"</span>,
+    <span class="s">"avatar"</span>: <span class="s">"preset:server:#1a9e6e"</span>,
+    <span class="s">"default_level"</span>: <span class="s">"active"</span>,
+    <span class="s">"encrypted"</span>: <span class="n">false</span>,
+    <span class="s">"created_at"</span>: <span class="n">1763539200000</span>,
+    <span class="s">"updated_at"</span>: <span class="n">1763539200000</span>
+  }
+}</pre></div>
+    </section>
+
+    <section class="doc-sec" id="setWebhook">
+      <h2>setWebhook</h2>
+      <div class="op-line"><span class="verb any">GET · POST</span><code>/bot&lt;token&gt;/setWebhook</code></div>
+      <p><span class="zh">卡片请求（widget query）的投递地址。带 <code>allow_queries</code> 的卡片调用 <code>request(data)</code> 后，网关把更新 POST 到这里（JSON，5 秒超时，不跟随重定向），然后等 <a href="#answerWidgetQuery">answerWidgetQuery</a>。和 <a href="#getUpdates">getUpdates</a> 二选一。返回 <code>true</code>。</span><span class="en">Where widget queries go. When a card sent with <code>allow_queries</code> calls <code>request(data)</code>, the gateway POSTs the update here (JSON, 5 s timeout, no redirects) and waits for <a href="#answerWidgetQuery">answerWidgetQuery</a>. Use this or <a href="#getUpdates">getUpdates</a>, not both. Returns <code>true</code>.</span></p>
+      <div class="tbl"><table>
+        <thead><tr><th><span class="zh">名称</span><span class="en">Name</span></th><th><span class="zh">类型</span><span class="en">Type</span></th><th><span class="zh">说明</span><span class="en">Description</span></th></tr></thead>
+        <tbody>
+          <tr><td>url</td><td class="t">https URL</td><td><span class="zh">只接受 https；空值等于删除。解析到回环、私有、链路本地等内部地址的主机会被拒绝（设置时和每次连接时都检查），除非 <code>HONK_WEBHOOK_ALLOW_PRIVATE=true</code></span><span class="en">https only; empty removes it. Hosts that resolve to loopback, private, link-local or other internal addresses are refused (checked when set and on every connection) unless <code>HONK_WEBHOOK_ALLOW_PRIVATE=true</code></span></td></tr>
+          <tr><td>secret_token</td><td class="t">string</td><td><span class="zh">原样放在 <code>X-Honk-Bot-Api-Secret-Token</code> 请求头里发回，用来确认请求来自网关</span><span class="en">sent back in the <code>X-Honk-Bot-Api-Secret-Token</code> header so you can tell the request is from the gateway</span></td></tr>
+        </tbody>
+      </table></div>
+      <div class="code"><div class="code-bar"><span class="label"><span class="zh">网关 POST 给你的更新</span><span class="en">The update the gateway POSTs</span></span><button type="button" class="copy"><svg class="i" aria-hidden="true"><use href="#i-copy"/></svg><span class="zh">复制</span><span class="en">Copy</span></button></div>
+<pre>{
+  <span class="s">"update_id"</span>: <span class="n">17</span>,
+  <span class="s">"widget_query"</span>: { <span class="s">"id"</span>: <span class="s">"q8sKd2…"</span>, <span class="s">"message_id"</span>: <span class="n">1042</span>, <span class="s">"data"</span>: <span class="s">"rollback"</span> }
+}</pre></div>
+    </section>
+
+    <section class="doc-sec" id="deleteWebhook">
+      <h2>deleteWebhook</h2>
+      <div class="op-line"><span class="verb any">GET · POST</span><code>/bot&lt;token&gt;/deleteWebhook</code></div>
+      <p><span class="zh">删除 webhook，之后可以用 <code>getUpdates</code>。返回 <code>true</code>。</span><span class="en">Removes the webhook so <code>getUpdates</code> can be used. Returns <code>true</code>.</span></p>
+    </section>
+
+    <section class="doc-sec" id="getWebhookInfo">
+      <h2>getWebhookInfo</h2>
+      <div class="op-line"><span class="verb any">GET · POST</span><code>/bot&lt;token&gt;/getWebhookInfo</code></div>
+      <p><span class="zh">返回 <code>url</code>、<code>has_custom_certificate</code>（总是 <code>false</code>）和 <code>pending_update_count</code>。</span><span class="en">Returns <code>url</code>, <code>has_custom_certificate</code> (always <code>false</code>) and <code>pending_update_count</code>.</span></p>
+    </section>
+
+    <section class="doc-sec" id="getUpdates">
+      <h2>getUpdates</h2>
+      <div class="op-line"><span class="verb any">GET · POST</span><code>/bot&lt;token&gt;/getUpdates</code></div>
+      <p><span class="zh">长轮询取卡片请求，返回更新数组。更新只在内存里保留 15 秒；小于 <code>offset</code> 的更新视为已确认并丢弃。设置了 webhook 时返回 <code>409 Conflict</code>。</span><span class="en">Long-polls for widget queries and returns an array of updates. Updates are kept in memory for 15 s; an update below <code>offset</code> is confirmed and dropped. Answers <code>409 Conflict</code> while a webhook is set.</span></p>
+      <div class="tbl"><table>
+        <thead><tr><th><span class="zh">名称</span><span class="en">Name</span></th><th><span class="zh">类型</span><span class="en">Type</span></th><th><span class="zh">说明</span><span class="en">Description</span></th></tr></thead>
+        <tbody>
+          <tr><td>offset</td><td class="t">int</td><td><span class="zh">上一批最大的 <code>update_id</code> + 1</span><span class="en">the highest <code>update_id</code> seen + 1</span></td></tr>
+          <tr><td>limit</td><td class="t">int</td><td>1–100</td></tr>
+          <tr><td>timeout</td><td class="t">int</td><td><span class="zh">0–50 秒，长轮询等待时间</span><span class="en">0–50 seconds of long polling</span></td></tr>
+        </tbody>
+      </table></div>
+      <div class="code"><div class="code-bar"><span class="label"><span class="zh">一个最小的机器人（Python）</span><span class="en">A minimal bot (Python)</span></span><button type="button" class="copy"><svg class="i" aria-hidden="true"><use href="#i-copy"/></svg><span class="zh">复制</span><span class="en">Copy</span></button></div>
+<pre><span class="k">import</span> json, os, urllib.parse, urllib.request
+
+api = <span class="s">"<span class="origin">https://honk.example.com</span>/bot"</span> + os.environ[<span class="s">"HONK_TOKEN"</span>]
+call = <span class="k">lambda</span> m, **p: json.load(urllib.request.urlopen(f<span class="s">"{api}/{m}?"</span> + urllib.parse.urlencode(p)))[<span class="s">"result"</span>]
+
+offset = <span class="n">0</span>
+<span class="k">while</span> <span class="n">True</span>:
+    <span class="k">for</span> u <span class="k">in</span> call(<span class="s">"getUpdates"</span>, offset=offset, timeout=<span class="n">50</span>):
+        offset = u[<span class="s">"update_id"</span>] + <span class="n">1</span>
+        q = u[<span class="s">"widget_query"</span>]
+        call(<span class="s">"answerWidgetQuery"</span>, widget_query_id=q[<span class="s">"id"</span>], data=<span class="s">"ok: "</span> + q[<span class="s">"data"</span>])</pre></div>
+    </section>
+
+    <section class="doc-sec" id="answerWidgetQuery">
+      <h2>answerWidgetQuery</h2>
+      <div class="op-line"><span class="verb any">GET · POST</span><code>/bot&lt;token&gt;/answerWidgetQuery</code></div>
+      <p><span class="zh">在 15 秒内回答一个卡片请求：<code>widget_query_id</code> 和 <code>data</code>（0–1024 字节）。回答只会送到发起请求的那台设备，卡片里 <code>request()</code> 的 Promise 得到它。超时、已回答或属于别的机器人的请求返回 <code>400</code>。</span><span class="en">Answers a widget query within 15 s: <code>widget_query_id</code> and <code>data</code> (0–1024 bytes). The answer goes only to the device that asked, where the card's <code>request()</code> Promise resolves with it. A query that timed out, was answered already or belongs to another bot is a <code>400</code>.</span></p>
+    </section>
+
+    <!-- ============ Guides ============ -->
+    <section class="doc-sec" id="bots">
+      <h2><span class="zh">机器人与通知</span><span class="en">Bots and notifications</span></h2>
+      <p><span class="zh">机器人在 App 里创建，每个都是手机上一个独立会话，有自己的名字、头像和默认级别；Android 上每个机器人一个通知渠道。</span><span class="en">Bots are created in the app; each is a chat of its own on the phone with its own name, avatar and default level, and on Android its own notification channel.</span></p>
+      <div class="tbl"><table>
+        <thead><tr><th>level</th><th><span class="zh">效果</span><span class="en">Effect</span></th></tr></thead>
+        <tbody>
+          <tr><td>passive</td><td><span class="zh">静静进入通知中心，不亮屏不响</span><span class="en">lands quietly in the notification list, no sound or wake</span></td></tr>
+          <tr><td>active</td><td><span class="zh">普通通知</span><span class="en">a normal notification</span></td></tr>
+          <tr><td>timeSensitive</td><td><span class="zh">时效性通知，可以穿过专注模式（iOS 上需要用户允许）</span><span class="en">time sensitive: may break through Focus (on iOS if the user allows it)</span></td></tr>
+        </tbody>
+      </table></div>
+      <p><span class="zh"><code>silent=true</code> 完全不弹横幅。同一个 <code>id</code> 的消息在手机上原地替换，适合"构建中 → 成功"这类状态。搜索、保留期限、导出导入都在手机本地完成，网关不参与。</span><span class="en"><code>silent=true</code> shows no banner at all. Messages with the same <code>id</code> replace each other on the phone, which suits states like "building → passed". Search, retention and export/import happen on the phone; the gateway takes no part.</span></p>
+    </section>
+
+    <section class="doc-sec" id="cards">
+      <h2><span class="zh">HTML 卡片</span><span class="en">HTML cards</span></h2>
+      <p><span class="zh">卡片使用 Telegram HTML widget 的格式（Bot API 10.4）。网关按白名单清洗：保留文本与结构、表格、<code>details</code>、<code>button</code>、<code>a</code>、<code>style</code>、<code>data:</code> 图片、内联 SVG 和内联 <code>&lt;script&gt;</code>；删除外部脚本和模块脚本、<code>on*</code> 事件属性、表单控件、外部资源，以及会加载东西的 CSS（<code>@import</code>、<code>url()</code> 等）。加密消息的卡片网关看不到，App 解密后用同一份白名单再清洗一次。</span><span class="en">Cards use Telegram's HTML widget format (Bot API 10.4). The gateway cleans them through a whitelist: text and structure, tables, <code>details</code>, <code>button</code>, <code>a</code>, <code>style</code>, <code>data:</code> images, inline SVG and inline <code>&lt;script&gt;</code> stay; external and module scripts, <code>on*</code> attributes, form controls, external resources and CSS that loads anything (<code>@import</code>, <code>url()</code>…) go. The gateway cannot see an encrypted card, so the app cleans it with its own copy of the whitelist after decrypting.</span></p>
+      <ul>
+        <li><span class="zh"><strong>样式</strong>：<code>&lt;style&gt;</code> 与 <code>style=""</code>，类型 / 类 / id / 属性选择器、组合器、<code>:nth-child()</code>、自定义属性、<code>--tg-theme-*</code> 主题变量、<code>light-dark()</code> 与 <code>prefers-color-scheme</code>；最多 400 条规则。</span><span class="en"><strong>Styles</strong>: <code>&lt;style&gt;</code> and <code>style=""</code>, type / class / id / attribute selectors, combinators, <code>:nth-child()</code>, custom properties, the <code>--tg-theme-*</code> variables, <code>light-dark()</code> and <code>prefers-color-scheme</code>; the first 400 rules apply.</span></li>
+        <li><span class="zh"><strong>数据</strong>：<code>{{key}}</code> 由 <code>data</code> 填充，<code>editMessageData</code> 可以随时更新。</span><span class="en"><strong>Data</strong>: <code>{{key}}</code> is filled from <code>data</code>, which <code>editMessageData</code> can update at any time.</span></li>
+        <li><span class="zh"><strong>脚本</strong>：每张卡片在独立的 QuickJS 沙箱里运行，没有网络和文件，8 MB 内存，每个任务 200 ms。提供 <code>TelegramWidget</code>（<code>chatData</code>、<code>themeParams</code>、<code>openLink</code>、<code>copyText</code>）、一个小 DOM、定时器和 4 KB 的 <code>localStorage</code>。</span><span class="en"><strong>Scripts</strong>: each card runs in a QuickJS sandbox of its own with no network or files, 8 MB of memory and 200 ms per task, with <code>TelegramWidget</code> (<code>chatData</code>, <code>themeParams</code>, <code>openLink</code>, <code>copyText</code>), a small DOM, timers and a 4 KB <code>localStorage</code>.</span></li>
+        <li><span class="zh"><strong>请求</strong>：<code>request(data)</code>（1–64 字节，需要 <code>allow_queries</code>）把请求交给机器人，Promise 得到回答；失败时 <code>code</code> 为 <code>NOT_ALLOWED</code>、<code>TIMEOUT</code>、<code>RATE_LIMITED</code>、<code>NETWORK</code> 等。</span><span class="en"><strong>Requests</strong>: <code>request(data)</code> (1–64 bytes, needs <code>allow_queries</code>) sends a query to the bot and the Promise resolves with its answer; failures carry a <code>code</code> such as <code>NOT_ALLOWED</code>, <code>TIMEOUT</code>, <code>RATE_LIMITED</code> or <code>NETWORK</code>.</span></li>
+      </ul>
+      <div class="code"><div class="code-bar"><span class="label">card.html</span><button type="button" class="copy"><svg class="i" aria-hidden="true"><use href="#i-copy"/></svg><span class="zh">复制</span><span class="en">Copy</span></button></div>
+<pre>&lt;<span class="k">p</span> id=<span class="s">"n"</span>&gt;{{count}}&lt;/<span class="k">p</span>&gt;&lt;<span class="k">button</span> id=<span class="s">"b"</span>&gt;+1&lt;/<span class="k">button</span>&gt;
+&lt;<span class="k">script</span>&gt;
+  <span class="k">let</span> n = Number(JSON.parse(TelegramWidget.chatData).count);
+  document.getElementById(<span class="s">"b"</span>).addEventListener(<span class="s">"click"</span>, () =&gt; {
+    document.getElementById(<span class="s">"n"</span>).textContent = String(++n);
+  });
+&lt;/<span class="k">script</span>&gt;</pre></div>
+      <p><span class="zh">调试卡片用 <code>honk preview card.html --data data.json --watch</code>：每次保存都重新发送并原地替换。更多例子见 <a href="https://github.com/evumi/honk/blob/main/docs/CARDS.zh-CN.md" rel="noopener">卡片指南</a>。</span><span class="en">To work on a card, run <code>honk preview card.html --data data.json --watch</code>: every save is resent and replaces the last one in place. More in the <a href="https://github.com/evumi/honk/blob/main/docs/CARDS.md" rel="noopener">card cookbook</a>.</span></p>
+    </section>
+
+    <section class="doc-sec" id="e2e">
+      <h2><span class="zh">端到端加密</span><span class="en">End-to-end encryption</span></h2>
+      <p><span class="zh">在 App 的机器人设置里按机器人开启。App 生成 32 字节密钥并显示在令牌旁边；之后这个机器人的明文 <code>sendMessage</code> / <code>editMessageData</code> 都会被拒绝（400）。发送方需要令牌和密钥。</span><span class="en">Turn it on per bot in the app's bot settings. The app makes a 32-byte key and shows it next to the token; from then on plaintext <code>sendMessage</code> / <code>editMessageData</code> for that bot is refused with a 400. A sender needs the token and the key.</span></p>
+      <div class="tbl"><table>
+        <tbody>
+          <tr><td><span class="zh">参数</span><span class="en">Parameter</span></td><td><span class="zh"><code>ciphertext</code>，无填充 base64url，最多 64 KB</span><span class="en"><code>ciphertext</code>, unpadded base64url, at most 64 KB</span></td></tr>
+          <tr><td><span class="zh">字节</span><span class="en">Bytes</span></td><td><span class="zh">12 字节 nonce + AES-256-GCM 密文 + 16 字节 tag</span><span class="en">12-byte nonce, then the AES-256-GCM ciphertext, then the 16-byte tag</span></td></tr>
+          <tr><td><span class="zh">明文</span><span class="en">Plaintext</span></td><td><span class="zh">JSON <code>{"title","body","html","data","url","copy","icon","image"}</code>，都是可选字符串</span><span class="en">JSON <code>{"title","body","html","data","url","copy","icon","image"}</code>, every field an optional string</span></td></tr>
+          <tr><td>AAD</td><td><span class="zh">机器人短 id，即令牌里 <code>:</code> 前面的部分</span><span class="en">the bot's short id, the part of the token before the <code>:</code></span></td></tr>
+          <tr><td><span class="zh">仍为明文</span><span class="en">Still plain</span></td><td><code>level</code>, <code>group</code>, <code>id</code>, <code>ttl</code>, <code>silent</code></td></tr>
+          <tr><td><span class="zh">编辑</span><span class="en">Edit</span></td><td><span class="zh"><code>editMessageData</code> 的 <code>ciphertext</code> 明文是 <code>{"data":"…"}</code></span><span class="en"><code>editMessageData</code> takes <code>ciphertext</code> whose plaintext is <code>{"data":"…"}</code></span></td></tr>
+        </tbody>
+      </table></div>
+      <div class="code">
+        <div class="code-bar">
+          <div class="tabs" role="tablist" data-tabs aria-label="Encryption">
+            <button type="button" class="tab" role="tab" aria-selected="true" aria-controls="e2e-cli">honk</button>
+            <button type="button" class="tab" role="tab" aria-selected="false" tabindex="-1" aria-controls="e2e-py">Python</button>
+            <button type="button" class="tab" role="tab" aria-selected="false" tabindex="-1" aria-controls="e2e-js">Node</button>
+          </div>
+          <button type="button" class="copy"><svg class="i" aria-hidden="true"><use href="#i-copy"/></svg><span class="zh">复制</span><span class="en">Copy</span></button>
+        </div>
+<pre id="e2e-cli" role="tabpanel"><span class="c"># HONK_KEY is the key the app shows in the bot's settings</span>
+<span class="k">export</span> HONK_KEY=…
+<span class="k">honk</span> send <span class="s">"api v1.8.2 is live"</span> --title Deploy --key <span class="s">"$HONK_KEY"</span></pre>
+<pre id="e2e-py" role="tabpanel" hidden><span class="c"># pip install cryptography</span>
+<span class="k">import</span> base64, json, os, urllib.request
+<span class="k">from</span> cryptography.hazmat.primitives.ciphers.aead <span class="k">import</span> AESGCM
+
+url, token, key = <span class="s">"<span class="origin">https://honk.example.com</span>"</span>, os.environ[<span class="s">"HONK_TOKEN"</span>], os.environ[<span class="s">"HONK_KEY"</span>]
+b64d = <span class="k">lambda</span> s: base64.urlsafe_b64decode(s + <span class="s">"="</span> * (-len(s) % <span class="n">4</span>))
+b64e = <span class="k">lambda</span> b: base64.urlsafe_b64encode(b).rstrip(<span class="s">b"="</span>).decode()
+
+content = {<span class="s">"title"</span>: <span class="s">"Deploy"</span>, <span class="s">"body"</span>: <span class="s">"api v1.8.2 is live"</span>}
+nonce = os.urandom(<span class="n">12</span>)
+<span class="c"># AESGCM returns ciphertext || tag; the bot id (before the ":") is the AAD</span>
+sealed = AESGCM(b64d(key)).encrypt(nonce, json.dumps(content).encode(), token.split(<span class="s">":"</span>)[<span class="n">0</span>].encode())
+body = json.dumps({<span class="s">"ciphertext"</span>: b64e(nonce + sealed), <span class="s">"level"</span>: <span class="s">"active"</span>}).encode()
+
+req = urllib.request.Request(f<span class="s">"{url}/bot{token}/sendMessage"</span>, body, {<span class="s">"Content-Type"</span>: <span class="s">"application/json"</span>})
+print(urllib.request.urlopen(req).read().decode())</pre>
+<pre id="e2e-js" role="tabpanel" hidden><span class="k">import</span> { createCipheriv, randomBytes } <span class="k">from</span> <span class="s">"node:crypto"</span>;
+
+<span class="k">const</span> { HONK_TOKEN: token, HONK_KEY: key } = process.env;
+<span class="k">const</span> content = { title: <span class="s">"Deploy"</span>, body: <span class="s">"api v1.8.2 is live"</span> };
+<span class="k">const</span> nonce = randomBytes(<span class="n">12</span>);
+<span class="k">const</span> cipher = createCipheriv(<span class="s">"aes-256-gcm"</span>, Buffer.from(key, <span class="s">"base64url"</span>), nonce);
+cipher.setAAD(Buffer.from(token.split(<span class="s">":"</span>)[<span class="n">0</span>])); <span class="c">// the bot id</span>
+<span class="k">const</span> sealed = Buffer.concat([nonce, cipher.update(JSON.stringify(content)), cipher.final(), cipher.getAuthTag()]);
+
+<span class="k">const</span> res = <span class="k">await</span> fetch(`<span class="origin">https://honk.example.com</span>/bot${token}/sendMessage`, {
+  method: <span class="s">"POST"</span>,
+  headers: { <span class="s">"Content-Type"</span>: <span class="s">"application/json"</span> },
+  body: JSON.stringify({ ciphertext: sealed.toString(<span class="s">"base64url"</span>), level: <span class="s">"active"</span> }),
+});
+console.log(<span class="k">await</span> res.text());</pre>
+      </div>
+      <div class="note"><span class="zh"><b>它防什么，不防什么：</b>防网关运营者、数据库泄露、推送中继、Apple 和 Google 读到内容；不防被攻破的发送方或设备，也不防流量分析——网关仍然知道哪个机器人在什么时候收到多大的消息。解密后的大小和格式限制由 App 检查。</span><span class="en"><b>What it covers:</b> the gateway operator, a leaked database, a push relay, Apple and Google cannot read the content. It does not cover a compromised sender or device, or traffic analysis: the gateway still sees which bot gets a message, when and how big. The app enforces size and format limits after decrypting.</span></div>
+    </section>
+
+    <section class="doc-sec" id="groups">
+      <h2><span class="zh">设备组</span><span class="en">Device groups</span></h2>
+      <p><span class="zh">配对过的设备组成一个设备组，共享机器人和队列。每条消息（包括编辑和删除）推给组里每台能收推送的设备；每台设备有自己的同步游标和确认水位，消息要等最慢的那台确认后才会清理。</span><span class="en">Paired devices form a device group that shares bots and the queue. Every message, edits and deletes included, is pushed to every device of the group that can take a push; each device keeps its own sync cursor and ack watermark, and cleanup waits for the slowest one.</span></p>
+      <p><span class="zh">在旧手机的 设置 → 设备 → 添加设备 生成 26 位配对码（10 分钟内有效，只能用一次），新手机输入即可。网关只看到由配对码经 HKDF-SHA256 派生出的 <code>link_id</code> 和加密后的令牌包，看不到配对码本身。按 IP 限制尝试次数，防止猜码。</span><span class="en">On the old phone, Settings → Devices → Add device shows a 26-character pairing code (good for 10 minutes, once); enter it on the new phone. The gateway only sees a <code>link_id</code> and the sealed token bundle, both derived from the code with HKDF-SHA256, never the code. Claims are limited per IP so a code cannot be guessed.</span></p>
+    </section>
+
+    <section class="doc-sec" id="hooks">
+      <h2><span class="zh">接入已有工具</span><span class="en">Connect existing tools</span></h2>
+      <div class="op-line"><span class="verb any">ANY</span><code>/bot&lt;token&gt;/hook/&lt;kind&gt;[/path]</code></div>
+      <p><span class="zh">把这个地址填到其他工具要求填 webhook 的地方，它的载荷会被转成一条消息；令牌、限流、校验都和 <code>sendMessage</code> 相同。没有可显示内容的载荷（GitHub 的 <code>ping</code>、没有告警的 Alertmanager 分组）返回 <code>{"ok":true,"result":{"ignored":true}}</code>。查询串里的 <code>level</code>、<code>group</code>、<code>icon</code>、<code>copy</code>、<code>url</code>、<code>title</code> 会覆盖适配器的选择，例如 <code>…/hook/github?level=passive</code>。</span><span class="en">Put this URL wherever another tool asks for a webhook and its payload becomes a message, with the same token, rate limit and validation as <code>sendMessage</code>. A payload with nothing to show (GitHub's <code>ping</code>, an Alertmanager group without alerts) answers <code>{"ok":true,"result":{"ignored":true}}</code>. <code>level</code>, <code>group</code>, <code>icon</code>, <code>copy</code>, <code>url</code> and <code>title</code> in the query string override the adapter, e.g. <code>…/hook/github?level=passive</code>.</span></p>
+      <div class="tbl"><table>
+        <thead><tr><th>kind</th><th><span class="zh">来源与效果</span><span class="en">Source and result</span></th></tr></thead>
+        <tbody>
+          <tr><td>slack</td><td><span class="zh">Slack incoming webhook 载荷（<code>text</code>、<code>attachments</code>、section <code>blocks</code>）；<code>&lt;url|label&gt;</code> 变成 <code>label</code></span><span class="en">Slack incoming-webhook payloads (<code>text</code>, <code>attachments</code>, section <code>blocks</code>); <code>&lt;url|label&gt;</code> becomes <code>label</code></span></td></tr>
+          <tr><td>alertmanager</td><td><span class="zh">标题 <code>[FIRING:n] name</code>，每条告警一行；<code>groupKey</code> 作为 <code>id</code>，恢复时原地替换；critical 为 <code>timeSensitive</code>，resolved 为 <code>passive</code>；附带状态卡片</span><span class="en">title <code>[FIRING:n] name</code>, one line per alert; <code>groupKey</code> is the <code>id</code>, so "resolved" replaces "firing" in place; critical is <code>timeSensitive</code>, resolved <code>passive</code>; with a status card</span></td></tr>
+          <tr><td>grafana</td><td><span class="zh">Grafana webhook 联系点，布局同上</span><span class="en">Grafana webhook contact point, same layout</span></td></tr>
+          <tr><td>github</td><td><span class="zh">仓库 webhook（JSON），按 <code>X-GitHub-Event</code>：<code>workflow_run</code>（排队、运行、完成原地替换，失败为 <code>timeSensitive</code>）、<code>release</code>、<code>issues</code>、<code>pull_request</code>、<code>push</code></span><span class="en">repository webhooks (JSON), by <code>X-GitHub-Event</code>: <code>workflow_run</code> (queued, running and finished replace each other, failures <code>timeSensitive</code>), <code>release</code>, <code>issues</code>, <code>pull_request</code>, <code>push</code></span></td></tr>
+          <tr><td>bark</td><td><span class="zh">把 Bark 服务器设为 <code><span class="origin">https://honk.example.com</span>/bot&lt;token&gt;/hook/bark</code>，兼容 <code>/&lt;key&gt;/&lt;body&gt;</code> 等路径和 <code>POST /push</code></span><span class="en">set the Bark server to <code><span class="origin">https://honk.example.com</span>/bot&lt;token&gt;/hook/bark</code>; <code>/&lt;key&gt;/&lt;body&gt;</code> and friends and <code>POST /push</code> work</span></td></tr>
+          <tr><td>json</td><td><span class="zh">任意 JSON，用查询串把字段映射过去：<code>?title=$.alert.name&amp;body=$.message&amp;group=ci</code></span><span class="en">any JSON; the query maps fields to paths: <code>?title=$.alert.name&amp;body=$.message&amp;group=ci</code></span></td></tr>
+        </tbody>
+      </table></div>
+      <p><span class="zh">GitHub 适配器不校验 <code>X-Hub-Signature-256</code>：URL 里的令牌就是密钥，别让它进公开日志。在 GitHub Actions 里用本仓库的 action：</span><span class="en">The GitHub adapter does not check <code>X-Hub-Signature-256</code>: the token in the URL is the secret, so keep it out of public logs. In GitHub Actions use this repository's action:</span></p>
+      <div class="code"><div class="code-bar"><span class="label">.github/workflows/ci.yml</span><button type="button" class="copy"><svg class="i" aria-hidden="true"><use href="#i-copy"/></svg><span class="zh">复制</span><span class="en">Copy</span></button></div>
+<pre>- <span class="k">uses</span>: evumi/honk@v1
+  <span class="k">if</span>: failure()
+  <span class="k">with</span>:
+    url: <span class="s">${{ secrets.HONK_URL }}</span>
+    token: <span class="s">${{ secrets.HONK_TOKEN }}</span>
+    title: <span class="s">"${{ github.repository }}: build failed"</span>
+    body: <span class="s">"${{ github.workflow }} on ${{ github.ref_name }}"</span>
+    id: <span class="s">ci-${{ github.workflow }}</span>
+    level: <span class="s">timeSensitive</span></pre></div>
+    </section>
+
+    <section class="doc-sec" id="cli">
+      <h2><span class="zh">命令行</span><span class="en">Command line</span></h2>
+      <p><span class="zh">网关二进制同时是发送工具。<code>honk</code>（或 <code>honk serve</code>）运行网关，其他子命令以一个机器人的身份调用网关。<code>HONK_URL</code> / <code>HONK_TOKEN</code> 也可以用 <code>--server</code> / <code>--token</code> 或 <code>~/.config/honk/config.json</code> 提供。退出码：0 成功，1 网关或网络失败，2 用法错误。</span><span class="en">The gateway binary is also a sender tool. <code>honk</code> (or <code>honk serve</code>) runs the gateway; the other subcommands talk to a gateway as one bot. <code>HONK_URL</code> / <code>HONK_TOKEN</code> can also come from <code>--server</code> / <code>--token</code> or <code>~/.config/honk/config.json</code>. Exit status: 0 success, 1 gateway or network failure, 2 usage error.</span></p>
+      <h3><span class="zh">安装</span><span class="en">Install</span></h3>
+      <p><span class="zh">命令行就是网关的二进制 <code>honk</code>，每个版本都为 Linux、macOS 和 Windows（amd64 / arm64）发布预编译文件。macOS 和 Linux 上一行安装：脚本从 GitHub Releases 下载对应平台的包，校验 sha256 后放到 <code>/usr/local/bin</code>；不可写时放到已在 PATH 里的 <code>~/.local/bin</code> 或 <code>~/bin</code>，都不在 PATH 里时会告诉你该往哪个 shell 配置文件里加。再运行一次就是升级。</span><span class="en">The command line is the gateway binary, <code>honk</code>, and every release ships it prebuilt for Linux, macOS and Windows (amd64 / arm64). On macOS and Linux one line installs it: the script downloads your platform's archive from GitHub Releases, checks its sha256 and puts it in <code>/usr/local/bin</code>, or, when that is not writable, in <code>~/.local/bin</code> or <code>~/bin</code> if one is on your PATH; otherwise it tells you which shell file to add it to. Run it again to upgrade.</span></p>
+      <div class="code">
+        <div class="code-bar">
+          <div class="tabs" role="tablist" data-tabs aria-label="Install">
+            <button type="button" class="tab" role="tab" aria-selected="true" aria-controls="cli-sh"><span class="zh">脚本</span><span class="en">Script</span></button>
+            <button type="button" class="tab" role="tab" aria-selected="false" tabindex="-1" aria-controls="cli-win">Windows</button>
+            <button type="button" class="tab" role="tab" aria-selected="false" tabindex="-1" aria-controls="cli-docker">Docker</button>
+            <button type="button" class="tab" role="tab" aria-selected="false" tabindex="-1" aria-controls="cli-go">go install</button>
+            <button type="button" class="tab" role="tab" aria-selected="false" tabindex="-1" aria-controls="cli-src"><span class="zh">源码</span><span class="en">Source</span></button>
+          </div>
+          <button type="button" class="copy"><svg class="i" aria-hidden="true"><use href="#i-copy"/></svg><span class="zh">复制</span><span class="en">Copy</span></button>
+        </div>
+<pre id="cli-sh" role="tabpanel"><span class="k">curl</span> -fsSL <span class="origin">https://honk.example.com</span>/install.sh | <span class="k">sh</span>
+<span class="k">honk</span> version
+
+<span class="c"># a given release, or somewhere else:</span>
+<span class="k">curl</span> -fsSL <span class="origin">https://honk.example.com</span>/install.sh | HONK_VERSION=v1.2.3 HONK_INSTALL_DIR=~/bin <span class="k">sh</span></pre>
+<pre id="cli-win" role="tabpanel" hidden><span class="c"># download honk_windows_amd64.zip (or _arm64) from the releases page,</span>
+<span class="c"># unzip honk.exe somewhere on PATH, then in PowerShell:</span>
+$env:HONK_URL = <span class="s">"<span class="origin">https://honk.example.com</span>"</span>
+$env:HONK_TOKEN = <span class="s">"aZ3kQ9xT:Gw2K7mx…"</span>
+<span class="k">honk</span> send <span class="s">"hello"</span> --title Test
+
+<span class="c"># https://github.com/evumi/honk/releases/latest</span></pre>
+<pre id="cli-docker" role="tabpanel" hidden><span class="c"># the image's entrypoint is honk: pass the subcommand and the environment</span>
+<span class="k">docker</span> run --rm -e HONK_URL=<span class="origin">https://honk.example.com</span> -e HONK_TOKEN \
+  ghcr.io/evumi/honk-gateway send <span class="s">"hello"</span> --title Test</pre>
+<pre id="cli-go" role="tabpanel" hidden><span class="c"># Go 1.26 or later; installs to $(go env GOPATH)/bin</span>
+<span class="k">go</span> install github.com/evumi/honk/gateway/cmd/honk@latest</pre>
+<pre id="cli-src" role="tabpanel" hidden><span class="k">git</span> clone https://github.com/evumi/honk
+<span class="k">cd</span> honk/gateway &amp;&amp; <span class="k">make</span> build      <span class="c"># bin/honk</span></pre>
+      </div>
+      <p><span class="zh">地址和令牌（以及加密机器人的 <code>key</code>）可以写进 <code>~/.config/honk/config.json</code>：<code>{"url": "…", "token": "…", "key": "…"}</code>，命令行参数优先于环境变量，环境变量优先于这个文件。</span><span class="en">The address and token (and an encrypted bot's <code>key</code>) can live in <code>~/.config/honk/config.json</code>: <code>{"url": "…", "token": "…", "key": "…"}</code>. Flags beat the environment, which beats the file.</span></p>
+      <h3><span class="zh">用法</span><span class="en">Usage</span></h3>
+      <div class="code"><div class="code-bar"><span class="label">shell</span><button type="button" class="copy"><svg class="i" aria-hidden="true"><use href="#i-copy"/></svg><span class="zh">复制</span><span class="en">Copy</span></button></div>
+<pre><span class="k">export</span> HONK_URL=<span class="origin">https://honk.example.com</span> HONK_TOKEN=aZ3kQ9xT:Gw2K7mx…
+<span class="k">honk</span> send <span class="s">"backup finished"</span> --title Backup --level passive
+make 2&gt;&amp;1 | tail -5 | <span class="k">honk</span> send --title <span class="s">"Build log"</span>      <span class="c"># stdin is the body when piped</span>
+<span class="k">honk</span> send <span class="s">"api v1.8.2 is live"</span> --html @card.html --data @data.json --id deploy-api
+<span class="k">honk</span> edit --id deploy-api --data <span class="s">'{"status":"rolled back"}'</span>
+<span class="k">honk</span> delete --id deploy-api
+<span class="k">honk</span> me                                                   <span class="c"># the bot behind the token</span>
+<span class="k">honk</span> preview card.html --data data.json --watch           <span class="c"># resend on every save</span></pre></div>
+      <p><span class="zh"><code>send</code> 的参数：<code>--title</code>、<code>--body</code>（或位置参数、或 stdin）、<code>--html</code>、<code>--data</code>（都支持 <code>@file</code>）、<code>--id</code>、<code>--level</code>、<code>--group</code>、<code>--link</code>、<code>--copy</code>、<code>--icon</code>、<code>--dry-run</code>、<code>--key</code>（端到端加密）。</span><span class="en"><code>send</code> flags: <code>--title</code>, <code>--body</code> (or the arguments, or stdin), <code>--html</code>, <code>--data</code> (both take <code>@file</code>), <code>--id</code>, <code>--level</code>, <code>--group</code>, <code>--link</code>, <code>--copy</code>, <code>--icon</code>, <code>--dry-run</code>, <code>--key</code> (end-to-end encryption).</span></p>
+    </section>
+
+    <!-- ============ App API ============ -->
+    <section class="doc-sec" id="app-api">
+      <h2>App API</h2>
+      <p><span class="zh">手机 App 使用的接口。除了设备注册和 <code>/v1/info</code>，都需要 <code>Authorization: Bearer &lt;device_secret&gt;</code>，并且都按设备组授权。自己写客户端时才需要这些。</span><span class="en">The interface the phone apps use. Everything except device registration and <code>/v1/info</code> needs <code>Authorization: Bearer &lt;device_secret&gt;</code> and is authorised by device group. You only need these to write a client of your own.</span></p>
+      <div class="tbl"><table>
+        <thead><tr><th><span class="zh">接口</span><span class="en">Endpoint</span></th><th><span class="zh">作用</span><span class="en">Purpose</span></th></tr></thead>
+        <tbody>
+          <tr><td><span class="verb get">GET</span> /v1/info</td><td><span class="zh"><code>{"name":"honk","version","api":2,"features","push":{"ios","android"}}</code>，开启注册密钥时还有 <code>register_key_required</code></span><span class="en"><code>{"name":"honk","version","api":2,"features","push":{"ios","android"}}</code>, plus <code>register_key_required</code> when a register key is set</span></td></tr>
+          <tr><td><span class="verb post">POST</span> /v1/devices</td><td><span class="zh"><code>{"platform","push_token","name","register_key"}</code> → <code>device</code>、<code>device_secret</code>；按 IP 限流</span><span class="en"><code>{"platform","push_token","name","register_key"}</code> → <code>device</code>, <code>device_secret</code>; limited per IP</span></td></tr>
+          <tr><td><span class="verb get">GET</span> /v1/devices</td><td><span class="zh">组里的设备</span><span class="en">the group's devices</span></td></tr>
+          <tr><td><span class="verb any">GET PUT DEL</span> /v1/devices/me</td><td><span class="zh">读取；更新推送令牌或名字；离开设备组（<code>?all=true</code> 删除整个组）</span><span class="en">read; update the push token or name; leave the group (<code>?all=true</code> deletes the whole group)</span></td></tr>
+          <tr><td><span class="verb delete">DELETE</span> /v1/devices/:id</td><td><span class="zh">移除组里的一台设备</span><span class="en">remove one device of the group</span></td></tr>
+          <tr><td><span class="verb post">POST</span> /v1/links</td><td><span class="zh"><code>{"link_id","bundle"}</code>：存一个配对包 10 分钟</span><span class="en"><code>{"link_id","bundle"}</code>: store a pairing bundle for 10 minutes</span></td></tr>
+          <tr><td><span class="verb post">POST</span> /v1/links/claim</td><td><span class="zh"><code>{"link_id"}</code>：合并设备组并取回 <code>bundle</code>；只能用一次，按 IP 限流</span><span class="en"><code>{"link_id"}</code>: merge the groups and return the <code>bundle</code>; works once, limited per IP</span></td></tr>
+          <tr><td><span class="verb any">GET POST</span> /v1/bots</td><td><span class="zh">列出；用 <code>{"name","avatar","default_level"}</code> 新建 → <code>bot</code>、<code>token</code></span><span class="en">list; create with <code>{"name","avatar","default_level"}</code> → <code>bot</code>, <code>token</code></span></td></tr>
+          <tr><td><span class="verb any">GET PATCH DEL</span> /v1/bots/:id</td><td><span class="zh">读、改（<code>name</code>、<code>avatar</code>、<code>default_level</code>、<code>encrypted</code>、<code>key_wrapped</code>）、删</span><span class="en">read, change (<code>name</code>, <code>avatar</code>, <code>default_level</code>, <code>encrypted</code>, <code>key_wrapped</code>), delete</span></td></tr>
+          <tr><td><span class="verb post">POST</span> /v1/bots/:id/token</td><td><span class="zh">重置令牌</span><span class="en">reset the token</span></td></tr>
+          <tr><td><span class="verb get">GET</span> /v1/messages/:id</td><td><span class="zh">队列里的一项：<code>message</code>、<code>edit</code> 或 <code>delete</code></span><span class="en">one queued item: <code>message</code>, <code>edit</code> or <code>delete</code></span></td></tr>
+          <tr><td><span class="verb get">GET</span> /v1/sync?cursor=&amp;limit=</td><td><span class="zh">游标之后的项 → <code>messages</code>、<code>cursor</code>、<code>has_more</code>；配对合并后可能带 <code>"reset": true</code>，此时从 0 重新同步</span><span class="en">items after the cursor → <code>messages</code>, <code>cursor</code>, <code>has_more</code>; after a pairing merge it may add <code>"reset": true</code>: sync again from 0</span></td></tr>
+          <tr><td><span class="verb post">POST</span> /v1/ack</td><td><span class="zh"><code>{"up_to": &lt;id&gt;}</code>：这台设备已存到这里（水位只升不降）</span><span class="en"><code>{"up_to": &lt;id&gt;}</code>: everything up to here is stored on this device (the watermark never goes down)</span></td></tr>
+          <tr><td><span class="verb post">POST</span> /v1/queries</td><td><span class="zh"><code>{"message_id","data"}</code>：卡片的 <code>request()</code>，最多等 15 秒 → <code>{"data"}</code>；403 不允许，429 太频繁，504 机器人没回答</span><span class="en"><code>{"message_id","data"}</code>: a card's <code>request()</code>, waits up to 15 s → <code>{"data"}</code>; 403 not allowed, 429 too often, 504 the bot did not answer</span></td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <section class="doc-sec" id="selfhost">
+      <h2><span class="zh">自托管</span><span class="en">Self-hosting</span></h2>
+      <p><span class="zh">网关是一个 Go 二进制加一个 SQLite 文件，这个页面也打包在里面（<code>HONK_SITE=false</code> 可以关掉首页和文档）。没有 APNs/FCM 凭据时会经官方推送中继发送，不需要 Apple 或 Google 账号。</span><span class="en">The gateway is one Go binary and one SQLite file, and this page is inside it (<code>HONK_SITE=false</code> turns the landing page and docs off). Without APNs/FCM credentials it pushes through the official relay, so no Apple or Google account is needed.</span></p>
+      <div class="code"><div class="code-bar"><span class="label">docker-compose.yml</span><button type="button" class="copy"><svg class="i" aria-hidden="true"><use href="#i-copy"/></svg><span class="zh">复制</span><span class="en">Copy</span></button></div>
+<pre><span class="k">services</span>:
+  honk:
+    image: <span class="s">ghcr.io/evumi/honk-gateway:latest</span>
+    restart: <span class="s">unless-stopped</span>
+    ports: [<span class="s">"127.0.0.1:8080:8080"</span>]   <span class="c"># put a TLS reverse proxy in front</span>
+    volumes: [<span class="s">"honk-data:/data"</span>]
+    environment:
+      HONK_MESSAGE_TTL: <span class="s">168h</span>
+      <span class="c"># HONK_REGISTER_KEY: only devices that know it can register</span>
+<span class="k">volumes</span>:
+  honk-data:</pre></div>
+      <p><span class="zh">反向代理、备份、升级和全部环境变量见 <a href="https://github.com/evumi/honk/blob/main/docs/SELF-HOSTING.zh-CN.md" rel="noopener">自托管指南</a>。</span><span class="en">Reverse proxy, backups, upgrades and every setting: see the <a href="https://github.com/evumi/honk/blob/main/docs/SELF-HOSTING.md" rel="noopener">self-hosting guide</a>.</span></p>
+    </section>
+    <p class="no-match" id="no-match"><span class="zh">没有匹配的内容。</span><span class="en">Nothing matches.</span></p>
+  </main>
+</div>
+
+<footer class="foot foot-slim">
+  <div class="foot-legal">
+    <div class="foot-frame">
+      <span>© 2026 Honk</span>
+      <span class="made"><a href="https://apps.apple.com/app/id6835855786" rel="noopener">App Store</a> · <span class="zh">Google Play 即将上线</span><span class="en">Google Play coming soon</span></span>
+      <a href="https://github.com/evumi/honk" rel="noopener">GitHub</a>
+    </div>
+  </div>
+</footer>
+</body>
+</html>

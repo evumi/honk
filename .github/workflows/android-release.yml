@@ -23,6 +23,11 @@ jobs:
   apk:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    # Gateway release (gateway-release.yml) attaches the honk binaries to the
+    # same release: one at a time, so the two never both create it.
+    concurrency:
+      group: github-release-${{ github.ref }}
+      cancel-in-progress: false
     steps:
       - name: Check secrets and variables
         env:

@@ -20,8 +20,8 @@ type Config struct {
 	MessageTTL time.Duration // HONK_MESSAGE_TTL, default 168h (7 days)
 	AckedKeep  time.Duration // HONK_ACKED_KEEP, default 24h: items every device of a group has acked are kept this long
 	DeviceGC   time.Duration // HONK_DEVICE_GC, default 2160h (90 days): devices with a dead push token and no request for this long are deleted; 0 or off turns it off (DeviceGC 0)
-	SendRate   float64       // HONK_SEND_RATE, messages per second per bot, default 5
-	SendBurst  int           // HONK_SEND_BURST, default 20
+	SendRate   float64       // HONK_SEND_RATE, messages per second per bot, default 10
+	SendBurst  int           // HONK_SEND_BURST, default 60
 
 	RegisterPerHour  float64 // HONK_REGISTER_PER_HOUR: device registrations per client IP, default 10
 	MaxBotsPerDevice int     // HONK_MAX_BOTS_PER_DEVICE, default 100; counted per device group
@@ -43,6 +43,9 @@ type Config struct {
 	// WebhookAllowPrivate (HONK_WEBHOOK_ALLOW_PRIVATE=true) lets bots set
 	// webhooks on loopback, private and link-local addresses. Default false.
 	WebhookAllowPrivate bool
+	// Site (HONK_SITE) serves the landing page at / and the API docs at
+	// /docs. Default true.
+	Site bool
 
 	// TrustedProxies (HONK_TRUSTED_PROXIES): comma-separated CIDRs whose
 	// X-Forwarded-For / X-Real-IP are believed for per-IP limits. Empty means
@@ -112,8 +115,8 @@ func Load() (Config, error) {
 	c := Config{
 		Addr:                env("HONK_ADDR", ":8080"),
 		DBPath:              env("HONK_DB", "./data/honk.db"),
-		SendRate:            5,
-		SendBurst:           20,
+		SendRate:            10,
+		SendBurst:           60,
 		RegisterPerHour:     10,
 		MaxBotsPerDevice:    100,
 		MetricsAddr:         os.Getenv("HONK_METRICS_ADDR"),
@@ -127,6 +130,7 @@ func Load() (Config, error) {
 		RelayRate:           10,
 		RelayBurst:          100,
 		RelayTokenPerMinute: 60,
+		Site:                true,
 		APNs: APNs{
 			KeyFile: os.Getenv("HONK_APNS_KEY_FILE"),
 			KeyID:   os.Getenv("HONK_APNS_KEY_ID"),
@@ -186,6 +190,11 @@ func Load() (Config, error) {
 	if v := os.Getenv("HONK_WEBHOOK_ALLOW_PRIVATE"); v != "" {
 		if c.WebhookAllowPrivate, err = strconv.ParseBool(v); err != nil {
 			return c, fmt.Errorf("HONK_WEBHOOK_ALLOW_PRIVATE: %w", err)
+		}
+	}
+	if v := os.Getenv("HONK_SITE"); v != "" {
+		if c.Site, err = strconv.ParseBool(v); err != nil {
+			return c, fmt.Errorf("HONK_SITE: %w", err)
 		}
 	}
 	if v := os.Getenv("HONK_APNS_SANDBOX"); v != "" {

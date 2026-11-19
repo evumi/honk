@@ -1,0 +1,91 @@
+# Builds the honk binary (the gateway and its command line) for Linux, macOS and
+# Windows and attaches it to the GitHub Release of a v* tag, next to the Android
+# APK. The asset names carry no version, so
+#   https://github.com/<owner>/honk/releases/latest/download/honk_<os>_<arch>.tar.gz
+# always points at the newest release; install.sh (gateway/internal/web/site,
+# served by every gateway at /install.sh) picks the newest release that has
+# honk_checksums.txt and checks the archive against it. A manual run builds the
+# same files as a workflow artifact and publishes nothing.
+name: Gateway release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: gateway-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: gateway/go.mod
+          cache-dependency-path: gateway/go.sum
+      - run: go test -race ./...
+        working-directory: gateway
+
+      - name: Build
+        working-directory: gateway
+        env:
+          # A tag v1.2.3 is version 1.2.3; a manual run is the short commit.
+          VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || github.sha }}
+        run: |
+          set -eu
+          version="${VERSION#v}"
+          case "$version" in *[!0-9a-zA-Z.+-]*) echo "bad version $version" >&2; exit 1;; esac
+          [ "${#version}" -eq 40 ] && version="${version:0:12}"
+          out="$RUNNER_TEMP/dist"
+          mkdir -p "$out"
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
+            os="${target%/*}" arch="${target#*/}"
+            dir="$RUNNER_TEMP/build/honk_${os}_${arch}"
+            mkdir -p "$dir"
+            bin=honk; [ "$os" = windows ] && bin=honk.exe
+            # Pure Go (modernc SQLite): cross-compiling needs no cgo.
+            CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -trimpath \
+              -ldflags "-s -w -X main.version=$version" -o "$dir/$bin" ./cmd/honk
+            if [ "$os" = windows ]; then
+              (cd "$dir" && zip -q -9 "$out/honk_${os}_${arch}.zip" ./*)
+            else
+              tar -C "$dir" -czf "$out/honk_${os}_${arch}.tar.gz" .
+            fi
+          done
+          (cd "$out" && sha256sum honk_* > honk_checksums.txt && cat honk_checksums.txt)
+
+      - name: Check an archive runs
+        run: |
+          tar -xzf "$RUNNER_TEMP/dist/honk_linux_amd64.tar.gz" -C "$RUNNER_TEMP" ./honk
+          "$RUNNER_TEMP/honk" version
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: honk-binaries
+          path: ${{ runner.temp }}/dist/*
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    # The Android release job attaches to the same release: one at a time, so
+    # the two never both create it.
+    concurrency:
+      group: github-release-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: honk-binaries
+          path: dist
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          fail_on_unmatched_files: true

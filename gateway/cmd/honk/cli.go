@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/signal"
 
@@ -14,6 +15,10 @@ import (
 func cli(args []string) (handled bool, code int) {
 	if len(args) == 0 || args[0] == "serve" {
 		return false, 0
+	}
+	if args[0] == "version" || args[0] == "--version" || args[0] == "-v" {
+		fmt.Println("honk " + version)
+		return true, 0
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
