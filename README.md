@@ -14,6 +14,7 @@ Honk is a push notification service built around bots: each bot is its own chann
 | `app/` | nsh app (TSX): chat list, message stream, card rendering | first version |
 | `ios/` | Swift host, Notification Service Extension, shared HonkKit package | first version; built for the simulator in CI (`iosapp` job), not yet verified on a real device |
 | `android/` | Kotlin host embedding the nsh app, FirebaseMessagingService, shared `:core` module (gateway client, local store, sync) | first version; `:core` tested on the JVM, the app built in CI (`android` job), not yet verified on a real device |
+| `sdk/` | Bot API SDKs for Go (`sdk/go`) and TypeScript (`sdk/js`, `@evumi/honk`) | first version; tested against a running gateway in CI |
 
 The development design (Chinese) is [docs/DESIGN.zh-CN.md](docs/DESIGN.zh-CN.md); mockups and screenshots are in [docs/design](docs/design/).
 
@@ -126,7 +127,7 @@ Serving a relay: set `HONK_RELAY_SERVE=true` next to your own credentials. It se
 
   Without `parse_mode`, `https://` links in the body can be tapped. Notifications have a "Copy" button when the message has `copy`, an "Open link" button when it has `url`, and always "Mark as read".
 - `sendMessage` also takes `dry_run` (`true`): validate only. Nothing is queued or pushed; the result is `{"dry_run":true,"html":<cleaned card>,"input_size","raw_size","compressed_size","removed":[…]}` with the sizes of the cleaned card (limits 32768 and 4096) and what the whitelist removed (`"onclick on <div>"`, `"<iframe>"`). It counts against the rate limit.
-- `sendMessage` also takes `ciphertext` instead of the content parameters, for a bot with [end-to-end encryption](#end-to-end-encryption) (required once the bot has it turned on); `level`, `group`, `id`, `ttl` and `silent` stay plain.
+- `sendMessage` also takes `ciphertext` instead of the content parameters, for a bot with [end-to-end encryption](#end-to-end-encryption) (required once the bot has it turned on); `level`, `group`, `id`, `ttl`, `silent`, `open`, `parse_mode` and `allow_queries` stay plain.
 - `editMessageData`: `message_id` or `id`, and `data` (or `ciphertext` sealing `{"data":"…"}`). Updates the card silently.
 - `deleteMessage`: `message_id` or `id`. Removes the message and its notification.
 - `getMe`: the bot.
@@ -185,11 +186,35 @@ honk preview card.html --data data.json --watch             # resend on every sa
 - Exit status is 0 on success, 1 when the gateway or the network fails (the gateway's `description` is printed to stderr) and 2 for a usage error.
 - `--key <base64 key>` (or `HONK_KEY`, or `"key"` in the config file) encrypts the message content on the client: title, body, html, data, url, copy and icon go into one AES-256-GCM ciphertext, sent as `ciphertext`, while `level`, `group` and `id` stay plain. The key is the one the app shows in the bot's settings; see [End-to-end encryption](#end-to-end-encryption).
 
+## SDKs
+
+Libraries for the Bot API, so a program does not have to build requests, seal content or run the widget query loop itself. Both have no dependencies and cover every method: send (cards, `dry_run`), edit, delete, `getMe`, end-to-end encryption with the bot's key, and widget queries by long polling or as a webhook handler that checks the secret token.
+
+| Language | Install | Docs |
+| --- | --- | --- |
+| Go 1.22+ | `go get github.com/evumi/honk/sdk/go` | [sdk/go](sdk/go/README.md) |
+| TypeScript / JavaScript (Node 20+, Bun, Deno, Workers) | `npm install @evumi/honk` | [sdk/js](sdk/js/README.md) |
+
+```ts
+import { Honk } from "@evumi/honk";
+
+const honk = new Honk({ url: process.env.HONK_URL!, token: process.env.HONK_TOKEN!, key: process.env.HONK_KEY });
+await honk.send({ title: "Deploy", body: "api v1.8.2 is live", html: "<button>Roll back</button>", allowQueries: true });
+await honk.poll(async (q) => (q.data === "rollback" ? await rollback() : "unknown"));
+```
+
+```go
+c := &honk.Client{URL: os.Getenv("HONK_URL"), Token: os.Getenv("HONK_TOKEN")}
+_, err := c.Send(ctx, honk.Message{Title: "Deploy", Body: "api v1.8.2 is live", Level: honk.Passive})
+```
+
+Both test against `app/src/e2e.vector.json` and, in CI, against a running gateway (`HONK_E2E_GATEWAY`). Go releases are tagged `sdk/go/vX.Y.Z`; npm releases `sdk/js/vX.Y.Z` (`.github/workflows/sdk-js-release.yml`).
+
 ## End-to-end encryption
 
 Turn it on per bot: Bot settings, End-to-end encryption. The app generates a 32-byte key, keeps it in the keychain shared with the notification extension (iOS) or in Keystore-backed encrypted preferences (Android), shows it next to the token with a copy button, and tells the gateway the bot is encrypted (`PATCH /v1/bots/:id {"encrypted":true}`). From then on the gateway answers a plaintext `sendMessage` or `editMessageData` for that bot with a 400. A sender needs the token and the key. Resetting the key makes a new one and invalidates the old; messages already received stay readable. With several devices (a [device group](#how-it-works)), the group has a 32-byte group key made on the first pairing; each device keeps it in its keychain or keystore, and it never reaches the gateway in clear: the pairing bundle, sealed with the pairing code, carries it (with the bots' keys) to a new phone. When a bot's key is turned on or reset on any device, the app seals it with the group key and stores the result on the gateway as the bot's `key_wrapped` (`PATCH /v1/bots/:id`, returned by `GET /v1/bots`), and the group's other devices unwrap it on their next refresh or when a message does not open, so they can decrypt right away. A phone that joins a group with its own encrypted bots adopts the group key and re-wraps those keys with it. The gateway cannot open `key_wrapped`. Turning encryption off deletes the key on the device and lets the bot send plaintext again.
 
-It keeps message content from the gateway operator, a leaked database, a push relay, Apple and Google. It does not protect against a compromised sender, a compromised device, or traffic analysis: the gateway still sees which bot gets a message, when, how big, and the plaintext `level`, `group`, `id`, `ttl` and `silent`. Pushes for encrypted messages carry no title, body or bot name (the banner is built on the device after decrypting); a message that cannot be decrypted (no key on this device, the wrong key) shows as "Couldn't decrypt this notification".
+It keeps message content from the gateway operator, a leaked database, a push relay, Apple and Google. It does not protect against a compromised sender, a compromised device, or traffic analysis: the gateway still sees which bot gets a message, when, how big, and the plaintext `level`, `group`, `id`, `ttl`, `silent`, `open`, `parse_mode` and `allow_queries`. Pushes for encrypted messages carry no title, body or bot name (the banner is built on the device after decrypting); a message that cannot be decrypted (no key on this device, the wrong key) shows as "Couldn't decrypt this notification".
 
 | | |
 | --- | --- |
@@ -197,12 +222,12 @@ It keeps message content from the gateway operator, a leaked database, a push re
 | Bytes | 12-byte nonce, then the AES-256-GCM ciphertext, then the 16-byte tag; unpadded base64url |
 | Plaintext | JSON `{"title","body","html","data","url","copy","icon","image"}`; every field is a string and optional (`data` is the JSON text, as in a plain send) |
 | AAD | the bot's short id, the part of the token before the `:` |
-| Still plain | `level`, `group`, `id`, `ttl`, `silent` |
+| Still plain | `level`, `group`, `id`, `ttl`, `silent`, `open`, `parse_mode`, `allow_queries` |
 | Edit | `editMessageData` takes `ciphertext` whose plaintext is `{"data":"…"}` |
 
 The gateway cannot check what it cannot read, so the app does it after decrypting: a card over 32 KB raw or 4 KB zlib, `data` over 1 KB, a title over 256 or a body over 4096 characters (cut), a `url` that is not http(s) or an `icon` that is not https (dropped). An invalid card is dropped and the message keeps its body. The app also cleans every card with its own copy of the whitelist before drawing it. Once a bot has a key on the device, plaintext for it is not trusted either and shows as the placeholder.
 
-`honk send --key KEY` (or `HONK_KEY`) does all of this. In code:
+`honk send --key KEY` (or `HONK_KEY`) and the [SDKs](#sdks) do all of this. By hand:
 
 Python (`pip install cryptography`):
 

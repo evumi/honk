@@ -24,6 +24,7 @@ jobs:
       native: ${{ steps.filter.outputs.native }}
       android: ${{ steps.filter.outputs.android }}
       iosapp: ${{ steps.filter.outputs.iosapp }}
+      sdk: ${{ steps.filter.outputs.sdk }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -53,6 +54,11 @@ jobs:
               - 'native/**'
               - 'app/**'
               - '.github/workflows/ci.yml'
+            sdk:
+              - 'sdk/**'
+              - 'gateway/**'
+              - 'app/src/e2e.vector.json'
+              - '.github/workflows/ci.yml'
             assets:
               - 'ios/App/Assets.xcassets/**'
               - 'public/appstore/**'
@@ -76,6 +82,54 @@ jobs:
       - run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
       - run: go vet ./...
       - run: go test -race ./...
+
+  # The Go and TypeScript SDKs: unit tests, then end to end against a gateway
+  # built from this commit (HONK_RELAY_URL=off, so nothing is pushed).
+  sdk:
+    needs: changes
+    if: needs.changes.outputs.sdk == 'true'
+    runs-on: ubuntu-latest
+    env:
+      HONK_E2E_GATEWAY: http://127.0.0.1:8080
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: gateway/go.mod
+          cache-dependency-path: gateway/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: sdk/js/package-lock.json
+      - name: Start a gateway
+        working-directory: gateway
+        run: |
+          go build -o "$RUNNER_TEMP/honk" ./cmd/honk
+          HONK_ADDR=127.0.0.1:8080 HONK_DB="$RUNNER_TEMP/honk.db" HONK_RELAY_URL=off \
+            nohup "$RUNNER_TEMP/honk" > "$RUNNER_TEMP/gateway.log" 2>&1 &
+          for _ in $(seq 50); do curl -fs "$HONK_E2E_GATEWAY/v1/info" && exit 0; sleep 0.2; done
+          cat "$RUNNER_TEMP/gateway.log"; exit 1
+      # The SDK on the oldest Go its go.mod allows, not the gateway's.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: sdk/go/go.mod
+          cache: false
+      - name: Go SDK
+        working-directory: sdk/go
+        run: |
+          test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+          go vet ./...
+          go test -race ./...
+      - name: TypeScript SDK
+        working-directory: sdk/js
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+          npm run build
+      - if: failure()
+        run: cat "$RUNNER_TEMP/gateway.log"
 
   honkkit:
     needs: changes

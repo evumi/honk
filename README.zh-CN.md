@@ -14,6 +14,7 @@ Honk 是一个以 bot 为渠道的推送通知服务：每个 bot 都是一个�
 | `app/` | nsh App（TSX）：会话列表、消息流、卡片渲染 | 第一版 |
 | `ios/` | Swift 宿主、Notification Service Extension、共享包 HonkKit | 第一版；CI 的 `iosapp` job 构建模拟器版，尚未在真机上验证 |
 | `android/` | Kotlin 宿主（嵌入 nsh App）、FirebaseMessagingService、共享模块 `:core`（网关客户端、本地库、同步） | 第一版；`:core` 在 JVM 上测试，CI 的 `android` job 构建 App，尚未在真机上验证 |
+| `sdk/` | Bot API 的 SDK：Go（`sdk/go`）和 TypeScript（`sdk/js`，`@evumi/honk`） | 第一版；CI 里对运行中的网关测试 |
 
 开发设计文档见 [docs/DESIGN.zh-CN.md](docs/DESIGN.zh-CN.md)，界面稿和截图见 [docs/design](docs/design/)。
 
@@ -266,11 +267,35 @@ honk preview card.html --data data.json --watch             # 每次保存都重
 - 退出码：成功 0；网关或网络出错 1（网关返回的 `description` 打到标准错误）；用法错误 2。
 - `--key <base64 密钥>`（或 `HONK_KEY`，或配置文件里的 `"key"`）在客户端加密消息内容：title、body、html、data、url、copy、icon 放进一段 AES-256-GCM 密文，以 `ciphertext` 发送，`level`、`group`、`id` 仍是明文。密钥就是 App 在 bot 设置里显示的那一把，见[端到端加密](#端到端加密)。
 
+## SDK
+
+Bot API 的库，程序不必自己拼请求、加密内容或写 widget query 的循环。两个都没有依赖，覆盖全部方法：发送（卡片、`dry_run`）、修改、删除、`getMe`、用 bot 密钥做端到端加密，以及用长轮询或 webhook handler（校验 secret token）应答 widget query。
+
+| 语言 | 安装 | 文档 |
+| --- | --- | --- |
+| Go 1.22+ | `go get github.com/evumi/honk/sdk/go` | [sdk/go](sdk/go/README.zh-CN.md) |
+| TypeScript / JavaScript（Node 20+、Bun、Deno、Workers） | `npm install @evumi/honk` | [sdk/js](sdk/js/README.zh-CN.md) |
+
+```ts
+import { Honk } from "@evumi/honk";
+
+const honk = new Honk({ url: process.env.HONK_URL!, token: process.env.HONK_TOKEN!, key: process.env.HONK_KEY });
+await honk.send({ title: "部署", body: "api v1.8.2 已上线", html: "<button>回滚</button>", allowQueries: true });
+await honk.poll(async (q) => (q.data === "rollback" ? await rollback() : "unknown"));
+```
+
+```go
+c := &honk.Client{URL: os.Getenv("HONK_URL"), Token: os.Getenv("HONK_TOKEN")}
+_, err := c.Send(ctx, honk.Message{Title: "部署", Body: "api v1.8.2 已上线", Level: honk.Passive})
+```
+
+两者都用 `app/src/e2e.vector.json` 测试，CI 里还会对运行中的网关测试（`HONK_E2E_GATEWAY`）。Go 版本的 tag 是 `sdk/go/vX.Y.Z`；npm 版本是 `sdk/js/vX.Y.Z`（`.github/workflows/sdk-js-release.yml`）。
+
 ## 端到端加密
 
 按 bot 打开：Bot 设置里的「端到端加密」。App 生成 32 字节的随机密钥，存在 iOS 与通知扩展共用的钥匙串组，或 Android 的 Keystore 加密偏好里，和 token 并排显示并可复制，同时告诉网关这个 bot 已加密（`PATCH /v1/bots/:id {"encrypted":true}`）。之后网关对这个 bot 的明文 `sendMessage`、`editMessageData` 一律返回 400。发送方需要 token 和密钥。重置密钥会换一把新的，旧的作废，已收到的消息不受影响。多台设备（[设备组](#工作方式)）时，设备组有一把 32 字节的组密钥，第一次配对时生成，各设备存在自己的钥匙串 / Keystore 里，不会明文到网关：配对数据包（用配对码封装）把它和各 bot 的密钥带给新手机。任何一台设备打开加密或重置密钥时，App 用组密钥把 bot 密钥封装起来，存到网关上作为 bot 的 `key_wrapped`（`PATCH /v1/bots/:id`，`GET /v1/bots` 返回），组里的其他设备在下次刷新时、或收到解不开的消息时解开它，马上就能解密。带着自己加密 bot 的手机加入设备组时，采用组的密钥并用它重新封装这些 bot 的密钥。网关打不开 `key_wrapped`；关闭加密会删除本机的密钥，bot 又可以发明文。
 
-它让网关运营者、泄露的数据库、推送中继、苹果和谷歌读不到消息内容。它不防发送方被攻破、设备本机被攻破和流量分析：网关仍然知道哪个 bot 在什么时候收到多大的消息，以及仍是明文的 `level`、`group`、`id`、`ttl`、`silent`。加密消息的推送不带标题、正文和 bot 名（横幅在设备上解密后再生成）；解不开的消息（这台设备没有密钥、密钥不对）显示为「无法解密的通知」。
+它让网关运营者、泄露的数据库、推送中继、苹果和谷歌读不到消息内容。它不防发送方被攻破、设备本机被攻破和流量分析：网关仍然知道哪个 bot 在什么时候收到多大的消息，以及仍是明文的 `level`、`group`、`id`、`ttl`、`silent`、`open`、`parse_mode`、`allow_queries`。加密消息的推送不带标题、正文和 bot 名（横幅在设备上解密后再生成）；解不开的消息（这台设备没有密钥、密钥不对）显示为「无法解密的通知」。
 
 | | |
 | --- | --- |
@@ -278,12 +303,12 @@ honk preview card.html --data data.json --watch             # 每次保存都重
 | 字节 | 12 字节 nonce，接 AES-256-GCM 密文，再接 16 字节 tag；无填充 base64url |
 | 明文 | JSON `{"title","body","html","data","url","copy","icon","image"}`，字段都是字符串且可省略（`data` 和明文发送一样是 JSON 文本） |
 | AAD | bot 的短 id，即 token 里冒号前的部分 |
-| 仍是明文 | `level`、`group`、`id`、`ttl`、`silent` |
+| 仍是明文 | `level`、`group`、`id`、`ttl`、`silent`、`open`、`parse_mode`、`allow_queries` |
 | 修改 | `editMessageData` 的 `ciphertext`，明文是 `{"data":"…"}` |
 
 网关读不到内容就没法校验，所以 App 解密后再做：卡片原文超过 32 KB 或 zlib 后超过 4 KB、`data` 超过 1 KB 就丢掉卡片（消息保留正文）；标题超过 256、正文超过 4096 个字符会被截断；`url` 不是 http(s)、`icon` 不是 https 会被清空。App 画卡片之前还会用自己的白名单再清理一遍。一个 bot 在本机有密钥之后，发给它的明文同样不被信任，显示为占位消息。
 
-`honk send --key 密钥`（或 `HONK_KEY`）已经做了这些。用代码发送：
+`honk send --key 密钥`（或 `HONK_KEY`）和 [SDK](#sdk) 已经做了这些。不用它们时：
 
 Python（`pip install cryptography`）：
 

@@ -1,0 +1,35 @@
+{
+  "name": "@evumi/honk",
+  "version": "0.1.0",
+  "description": "SDK for the Honk Bot API: push notifications, end-to-end encryption and card widget queries",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/evumi/honk.git",
+    "directory": "sdk/js"
+  },
+  "homepage": "https://github.com/evumi/honk/tree/main/sdk/js#readme",
+  "keywords": ["honk", "push", "notifications", "bot", "apns", "fcm"],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "files": ["dist", "README.md", "README.zh-CN.md"],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test test/*.test.ts",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.9.2"
+  }
+}

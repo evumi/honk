@@ -75,6 +75,7 @@
         <a href="#groups" data-k="device group pairing link"><span><span class="zh">设备组</span><span class="en">Device groups</span></span></a>
         <a href="#hooks" data-k="hook webhook slack alertmanager grafana github bark json actions"><span><span class="zh">接入已有工具</span><span class="en">Connect existing tools</span></span></a>
         <a href="#cli" data-k="cli command line honk send preview install curl script release download"><span><span class="zh">命令行</span><span class="en">Command line</span></span></a>
+        <a href="#sdk" data-k="sdk library go golang typescript javascript node npm bun deno workers poll webhook"><span>SDK</span></a>
       </div>
       <div class="grp"><span><span class="zh">App API 与部署</span><span class="en">App API and hosting</span></span>
         <a href="#app-api" data-k="devices bots sync ack messages links queries info"><span>App API</span></a>
@@ -423,7 +424,7 @@ offset = <span class="n">0</span>
           <tr><td><span class="zh">字节</span><span class="en">Bytes</span></td><td><span class="zh">12 字节 nonce + AES-256-GCM 密文 + 16 字节 tag</span><span class="en">12-byte nonce, then the AES-256-GCM ciphertext, then the 16-byte tag</span></td></tr>
           <tr><td><span class="zh">明文</span><span class="en">Plaintext</span></td><td><span class="zh">JSON <code>{"title","body","html","data","url","copy","icon","image"}</code>，都是可选字符串</span><span class="en">JSON <code>{"title","body","html","data","url","copy","icon","image"}</code>, every field an optional string</span></td></tr>
           <tr><td>AAD</td><td><span class="zh">机器人短 id，即令牌里 <code>:</code> 前面的部分</span><span class="en">the bot's short id, the part of the token before the <code>:</code></span></td></tr>
-          <tr><td><span class="zh">仍为明文</span><span class="en">Still plain</span></td><td><code>level</code>, <code>group</code>, <code>id</code>, <code>ttl</code>, <code>silent</code></td></tr>
+          <tr><td><span class="zh">仍为明文</span><span class="en">Still plain</span></td><td><code>level</code>, <code>group</code>, <code>id</code>, <code>ttl</code>, <code>silent</code>, <code>open</code>, <code>parse_mode</code>, <code>allow_queries</code></td></tr>
           <tr><td><span class="zh">编辑</span><span class="en">Edit</span></td><td><span class="zh"><code>editMessageData</code> 的 <code>ciphertext</code> 明文是 <code>{"data":"…"}</code></span><span class="en"><code>editMessageData</code> takes <code>ciphertext</code> whose plaintext is <code>{"data":"…"}</code></span></td></tr>
         </tbody>
       </table></div>
@@ -556,6 +557,36 @@ make 2&gt;&amp;1 | tail -5 | <span class="k">honk</span> send --title <span clas
 <span class="k">honk</span> me                                                   <span class="c"># the bot behind the token</span>
 <span class="k">honk</span> preview card.html --data data.json --watch           <span class="c"># resend on every save</span></pre></div>
       <p><span class="zh"><code>send</code> 的参数：<code>--title</code>、<code>--body</code>（或位置参数、或 stdin）、<code>--html</code>、<code>--data</code>（都支持 <code>@file</code>）、<code>--id</code>、<code>--level</code>、<code>--group</code>、<code>--link</code>、<code>--copy</code>、<code>--icon</code>、<code>--dry-run</code>、<code>--key</code>（端到端加密）。</span><span class="en"><code>send</code> flags: <code>--title</code>, <code>--body</code> (or the arguments, or stdin), <code>--html</code>, <code>--data</code> (both take <code>@file</code>), <code>--id</code>, <code>--level</code>, <code>--group</code>, <code>--link</code>, <code>--copy</code>, <code>--icon</code>, <code>--dry-run</code>, <code>--key</code> (end-to-end encryption).</span></p>
+    </section>
+
+    <section class="doc-sec" id="sdk">
+      <h2>SDK</h2>
+      <p><span class="zh">Go 和 TypeScript 的 Bot API 库，都没有依赖。它们覆盖全部方法，持有密钥时自动做端到端加密（只加密内容，路由字段保持明文），并处理 widget query：长轮询，或者一个校验 secret token 的 webhook handler。处理函数的返回值就是卡片 <code>request()</code> 收到的应答。</span><span class="en">Bot API libraries for Go and TypeScript, both without dependencies. They cover every method, seal the content end to end when given the key (routing fields stay plain), and handle widget queries: by long polling, or as a webhook handler that checks the secret token. What your handler returns is what the card's <code>request()</code> gets.</span></p>
+      <div class="code">
+        <div class="code-bar">
+          <div class="tabs" role="tablist" data-tabs aria-label="SDK">
+            <button type="button" class="tab" role="tab" aria-selected="true" aria-controls="sdk-ts">TypeScript</button>
+            <button type="button" class="tab" role="tab" aria-selected="false" tabindex="-1" aria-controls="sdk-go">Go</button>
+          </div>
+          <button type="button" class="copy"><svg class="i" aria-hidden="true"><use href="#i-copy"/></svg><span class="zh">复制</span><span class="en">Copy</span></button>
+        </div>
+<pre id="sdk-ts" role="tabpanel"><span class="c">// npm install @evumi/honk   (Node 20+, Bun, Deno, Workers)</span>
+<span class="k">import</span> { Honk } <span class="k">from</span> <span class="s">"@evumi/honk"</span>;
+
+<span class="k">const</span> honk = <span class="k">new</span> Honk({ url: <span class="s">"<span class="origin">https://honk.example.com</span>"</span>, token: process.env.HONK_TOKEN, key: process.env.HONK_KEY });
+<span class="k">await</span> honk.send({ title: <span class="s">"Deploy"</span>, body: <span class="s">"api v1.8.2 is live"</span>, html: <span class="s">"&lt;button&gt;Roll back&lt;/button&gt;"</span>, allowQueries: <span class="k">true</span> });
+<span class="k">await</span> honk.poll(<span class="k">async</span> (q) =&gt; (q.data === <span class="s">"rollback"</span> ? <span class="k">await</span> rollback() : <span class="s">"unknown"</span>));
+
+<span class="c">// or a webhook: export const POST = honk.webhookHandler(answer, { secretToken })</span></pre>
+<pre id="sdk-go" role="tabpanel" hidden><span class="c">// go get github.com/evumi/honk/sdk/go</span>
+c := &amp;honk.Client{URL: <span class="s">"<span class="origin">https://honk.example.com</span>"</span>, Token: os.Getenv(<span class="s">"HONK_TOKEN"</span>)}
+_, err := c.Send(ctx, honk.Message{Title: <span class="s">"Deploy"</span>, Body: <span class="s">"api v1.8.2 is live"</span>, AllowQueries: <span class="k">true</span>})
+err = c.Poll(ctx, <span class="k">func</span>(ctx context.Context, q honk.WidgetQuery) (<span class="k">string</span>, <span class="k">error</span>) {
+	<span class="k">return</span> <span class="s">"pong"</span>, <span class="k">nil</span>
+}, <span class="k">nil</span>)
+
+<span class="c">// or a webhook: http.Handle("/honk", c.WebhookHandler(answer, &amp;honk.WebhookOptions{Secret: secret}))</span></pre></div>
+      <p><span class="zh">文档：<a href="https://github.com/evumi/honk/tree/main/sdk/js" rel="noopener">TypeScript</a>、<a href="https://github.com/evumi/honk/tree/main/sdk/go" rel="noopener">Go</a>。</span><span class="en">Docs: <a href="https://github.com/evumi/honk/tree/main/sdk/js" rel="noopener">TypeScript</a>, <a href="https://github.com/evumi/honk/tree/main/sdk/go" rel="noopener">Go</a>.</span></p>
     </section>
 
     <!-- ============ App API ============ -->
