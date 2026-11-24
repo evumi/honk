@@ -78,4 +78,8 @@ http.Handle("/honk", c.WebhookHandler(answer, &honk.WebhookOptions{Secret: secre
 
 `go test ./...` 用所有 Honk 客户端共用的 `app/src/e2e.vector.json` 做校验。`HONK_E2E_GATEWAY=http://127.0.0.1:8080 go test -run TestGateway` 会对一个用 `HONK_RELAY_URL=off` 启动的真实网关跑 SDK。
 
-版本 tag 是 `sdk/go/vX.Y.Z`。
+推 tag 即发布：先改 `honk.go` 里的 `Version`，再推 `sdk/go/vX.Y.Z`；CI 跑测试后让 proxy.golang.org 拉取。
+
+## 许可
+
+MIT

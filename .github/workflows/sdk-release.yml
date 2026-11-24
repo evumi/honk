@@ -1,0 +1,88 @@
+# Releases the SDKs from tags; pushing the tag is the release.
+#
+#   sdk/go/vX.Y.Z  the Go module github.com/evumi/honk/sdk/go. A Go module is
+#                  published by its tag alone; this checks the tag against
+#                  Version in sdk/go/honk.go, runs the tests and has
+#                  proxy.golang.org fetch the version, so `go get` and
+#                  pkg.go.dev see it at once.
+#   sdk/js/vX.Y.Z  @evumi/honk on npm. The tag must match package.json's version
+#                  (and VERSION in src/index.ts, which the tests check);
+#                  prepublishOnly type-checks, tests and builds first. Needs the
+#                  NPM_TOKEN secret (an automation token of the @evumi scope), or
+#                  an npm trusted publisher set up for this workflow (that takes
+#                  npm 11.5.1 or later, installed below).
+#
+# No GitHub Release is made: install.sh and releases/latest belong to the
+# gateway's v* releases.
+name: SDK release
+
+on:
+  push:
+    tags: ['sdk/go/v*', 'sdk/js/v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sdk-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  go:
+    if: startsWith(github.ref, 'refs/tags/sdk/go/v')
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdk/go
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: sdk/go/go.mod
+          cache: false
+      - name: Tag matches the version
+        run: |
+          tag="${GITHUB_REF_NAME#sdk/go/}"
+          case "$tag" in v[0-9]*.[0-9]*.[0-9]*) ;; *) echo "bad tag $GITHUB_REF_NAME" >&2; exit 1;; esac
+          grep -qxF "const Version = \"${tag#v}\"" honk.go || { echo "honk.go Version is not ${tag#v}" >&2; exit 1; }
+      - name: Test
+        run: |
+          test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+          go vet ./...
+          go test -race ./...
+      - name: Publish to the module proxy
+        env:
+          GOPROXY: https://proxy.golang.org
+        run: |
+          cd "$RUNNER_TEMP" # outside any module
+          mod=github.com/evumi/honk/sdk/go
+          version="${GITHUB_REF_NAME#sdk/go/}"
+          # The proxy may not see a just-pushed tag for a little while.
+          for i in 1 2 3 4 5; do
+            go list -m -json "$mod@$version" && exit 0
+            sleep $((i * 15))
+          done
+          exit 1
+
+  npm:
+    if: startsWith(github.ref, 'refs/tags/sdk/js/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # npm provenance
+    defaults:
+      run:
+        working-directory: sdk/js
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: https://registry.npmjs.org
+      - run: npm install -g npm@11
+      - name: Tag matches the version
+        run: test "v$(node -p 'require("./package.json").version')" = "${GITHUB_REF_NAME#sdk/js/}"
+      - run: npm ci
+      - run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

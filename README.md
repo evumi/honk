@@ -208,7 +208,7 @@ c := &honk.Client{URL: os.Getenv("HONK_URL"), Token: os.Getenv("HONK_TOKEN")}
 _, err := c.Send(ctx, honk.Message{Title: "Deploy", Body: "api v1.8.2 is live", Level: honk.Passive})
 ```
 
-Both test against `app/src/e2e.vector.json` and, in CI, against a running gateway (`HONK_E2E_GATEWAY`). Go releases are tagged `sdk/go/vX.Y.Z`; npm releases `sdk/js/vX.Y.Z` (`.github/workflows/sdk-js-release.yml`).
+Both test against `app/src/e2e.vector.json` and, in CI, against a running gateway (`HONK_E2E_GATEWAY`). Both are MIT licensed and released by pushing a tag: `sdk/go/vX.Y.Z` for the Go module, `sdk/js/vX.Y.Z` for npm (`.github/workflows/sdk-release.yml` checks the tag against the version, tests, then warms proxy.golang.org or publishes to npm).
 
 ## End-to-end encryption
 
