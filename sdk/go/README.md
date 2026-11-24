@@ -78,7 +78,7 @@ The handler checks the `X-Honk-Bot-Api-Secret-Token` header (when `Secret` is se
 
 `go test ./...` checks against `app/src/e2e.vector.json`, the vector every Honk client shares. `HONK_E2E_GATEWAY=http://127.0.0.1:8080 go test -run TestGateway` runs the SDK against a real gateway started with `HONK_RELAY_URL=off`.
 
-Releases are tags: bump `Version` in `honk.go`, then push `sdk/go/vX.Y.Z`; CI tests it and has proxy.golang.org fetch it.
+Releases follow the repository's `vX.Y.Z` tags; CI adds the module's `sdk/go/vX.Y.Z` tag. `honk.Version` is the module version your program was built with.
 
 ## License
 

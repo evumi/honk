@@ -374,3 +374,10 @@ func equal(a, b any) bool {
 	y, _ := json.Marshal(b)
 	return string(x) == string(y)
 }
+
+func TestVersion(t *testing.T) {
+	// The SDK's own test binary is the main module at (devel).
+	if Version != "dev" {
+		t.Fatalf("Version = %q, want dev", Version)
+	}
+}

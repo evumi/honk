@@ -88,7 +88,7 @@ npm run build        # 输出到 dist/
 HONK_E2E_GATEWAY=http://127.0.0.1:8080 npm test   # 同时对一个用 HONK_RELAY_URL=off 启动的网关跑
 ```
 
-测试用所有 Honk 客户端共用的 `app/src/e2e.vector.json` 做校验。推 tag 即发布：先改 `package.json` 的版本和 `src/index.ts` 的 `VERSION`，再推 `sdk/js/vX.Y.Z`；CI 测试、编译后发布到 npm。
+测试用所有 Honk 客户端共用的 `app/src/e2e.vector.json` 做校验。版本跟着仓库的 `vX.Y.Z` tag 发布：CI 把版本号写进 `package.json` 和 `VERSION`，测试、编译后发布到 npm。源码里两处都保持 `0.0.0-dev`。
 
 ## 许可
 

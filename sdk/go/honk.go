@@ -21,12 +21,39 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"runtime/debug"
 	"strings"
 	"time"
 )
 
-// Version is the SDK version.
-const Version = "0.1.0"
+const modulePath = "github.com/evumi/honk/sdk/go"
+
+// Version is the SDK's version, without the leading v. It comes from the
+// module version the program was built with (releases are the repository's
+// vX.Y.Z tags), or "dev" when there is none, as in the SDK's own tests or a
+// replace with a local path.
+var Version = moduleVersion()
+
+func moduleVersion() string {
+	bi, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "dev"
+	}
+	mods := append([]*debug.Module{&bi.Main}, bi.Deps...)
+	for _, m := range mods {
+		if m == nil || m.Path != modulePath {
+			continue
+		}
+		if m.Replace != nil {
+			m = m.Replace
+		}
+		if v := strings.TrimPrefix(m.Version, "v"); v != "" && v != "(devel)" {
+			return v
+		}
+		break
+	}
+	return "dev"
+}
 
 // Client calls one bot's API. The zero value is not usable: set URL and
 // Token. A Client is safe for concurrent use once it is set up.

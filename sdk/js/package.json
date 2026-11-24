@@ -1,6 +1,6 @@
 {
   "name": "@evumi/honk",
-  "version": "0.1.0",
+  "version": "0.0.0-dev",
   "description": "SDK for the Honk Bot API: push notifications, end-to-end encryption and card widget queries",
   "license": "MIT",
   "type": "module",

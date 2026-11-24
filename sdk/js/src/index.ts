@@ -6,7 +6,8 @@ export { open, parseKey, seal } from "./crypto.ts";
 export { toNodeHandler } from "./node.ts";
 export type { NodeHandler, NodeRequest, NodeResponse } from "./node.ts";
 
-export const VERSION = "0.1.0";
+/** The package version; the release workflow writes the tag's version here and in package.json. */
+export const VERSION = "0.0.0-dev";
 
 /** How long the gateway holds a card's request() for the bot's answer, in ms. */
 export const QUERY_TIMEOUT = 15_000;

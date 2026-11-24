@@ -88,7 +88,7 @@ npm run build        # dist/
 HONK_E2E_GATEWAY=http://127.0.0.1:8080 npm test   # also against a gateway run with HONK_RELAY_URL=off
 ```
 
-The tests check against `app/src/e2e.vector.json`, the vector every Honk client shares. Releases are tags: bump the version in `package.json` and `VERSION` in `src/index.ts`, then push `sdk/js/vX.Y.Z`; CI tests, builds and publishes it to npm.
+The tests check against `app/src/e2e.vector.json`, the vector every Honk client shares. Releases follow the repository's `vX.Y.Z` tags: CI writes the version into `package.json` and `VERSION`, tests, builds and publishes. In the source both stay `0.0.0-dev`.
 
 ## License
 

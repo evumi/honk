@@ -1,14 +1,15 @@
 # 部署与发布
 
-推一个 `v*` 标签（例如 `v0.1.0`）会同时触发三条发布流水线：
+推一个 `v*` 标签（例如 `v0.1.0`）会同时触发下面这些发布流水线：
 
 | 流水线 | 文件 | 产物 |
 | --- | --- | --- |
 | 网关镜像 | `.github/workflows/gateway-image.yml` | `ghcr.io/evumi/honk-gateway`（amd64 + arm64）。另外：推到 main 时打 `:main`，可选通过 SSH 自动部署 |
 | iOS | `.github/workflows/ios-release.yml` | 用 [asc](https://github.com/rorkai/App-Store-Connect-CLI) 归档、签名并上传 TestFlight；IPA 也作为构建产物保留 14 天 |
 | Android | `.github/workflows/android-release.yml` | 签名的 release APK，附在 GitHub Release 上供下载 |
+| SDK | `.github/workflows/sdk-release.yml` | Go module `github.com/evumi/honk/sdk/go`（自动补推 `sdk/go/v0.1.0` tag）和 npm 包 `@evumi/honk` |
 
-三条流水线都可以在 Actions 页面手动运行（workflow_dispatch）。`ci.yml` 在 PR 上跑网关、HonkKit 和 nsh App 的测试。
+网关、iOS、Android 流水线都可以在 Actions 页面手动运行（workflow_dispatch）；SDK 只由标签触发。`ci.yml` 在 PR 上跑网关、HonkKit 和 nsh App 的测试。
 
 ```bash
 git tag v0.1.0 && git push origin v0.1.0
@@ -21,6 +22,8 @@ git tag v0.1.0 && git push origin v0.1.0
 | 网关镜像 | `:0.1.0`、`:0.1`、`:latest`；`/v1/info` 返回 `0.1.0` | 无 |
 | iOS | `MARKETING_VERSION = 0.1.0` | App Store Connect 里这个版本的下一个可用构建号 |
 | Android | `versionName = 0.1.0` | 这次 Actions 运行的序号 |
+| Go SDK | `sdk/go/v0.1.0`；`honk.Version` 读使用方构建时的 module 版本 | 无 |
+| npm SDK | `@evumi/honk@0.1.0`（`v0.2.0-rc.1` 这类预发布发到 dist-tag `next`） | 无 |
 
 App 设置页底部会显示 `Honk 0.1.0 (构建号)`。
 
@@ -80,6 +83,14 @@ base64 -i honk-release.keystore | pbcopy
 | `GATEWAY_DEPLOY_USER` | Variable | SSH 用户，默认 `deploy` |
 | `GATEWAY_DEPLOY_PATH` | Variable | 服务器上 `docker-compose.yml` 所在目录，默认 `/opt/honk` |
 | `GATEWAY_SSH_KEY` | Secret | 该用户的 SSH 私钥 |
+
+### SDK（sdk-release.yml）
+
+| 名称 | 类型 | 内容 |
+| --- | --- | --- |
+| `NPM_TOKEN` | Secret | npm 上 `@evumi` scope 的 automation token。也可以不填，改在 npm 包设置里把这个 workflow 配成 trusted publisher |
+
+Go 不需要 secret：job 用 `GITHUB_TOKEN` 推 `sdk/go/v*` tag。Go 从 v2 起要求 module 路径带 `/v2`，在那之前打 `v2.*` 标签时 Go 的 job 会失败，npm 不受影响。
 
 ## 2. 部署网关
 

@@ -289,7 +289,7 @@ c := &honk.Client{URL: os.Getenv("HONK_URL"), Token: os.Getenv("HONK_TOKEN")}
 _, err := c.Send(ctx, honk.Message{Title: "部署", Body: "api v1.8.2 已上线", Level: honk.Passive})
 ```
 
-两者都用 `app/src/e2e.vector.json` 测试，CI 里还会对运行中的网关测试（`HONK_E2E_GATEWAY`）。两者都是 MIT 许可，推 tag 即发布：Go module 打 `sdk/go/vX.Y.Z`，npm 打 `sdk/js/vX.Y.Z`（`.github/workflows/sdk-release.yml` 先核对 tag 和版本号、跑测试，再让 proxy.golang.org 拉取或发布到 npm）。
+两者都用 `app/src/e2e.vector.json` 测试，CI 里还会对运行中的网关测试（`HONK_E2E_GATEWAY`）。两者都是 MIT 许可，随仓库的 `vX.Y.Z` tag 一起发布：`.github/workflows/sdk-release.yml` 跑测试，推 Go module 需要的 `sdk/go/vX.Y.Z` tag，并把 `@evumi/honk` X.Y.Z 发布到 npm。源码里不写版本号。
 
 ## 端到端加密
 
